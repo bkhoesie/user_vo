@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Selective user sync in admin interface to help diagnose sync issues
 
+### Fixed
+- Photo sync now checks file size before downloading (10MB limit) to prevent memory exhaustion
+- Photo sync errors no longer crash the entire user sync process
+- Improved error handling catches fatal errors (Throwable instead of Exception)
+
 ## [0.3.0] - 2025-10-11
 
 ### Added

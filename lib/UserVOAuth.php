@@ -417,12 +417,20 @@ class UserVOAuth extends Base {
 
             // Update photo (if configured and available)
             $syncPhoto = $this->config->getAppValue('user_vo', 'sync_photo', 'false') === 'true';
+            $photoSyncResult = null;
             if ($syncPhoto && !empty($voUserData['foto'])) {
                 // Construct photo URL from foto filename
                 $photoUrl = $this->apiUrl . '/fotos/' . $voUserData['foto'];
                 // Skip default anonymous photo
                 if ($voUserData['foto'] !== 'anonym.gif') {
-                    $this->syncUserPhoto($uid, $photoUrl);
+                    $photoSyncResult = $this->syncUserPhoto($uid, $photoUrl);
+                    // Log photo sync failures but don't fail the whole user sync
+                    if (!$photoSyncResult['success']) {
+                        logger('user_vo')->warning("Photo sync failed but continuing with user sync", [
+                            'uid' => $uid,
+                            'photo_error' => $photoSyncResult['message']
+                        ]);
+                    }
                 }
             }
 
@@ -431,10 +439,12 @@ class UserVOAuth extends Base {
 
             return true;
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            // Catch both Exception and Error (e.g., memory exhaustion, type errors)
             logger('user_vo')->error("Failed to sync user data", [
                 'uid' => $uid,
                 'error' => $e->getMessage(),
+                'type' => get_class($e),
                 'trace' => $e->getTraceAsString()
             ]);
             return false;
@@ -462,6 +472,37 @@ class UserVOAuth extends Base {
                 return ['success' => false, 'message' => 'Invalid URL'];
             }
 
+            // Check file size before downloading
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $photoUrl);
+            curl_setopt($ch, CURLOPT_NOBODY, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_exec($ch);
+            $contentLength = curl_getinfo($ch, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($httpCode !== 200) {
+                logger('user_vo')->error("Photo URL returned non-200 status", [
+                    'uid' => $uid,
+                    'url' => $photoUrl,
+                    'http_code' => $httpCode
+                ]);
+                return ['success' => false, 'message' => 'Photo not accessible (HTTP ' . $httpCode . ')'];
+            }
+
+            // Size limit: 10MB
+            $maxSize = 10 * 1024 * 1024;
+            if ($contentLength > $maxSize) {
+                logger('user_vo')->warning("Photo file too large", [
+                    'uid' => $uid,
+                    'size' => $contentLength,
+                    'max_size' => $maxSize
+                ]);
+                return ['success' => false, 'message' => 'Photo too large (' . round($contentLength / 1024 / 1024, 1) . 'MB)'];
+            }
+
             // Download photo
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $photoUrl);
@@ -469,16 +510,16 @@ class UserVOAuth extends Base {
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
             curl_setopt($ch, CURLOPT_TIMEOUT, 10);
             $imageData = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $downloadHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
 
-            if ($imageData === false || $httpCode !== 200) {
+            if ($imageData === false || $downloadHttpCode !== 200) {
                 logger('user_vo')->error("Failed to download photo", [
                     'uid' => $uid,
                     'url' => $photoUrl,
-                    'http_code' => $httpCode
+                    'http_code' => $downloadHttpCode
                 ]);
-                return ['success' => false, 'message' => 'Download failed (HTTP ' . $httpCode . ')'];
+                return ['success' => false, 'message' => 'Download failed (HTTP ' . $downloadHttpCode . ')'];
             }
 
             // Validate it's an image
@@ -524,10 +565,12 @@ class UserVOAuth extends Base {
             logger('user_vo')->debug("Successfully synced user photo", ['uid' => $uid]);
             return ['success' => true, 'message' => 'Synced'];
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            // Catch both Exception and Error (e.g., memory exhaustion)
             logger('user_vo')->error("Error syncing user photo", [
                 'uid' => $uid,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'type' => get_class($e)
             ]);
             return ['success' => false, 'message' => 'Error: ' . $e->getMessage()];
         }
