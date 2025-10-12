@@ -260,6 +260,29 @@ class UserVOAuth extends Base {
         return $listResponse;
     }
 
+    /**
+     * Fetch all groups from VereinOnline API
+     *
+     * @return array|null Array of groups or null on failure
+     *     Each group: ['id' => string, 'name' => string, ...]
+     */
+    public function fetchAllGroups(): ?array {
+        $token = 'A/' . $this->username . '/' . md5($this->password);
+        $listUrl = $this->apiUrl . "/?api=GetGroups";
+        $listResponse = $this->makeRequest($listUrl, [], $token);
+
+        if (!$listResponse || !is_array($listResponse)) {
+            logger('user_vo')->error("Failed to fetch groups list from VO");
+            return null;
+        }
+
+        logger('user_vo')->info("Fetched groups from VO", [
+            'group_count' => count($listResponse)
+        ]);
+
+        return $listResponse;
+    }
+
     public function fetchMembersMapForUsers(array $targetUsernames): array {
         $listResponse = $this->fetchAllMembers();
 
