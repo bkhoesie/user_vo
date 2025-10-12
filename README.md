@@ -71,7 +71,8 @@ Configure which data to sync in the admin interface:
 - **View Users**: See current Nextcloud user data and photo status
 - **Preview VO**: See VereinOnline data without making changes
 - **Sync from VO**: Trigger immediate sync for all users
-- View detailed sync results and status for each user
+- **Sync Selected Users**: Sync only selected users from the results table
+- View detailed sync results with photo sync error reporting
 
 **Important:** VereinOnline is the source of truth. Manual changes to user data in Nextcloud will be overwritten on next sync.
 
