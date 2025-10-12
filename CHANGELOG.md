@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Photo sync error reporting shows specific errors and warning icons in admin UI
 
+### Fixed
+- Photo sync crop coordinates are now properly cast to integers to avoid TypeError
+
 ## [0.3.1] - 2025-10-12
 
 ### Added

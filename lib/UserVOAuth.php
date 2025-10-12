@@ -572,8 +572,8 @@ class UserVOAuth extends Base {
             // Nextcloud requires square avatars - crop to square if needed
             if ($image->width() !== $image->height()) {
                 $size = min($image->width(), $image->height());
-                $x = ($image->width() - $size) / 2;
-                $y = ($image->height() - $size) / 2;
+                $x = (int)(($image->width() - $size) / 2);
+                $y = (int)(($image->height() - $size) / 2);
                 if (!$image->crop($x, $y, $size, $size)) {
                     fclose($tmpFile);
                     logger('user_vo')->error("Failed to crop image", ['uid' => $uid]);
