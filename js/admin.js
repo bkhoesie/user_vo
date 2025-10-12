@@ -616,6 +616,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                          result.status === 'skipped' ? '○' : '○';
 
                         row.innerHTML = `
+                            <td><input type="checkbox" class="sync-user-checkbox" data-uid="${escapeHtml(result.uid)}" /></td>
                             <td>${escapeHtml(result.uid)}</td>
                             <td>${escapeHtml(result.vo_username || '-')}</td>
                             <td>${escapeHtml(result.vo_user_id || '-')}</td>
@@ -686,6 +687,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                          result.status === 'skipped' ? '○' : '○';
 
                         row.innerHTML = `
+                            <td><input type="checkbox" class="sync-user-checkbox" data-uid="${escapeHtml(result.uid)}" /></td>
                             <td>${escapeHtml(result.uid)}</td>
                             <td>${escapeHtml(result.vo_username || '-')}</td>
                             <td>${escapeHtml(result.vo_user_id || '-')}</td>
@@ -758,6 +760,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                          result.status === 'skipped' ? '○' : '○';
 
                         row.innerHTML = `
+                            <td><input type="checkbox" class="sync-user-checkbox" data-uid="${escapeHtml(result.uid)}" /></td>
                             <td>${escapeHtml(result.uid)}</td>
                             <td>${escapeHtml(result.vo_username || '-')}</td>
                             <td>${escapeHtml(result.vo_user_id || '-')}</td>
@@ -986,12 +989,113 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Select all checkbox
+    // Select all checkbox (pre-provision)
     const selectAllCheckbox = document.getElementById('select-all-vo-users');
     if (selectAllCheckbox) {
         selectAllCheckbox.addEventListener('change', function() {
             document.querySelectorAll('.vo-user-checkbox').forEach(checkbox => {
                 checkbox.checked = selectAllCheckbox.checked;
+            });
+        });
+    }
+
+    // Select all checkbox (sync users)
+    const selectAllSyncCheckbox = document.getElementById('select-all-sync-users');
+    if (selectAllSyncCheckbox) {
+        selectAllSyncCheckbox.addEventListener('change', function() {
+            document.querySelectorAll('.sync-user-checkbox').forEach(checkbox => {
+                checkbox.checked = selectAllSyncCheckbox.checked;
+            });
+        });
+    }
+
+    // Sync selected users button
+    const syncSelectedBtn = document.getElementById('sync-selected-users-btn');
+    if (syncSelectedBtn) {
+        syncSelectedBtn.addEventListener('click', function() {
+            const selectedCheckboxes = document.querySelectorAll('.sync-user-checkbox:checked');
+            const selectedUids = Array.from(selectedCheckboxes).map(cb => cb.dataset.uid);
+
+            if (selectedUids.length === 0) {
+                OC.Notification.showTemporary(t('user_vo', 'Please select at least one user to sync'));
+                return;
+            }
+
+            const statusSpan = document.getElementById('sync-selected-status');
+            const userSyncSummary = document.getElementById('user-sync-summary');
+            const userSyncList = document.getElementById('user-sync-list');
+
+            statusSpan.textContent = t('user_vo', 'Syncing {count} user(s)...', {count: selectedUids.length});
+            statusSpan.style.color = '';
+            syncSelectedBtn.disabled = true;
+
+            // Clear previous summary
+            userSyncSummary.innerHTML = '';
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/sync-selected-users'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                },
+                body: JSON.stringify({
+                    user_ids: selectedUids
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                syncSelectedBtn.disabled = false;
+
+                if (data.success) {
+                    const summary = data.summary;
+                    const message = t('user_vo', 'Sync complete: {synced} synced, {failed} failed', {
+                        synced: summary.synced,
+                        failed: summary.failed
+                    });
+                    statusSpan.textContent = message;
+                    statusSpan.style.color = summary.failed > 0 ? 'orange' : 'green';
+                    OC.Notification.showTemporary(message);
+
+                    // Update only the synced rows in the table
+                    if (data.results && data.results.length > 0) {
+                        data.results.forEach(result => {
+                            // Find the existing row for this user
+                            const existingCheckbox = userSyncList.querySelector(`.sync-user-checkbox[data-uid="${escapeHtml(result.uid)}"]`);
+                            if (existingCheckbox) {
+                                const existingRow = existingCheckbox.closest('tr');
+
+                                const statusIcon = result.status === 'success' ? '✓' :
+                                                 result.status === 'deleted' ? '⚠' :
+                                                 result.status === 'failed' ? '✗' :
+                                                 result.status === 'skipped' ? '○' : '○';
+
+                                // Update the row with new data
+                                existingRow.className = result.status;
+                                existingRow.innerHTML = `
+                                    <td><input type="checkbox" class="sync-user-checkbox" data-uid="${escapeHtml(result.uid)}" checked /></td>
+                                    <td>${escapeHtml(result.uid)}</td>
+                                    <td>${escapeHtml(result.vo_username || '-')}</td>
+                                    <td>${escapeHtml(result.vo_user_id || '-')}</td>
+                                    <td>${escapeHtml(result.display_name || '-')}</td>
+                                    <td>${escapeHtml(result.email || '-')}</td>
+                                    <td>${escapeHtml(result.photo_status || '-')}</td>
+                                    <td>${escapeHtml(result.last_synced || '-')}</td>
+                                    <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
+                                `;
+                            }
+                        });
+                    }
+                } else {
+                    statusSpan.textContent = t('user_vo', 'Sync failed: {error}', {error: data.message || 'Unknown error'});
+                    statusSpan.style.color = 'red';
+                    OC.Notification.showTemporary(t('user_vo', 'Failed to sync selected users: {error}', {error: data.message || 'Unknown error'}));
+                }
+            })
+            .catch(error => {
+                syncSelectedBtn.disabled = false;
+                statusSpan.textContent = t('user_vo', 'Error: {error}', {error: error.message});
+                statusSpan.style.color = 'red';
+                OC.Notification.showTemporary(t('user_vo', 'Failed to sync selected users: {error}', {error: error.message}));
             });
         });
     }

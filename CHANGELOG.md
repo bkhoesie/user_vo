@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Selective user sync in admin interface to help diagnose sync issues
+
 ## [0.3.0] - 2025-10-11
 
 ### Added

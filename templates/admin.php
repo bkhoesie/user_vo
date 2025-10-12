@@ -243,6 +243,7 @@ style('user_vo', 'admin');
             <table class="vo-users-table">
                 <thead>
                     <tr>
+                        <th><input type="checkbox" id="select-all-sync-users" /></th>
                         <th><?php p($l->t('NC Username')); ?></th>
                         <th><?php p($l->t('VO Username')); ?></th>
                         <th><?php p($l->t('VO User ID')); ?></th>
@@ -255,6 +256,13 @@ style('user_vo', 'admin');
                 </thead>
                 <tbody id="user-sync-list"></tbody>
             </table>
+
+            <div class="vo-bulk-actions" style="margin-top: 15px;">
+                <button id="sync-selected-users-btn" class="button-primary">
+                    <?php p($l->t('Sync Selected Users')); ?>
+                </button>
+                <span id="sync-selected-status"></span>
+            </div>
         </div>
     </div>
 
