@@ -568,6 +568,7 @@ class AdminController extends Controller {
             $successCount = 0;
             $failureCount = 0;
             $skippedCount = 0;
+            $photoErrorCount = 0;
 
             // Get all users from user_vo table
             $qb = $this->connection->getQueryBuilder();
@@ -704,7 +705,9 @@ class AdminController extends Controller {
                 $isDeleted = $voUserData['_deleted'] ?? false;
 
                 // Sync user data (even for deleted users to update metadata)
-                $success = $auth->syncUserData($uid, $voUserData);
+                $syncResult = $auth->syncUserData($uid, $voUserData);
+                $success = $syncResult['success'];
+                $photoError = $syncResult['photo_error'];
 
                 if ($success || $isDeleted) {
                     // Get last_synced from database
@@ -720,13 +723,18 @@ class AdminController extends Controller {
                     $user = \OC::$server->getUserManager()->get($uid);
                     $email = $user ? $user->getSystemEMailAddress() : '';
 
-                    // Check photo sync status from voUserData
+                    // Determine photo sync status based on actual result
                     $photoStatus = '-';
                     $syncPhoto = $this->config->getAppValue('user_vo', 'sync_photo', 'false') === 'true';
                     $hasPhoto = !empty($voUserData['foto']) && $voUserData['foto'] !== 'anonym.gif';
 
                     if ($syncPhoto && $hasPhoto && !$isDeleted) {
-                        $photoStatus = 'Synced';
+                        if ($photoError) {
+                            $photoStatus = 'Sync error';
+                            $photoErrorCount++;
+                        } else {
+                            $photoStatus = 'Synced';
+                        }
                     } elseif ($hasPhoto) {
                         $photoStatus = 'Available (not synced)';
                     }
@@ -739,6 +747,7 @@ class AdminController extends Controller {
                             'display_name' => trim($voUserData['firstname'] . ' ' . $voUserData['lastname']),
                             'email' => $voUserData['email'] ?? '',
                             'photo_status' => $photoStatus,
+                            'photo_error' => $photoError,
                             'last_synced' => $userData['last_synced'] ?? null,
                             'status' => 'deleted',
                             'message' => 'User marked as deleted in VO'
@@ -752,6 +761,7 @@ class AdminController extends Controller {
                             'display_name' => $userData['displayname'] ?? '',
                             'email' => $email,
                             'photo_status' => $photoStatus,
+                            'photo_error' => $photoError,
                             'last_synced' => $userData['last_synced'] ?? null,
                             'status' => 'success',
                             'message' => 'Synced successfully'
@@ -766,6 +776,7 @@ class AdminController extends Controller {
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
+                        'photo_error' => null,
                         'last_synced' => '',
                         'status' => 'failed',
                         'message' => 'Sync method returned false'
@@ -780,7 +791,8 @@ class AdminController extends Controller {
                     'total' => $successCount + $failureCount + $skippedCount,
                     'success' => $successCount,
                     'failed' => $failureCount,
-                    'skipped' => $skippedCount
+                    'skipped' => $skippedCount,
+                    'photo_errors' => $photoErrorCount
                 ],
                 'results' => $results
             ]);
@@ -813,6 +825,14 @@ class AdminController extends Controller {
             $successCount = 0;
             $failureCount = 0;
             $skippedCount = 0;
+            $photoErrorCount = 0;
+
+            // Get total count of all users in table (for "X out of Y" display)
+            $qbCount = $this->connection->getQueryBuilder();
+            $qbCount->select($qbCount->func()->count('*'))
+                ->from('user_vo')
+                ->where($qbCount->expr()->eq('backend', $qbCount->createNamedParameter('user_vo')));
+            $totalInTable = (int) $qbCount->executeQuery()->fetchOne();
 
             // Get selected users from user_vo table
             $qb = $this->connection->getQueryBuilder();
@@ -907,7 +927,9 @@ class AdminController extends Controller {
                 $isDeleted = $voUserData['_deleted'] ?? false;
 
                 // Sync user data (even for deleted users to update metadata)
-                $success = $auth->syncUserData($uid, $voUserData);
+                $syncResult = $auth->syncUserData($uid, $voUserData);
+                $success = $syncResult['success'];
+                $photoError = $syncResult['photo_error'];
 
                 if ($success || $isDeleted) {
                     // Get last_synced from database
@@ -923,13 +945,18 @@ class AdminController extends Controller {
                     $user = \OC::$server->getUserManager()->get($uid);
                     $email = $user ? $user->getSystemEMailAddress() : '';
 
-                    // Check photo sync status from voUserData
+                    // Determine photo sync status based on actual result
                     $photoStatus = '-';
                     $syncPhoto = $this->config->getAppValue('user_vo', 'sync_photo', 'false') === 'true';
                     $hasPhoto = !empty($voUserData['foto']) && $voUserData['foto'] !== 'anonym.gif';
 
                     if ($syncPhoto && $hasPhoto && !$isDeleted) {
-                        $photoStatus = 'Synced';
+                        if ($photoError) {
+                            $photoStatus = 'Sync error';
+                            $photoErrorCount++;
+                        } else {
+                            $photoStatus = 'Synced';
+                        }
                     } elseif ($hasPhoto) {
                         $photoStatus = 'Available (not synced)';
                     }
@@ -942,6 +969,7 @@ class AdminController extends Controller {
                             'display_name' => trim($voUserData['firstname'] . ' ' . $voUserData['lastname']),
                             'email' => $voUserData['email'] ?? '',
                             'photo_status' => $photoStatus,
+                            'photo_error' => $photoError,
                             'last_synced' => $userData['last_synced'] ?? null,
                             'status' => 'deleted',
                             'message' => 'User marked as deleted in VO'
@@ -955,6 +983,7 @@ class AdminController extends Controller {
                             'display_name' => $userData['displayname'] ?? '',
                             'email' => $email,
                             'photo_status' => $photoStatus,
+                            'photo_error' => $photoError,
                             'last_synced' => $userData['last_synced'] ?? null,
                             'status' => 'success',
                             'message' => 'Synced successfully'
@@ -969,6 +998,7 @@ class AdminController extends Controller {
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
+                        'photo_error' => null,
                         'last_synced' => '',
                         'status' => 'failed',
                         'message' => 'Sync method returned false'
@@ -983,7 +1013,9 @@ class AdminController extends Controller {
                     'total' => $successCount + $failureCount + $skippedCount,
                     'synced' => $successCount,
                     'failed' => $failureCount,
-                    'skipped' => $skippedCount
+                    'skipped' => $skippedCount,
+                    'photo_errors' => $photoErrorCount,
+                    'total_in_table' => $totalInTable
                 ],
                 'results' => $results
             ]);

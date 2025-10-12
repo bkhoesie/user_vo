@@ -380,9 +380,9 @@ class UserVOAuth extends Base {
      *
      * @param string $uid NC username (lowercase canonical)
      * @param array $voUserData User data from fetchUserDataFromVO
-     * @return bool Success
+     * @return array ['success' => bool, 'photo_error' => string|null]
      */
-    public function syncUserData(string $uid, array $voUserData): bool {
+    public function syncUserData(string $uid, array $voUserData): array {
         try {
             // Username mismatch warning - VO username might have different case (case-insensitive comparison)
             if (strtolower($voUserData['username']) !== strtolower($uid)) {
@@ -400,7 +400,7 @@ class UserVOAuth extends Base {
 
             if (!$user) {
                 logger('user_vo')->error("Cannot sync - user not found in NC", ['uid' => $uid]);
-                return false;
+                return ['success' => false, 'photo_error' => null];
             }
 
             // Update display name (always)
@@ -417,7 +417,7 @@ class UserVOAuth extends Base {
 
             // Update photo (if configured and available)
             $syncPhoto = $this->config->getAppValue('user_vo', 'sync_photo', 'false') === 'true';
-            $photoSyncResult = null;
+            $photoError = null;
             if ($syncPhoto && !empty($voUserData['foto'])) {
                 // Construct photo URL from foto filename
                 $photoUrl = $this->apiUrl . '/fotos/' . $voUserData['foto'];
@@ -426,9 +426,10 @@ class UserVOAuth extends Base {
                     $photoSyncResult = $this->syncUserPhoto($uid, $photoUrl);
                     // Log photo sync failures but don't fail the whole user sync
                     if (!$photoSyncResult['success']) {
+                        $photoError = $photoSyncResult['message'];
                         logger('user_vo')->warning("Photo sync failed but continuing with user sync", [
                             'uid' => $uid,
-                            'photo_error' => $photoSyncResult['message']
+                            'photo_error' => $photoError
                         ]);
                     }
                 }
@@ -437,7 +438,7 @@ class UserVOAuth extends Base {
             // Update metadata in user_vo table
             $this->updateVOMetadata($uid, $voUserData);
 
-            return true;
+            return ['success' => true, 'photo_error' => $photoError];
 
         } catch (\Throwable $e) {
             // Catch both Exception and Error (e.g., memory exhaustion, type errors)
@@ -447,7 +448,7 @@ class UserVOAuth extends Base {
                 'type' => get_class($e),
                 'trace' => $e->getTraceAsString()
             ]);
-            return false;
+            return ['success' => false, 'photo_error' => null];
         }
     }
 
@@ -546,23 +547,66 @@ class UserVOAuth extends Base {
             fwrite($tmpFile, $imageData);
             $tmpPath = stream_get_meta_data($tmpFile)['uri'];
 
-            // Set avatar
+            // Load image
             $image = new \OCP\Image();
-            $image->loadFromFile($tmpPath);
+            if (!$image->loadFromFile($tmpPath)) {
+                fclose($tmpFile);
+                logger('user_vo')->error("Failed to load image from temp file", [
+                    'uid' => $uid,
+                    'mime_type' => $mimeType
+                ]);
+                return ['success' => false, 'message' => 'Failed to load image'];
+            }
+
+            // Validate image dimensions
+            if (!$image->valid() || $image->width() <= 0 || $image->height() <= 0) {
+                fclose($tmpFile);
+                logger('user_vo')->error("Image is invalid or has invalid dimensions", [
+                    'uid' => $uid,
+                    'width' => $image->width(),
+                    'height' => $image->height()
+                ]);
+                return ['success' => false, 'message' => 'Invalid image dimensions'];
+            }
 
             // Nextcloud requires square avatars - crop to square if needed
             if ($image->width() !== $image->height()) {
                 $size = min($image->width(), $image->height());
                 $x = ($image->width() - $size) / 2;
                 $y = ($image->height() - $size) / 2;
-                $image->crop($x, $y, $size, $size);
+                if (!$image->crop($x, $y, $size, $size)) {
+                    fclose($tmpFile);
+                    logger('user_vo')->error("Failed to crop image", ['uid' => $uid]);
+                    return ['success' => false, 'message' => 'Failed to crop image'];
+                }
             }
 
-            $avatar->set($image);
+            // Set avatar and verify it succeeded
+            try {
+                $avatar->set($image);
+
+                // Verify avatar was actually set by checking if it exists
+                if (!$avatar->exists()) {
+                    fclose($tmpFile);
+                    logger('user_vo')->error("Avatar->set() succeeded but avatar doesn't exist", ['uid' => $uid]);
+                    return ['success' => false, 'message' => 'Avatar not set (exists check failed)'];
+                }
+            } catch (\Exception $e) {
+                fclose($tmpFile);
+                logger('user_vo')->error("Failed to set avatar", [
+                    'uid' => $uid,
+                    'error' => $e->getMessage()
+                ]);
+                return ['success' => false, 'message' => 'Failed to set avatar: ' . $e->getMessage()];
+            }
 
             fclose($tmpFile);
 
-            logger('user_vo')->debug("Successfully synced user photo", ['uid' => $uid]);
+            logger('user_vo')->info("Successfully synced user photo", [
+                'uid' => $uid,
+                'width' => $image->width(),
+                'height' => $image->height()
+            ]);
             return ['success' => true, 'message' => 'Synced'];
 
         } catch (\Throwable $e) {

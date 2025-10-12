@@ -576,6 +576,43 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Helper function to generate sync summary HTML
+    function generateSyncSummaryHTML(summary, isSelectiveSync = false) {
+        let totalText = summary.total.toString();
+        if (isSelectiveSync && summary.total_in_table) {
+            totalText = `${summary.total} (out of ${summary.total_in_table})`;
+        }
+
+        return `
+            <p><strong>${t('user_vo', 'Sync completed:')}</strong></p>
+            <ul>
+                <li>${t('user_vo', 'Total users:')} ${totalText}</li>
+                <li class="success">${t('user_vo', 'Successfully synced:')} ${summary.success || summary.synced || 0}</li>
+                <li class="error">${t('user_vo', 'Failed:')} ${summary.failed || 0}</li>
+                <li>${t('user_vo', 'Skipped:')} ${summary.skipped || 0}</li>
+            </ul>
+        `;
+    }
+
+    // Helper function to generate photo errors HTML
+    function generatePhotoErrorsHTML(results) {
+        const photoErrors = results.filter(r => r.photo_error);
+        if (photoErrors.length === 0) {
+            return '';
+        }
+
+        const errorListHTML = photoErrors.map(r =>
+            `<li>${escapeHtml(r.uid)}: ${escapeHtml(r.photo_error)}</li>`
+        ).join('');
+
+        return `
+            <p><strong>⚠ ${t('user_vo', 'Photo Sync Issues')} (${photoErrors.length} ${photoErrors.length === 1 ? 'user' : 'users'}):</strong></p>
+            <ul class="photo-errors">
+                ${errorListHTML}
+            </ul>
+        `;
+    }
+
     // View local data (fast, no API calls)
     const viewLocalDataButton = document.getElementById('view-local-data');
     if (viewLocalDataButton) {
@@ -737,16 +774,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     const summary = data.summary;
                     syncAllUsersStatus.textContent = '';
 
-                    // Show summary
-                    userSyncSummary.innerHTML = `
-                        <p><strong>${t('user_vo', 'Sync completed:')}</strong></p>
-                        <ul>
-                            <li>${t('user_vo', 'Total users:')} ${summary.total}</li>
-                            <li class="success">${t('user_vo', 'Successfully synced:')} ${summary.success}</li>
-                            <li class="error">${t('user_vo', 'Failed:')} ${summary.failed}</li>
-                            <li>${t('user_vo', 'Skipped:')} ${summary.skipped}</li>
-                        </ul>
-                    `;
+                    // Show summary with photo errors
+                    userSyncSummary.innerHTML = generateSyncSummaryHTML(summary, false) + generatePhotoErrorsHTML(data.results);
 
                     // Show results table
                     userSyncList.innerHTML = '';
@@ -759,6 +788,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                          result.status === 'failed' ? '✗' :
                                          result.status === 'skipped' ? '○' : '○';
 
+                        // Add warning icon for photo errors
+                        let photoDisplay = escapeHtml(result.photo_status || '-');
+                        if (result.photo_error) {
+                            photoDisplay = '⚠ ' + photoDisplay;
+                        }
+
                         row.innerHTML = `
                             <td><input type="checkbox" class="sync-user-checkbox" data-uid="${escapeHtml(result.uid)}" /></td>
                             <td>${escapeHtml(result.uid)}</td>
@@ -766,7 +801,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <td>${escapeHtml(result.vo_user_id || '-')}</td>
                             <td>${escapeHtml(result.display_name || '-')}</td>
                             <td>${escapeHtml(result.email || '-')}</td>
-                            <td>${escapeHtml(result.photo_status || '-')}</td>
+                            <td>${photoDisplay}</td>
                             <td>${escapeHtml(result.last_synced || '-')}</td>
                             <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
                         `;
@@ -1021,13 +1056,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            const statusSpan = document.getElementById('sync-selected-status');
-            const userSyncSummary = document.getElementById('user-sync-summary');
-            const userSyncList = document.getElementById('user-sync-list');
-
-            statusSpan.textContent = t('user_vo', 'Syncing {count} user(s)...', {count: selectedUids.length});
-            statusSpan.style.color = '';
+            // Use unified status area
             syncSelectedBtn.disabled = true;
+            syncAllUsersStatus.textContent = t('user_vo', 'Syncing {count} user(s)...', {count: selectedUids.length});
+            syncAllUsersStatus.className = 'sync-status syncing';
 
             // Clear previous summary
             userSyncSummary.innerHTML = '';
@@ -1048,13 +1080,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (data.success) {
                     const summary = data.summary;
-                    const message = t('user_vo', 'Sync complete: {synced} synced, {failed} failed', {
-                        synced: summary.synced,
-                        failed: summary.failed
-                    });
-                    statusSpan.textContent = message;
-                    statusSpan.style.color = summary.failed > 0 ? 'orange' : 'green';
-                    OC.Notification.showTemporary(message);
+                    syncAllUsersStatus.textContent = '';
+
+                    // Show summary with photo errors (indicating selective sync)
+                    userSyncSummary.innerHTML = generateSyncSummaryHTML(summary, true) + generatePhotoErrorsHTML(data.results);
 
                     // Update only the synced rows in the table
                     if (data.results && data.results.length > 0) {
@@ -1069,6 +1098,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                                  result.status === 'failed' ? '✗' :
                                                  result.status === 'skipped' ? '○' : '○';
 
+                                // Add warning icon for photo errors
+                                let photoDisplay = escapeHtml(result.photo_status || '-');
+                                if (result.photo_error) {
+                                    photoDisplay = '⚠ ' + photoDisplay;
+                                }
+
                                 // Update the row with new data
                                 existingRow.className = result.status;
                                 existingRow.innerHTML = `
@@ -1078,23 +1113,30 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <td>${escapeHtml(result.vo_user_id || '-')}</td>
                                     <td>${escapeHtml(result.display_name || '-')}</td>
                                     <td>${escapeHtml(result.email || '-')}</td>
-                                    <td>${escapeHtml(result.photo_status || '-')}</td>
+                                    <td>${photoDisplay}</td>
                                     <td>${escapeHtml(result.last_synced || '-')}</td>
                                     <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
                                 `;
                             }
                         });
                     }
+
+                    OC.Notification.showTemporary(
+                        t('user_vo', 'Sync complete: {synced} synced, {failed} failed', {
+                            synced: summary.synced,
+                            failed: summary.failed
+                        })
+                    );
                 } else {
-                    statusSpan.textContent = t('user_vo', 'Sync failed: {error}', {error: data.message || 'Unknown error'});
-                    statusSpan.style.color = 'red';
+                    syncAllUsersStatus.textContent = t('user_vo', 'Sync failed: {error}', {error: data.message || 'Unknown error'});
+                    syncAllUsersStatus.className = 'sync-status error';
                     OC.Notification.showTemporary(t('user_vo', 'Failed to sync selected users: {error}', {error: data.message || 'Unknown error'}));
                 }
             })
             .catch(error => {
                 syncSelectedBtn.disabled = false;
-                statusSpan.textContent = t('user_vo', 'Error: {error}', {error: error.message});
-                statusSpan.style.color = 'red';
+                syncAllUsersStatus.textContent = t('user_vo', 'Error: {error}', {error: error.message});
+                syncAllUsersStatus.className = 'sync-status error';
                 OC.Notification.showTemporary(t('user_vo', 'Failed to sync selected users: {error}', {error: error.message}));
             });
         });

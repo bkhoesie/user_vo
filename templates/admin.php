@@ -234,6 +234,7 @@ style('user_vo', 'admin');
             <button id="view-local-data" class="button"><?php p($l->t('View Users')); ?></button>
             <button id="view-user-metadata" class="button"><?php p($l->t('Preview VO')); ?></button>
             <button id="sync-all-users" class="button"><?php p($l->t('Sync from VO')); ?></button>
+            <button id="sync-selected-users-btn" class="button"><?php p($l->t('Sync Selected Users')); ?></button>
             <span id="sync-all-users-status"></span>
         </p>
 
@@ -256,13 +257,6 @@ style('user_vo', 'admin');
                 </thead>
                 <tbody id="user-sync-list"></tbody>
             </table>
-
-            <div class="vo-bulk-actions" style="margin-top: 15px;">
-                <button id="sync-selected-users-btn" class="button-primary">
-                    <?php p($l->t('Sync Selected Users')); ?>
-                </button>
-                <span id="sync-selected-status"></span>
-            </div>
         </div>
     </div>
 
