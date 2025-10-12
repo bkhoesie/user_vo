@@ -1406,6 +1406,10 @@ class AdminController extends Controller {
             $searchLower = mb_strtolower(trim($searchTerm), 'UTF-8');
             $userManager = \OC::$server->getUserManager();
 
+            // If search term contains dots, also prepare a space-separated version
+            // This allows searching for usernames like "john.doe" to match "John Doe"
+            $searchAlternative = str_contains($searchLower, '.') ? str_replace('.', ' ', $searchLower) : null;
+
             // Filter and check each member
             foreach ($allMembers as $member) {
                 $memberId = $member['id'];
@@ -1420,8 +1424,7 @@ class AdminController extends Controller {
 
                     $nameLower = mb_strtolower($member['name'], 'UTF-8');
 
-                    // Split search term into parts and check if all parts exist in name
-                    // Supports "Niko Demmel" or "Demmel Niko" matching "Demmel, Nikolaus"
+                    // Try matching with original search term
                     $searchParts = preg_split('/\s+/', $searchLower, -1, PREG_SPLIT_NO_EMPTY);
                     $allPartsMatch = true;
 
@@ -1429,6 +1432,19 @@ class AdminController extends Controller {
                         if (mb_strpos($nameLower, $part) === false) {
                             $allPartsMatch = false;
                             break;
+                        }
+                    }
+
+                    // If original didn't match and we have an alternative (dots replaced with spaces), try that
+                    if (!$allPartsMatch && $searchAlternative !== null) {
+                        $searchParts = preg_split('/\s+/', $searchAlternative, -1, PREG_SPLIT_NO_EMPTY);
+                        $allPartsMatch = true;
+
+                        foreach ($searchParts as $part) {
+                            if (mb_strpos($nameLower, $part) === false) {
+                                $allPartsMatch = false;
+                                break;
+                            }
                         }
                     }
 

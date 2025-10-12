@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Photo sync crop coordinates are now properly cast to integers to avoid TypeError
+- Pre-provision search now handles usernames with dots (e.g., "john.doe")
 
 ## [0.3.1] - 2025-10-12
 
