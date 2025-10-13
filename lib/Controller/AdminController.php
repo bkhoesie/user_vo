@@ -1673,4 +1673,141 @@ class AdminController extends Controller {
         }
     }
 
+    /**
+     * Fetch all groups from VereinOnline API
+     *
+     * @return JSONResponse
+     */
+    public function fetchAllVOGroups() {
+        try {
+            // Get UserVOAuth instance to access API methods
+            $configuration = $this->configService->loadConfiguration(maskPassword: false);
+            $backend = new UserVOAuth(
+                $configuration['api_url'],
+                $configuration['api_username'],
+                $configuration['api_password']
+            );
+
+            // Fetch all groups from VO
+            $allGroups = $backend->fetchAllGroups();
+
+            if (!$allGroups) {
+                return new JSONResponse([
+                    'success' => false,
+                    'error' => 'Failed to fetch groups from VereinOnline'
+                ], 500);
+            }
+
+            // For each group, determine if it's already managed (created in NC)
+            $results = [];
+            foreach ($allGroups as $group) {
+                $voGroupId = $group['id'] ?? null;
+                $voGroupName = $group['name'] ?? '';
+
+                if (!$voGroupId) {
+                    continue; // Skip groups without ID
+                }
+
+                // Check if this group exists in our database (is managed)
+                $qb = $this->connection->getQueryBuilder();
+                $qb->select('nc_group_id', 'deleted_in_vo', 'last_synced', 'member_count', 'vo_member_count', 'non_vo_member_count')
+                    ->from('user_vo_groups')
+                    ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
+                $result = $qb->executeQuery();
+                $dbRow = $result->fetch();
+                $result->closeCursor();
+
+                $isManaged = ($dbRow !== false);
+                $ncGroupId = $isManaged ? $dbRow['nc_group_id'] : null;
+                $deletedInVO = $isManaged && $dbRow['deleted_in_vo'];
+
+                $results[] = [
+                    'vo_group_id' => $voGroupId,
+                    'vo_group_name' => $voGroupName,
+                    'nc_group_id' => $ncGroupId,
+                    'is_managed' => $isManaged,
+                    'deleted_in_vo' => $deletedInVO,
+                    'last_synced' => $isManaged ? $dbRow['last_synced'] : null,
+                    'member_count' => $isManaged ? (int)$dbRow['member_count'] : null,
+                    'vo_member_count' => $isManaged ? (int)$dbRow['vo_member_count'] : null,
+                    'non_vo_member_count' => $isManaged ? (int)$dbRow['non_vo_member_count'] : null,
+                ];
+            }
+
+            return new JSONResponse([
+                'success' => true,
+                'groups' => $results,
+                'count' => count($results)
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to fetch VO groups', [
+                'app' => 'user_vo',
+                'error' => $e->getMessage()
+            ]);
+
+            return new JSONResponse([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Fetch managed groups from database
+     *
+     * @return JSONResponse
+     */
+    public function fetchManagedGroups() {
+        try {
+            // Get all managed groups from database
+            $qb = $this->connection->getQueryBuilder();
+            $qb->select('vo_group_id', 'vo_group_name', 'nc_group_id', 'deleted_in_vo', 'last_synced',
+                        'member_count', 'vo_member_count', 'non_vo_member_count')
+                ->from('user_vo_groups')
+                ->orderBy('vo_group_name', 'ASC');
+            $result = $qb->executeQuery();
+            $rows = $result->fetchAll();
+            $result->closeCursor();
+
+            $results = [];
+            foreach ($rows as $row) {
+                $ncGroupId = $row['nc_group_id'];
+
+                // Check if NC group still exists
+                $ncGroupExists = $this->groupManager->groupExists($ncGroupId);
+
+                $results[] = [
+                    'vo_group_id' => $row['vo_group_id'],
+                    'vo_group_name' => $row['vo_group_name'],
+                    'nc_group_id' => $ncGroupId,
+                    'nc_group_exists' => $ncGroupExists,
+                    'is_managed' => true,
+                    'deleted_in_vo' => (bool)$row['deleted_in_vo'],
+                    'last_synced' => $row['last_synced'],
+                    'member_count' => (int)$row['member_count'],
+                    'vo_member_count' => (int)$row['vo_member_count'],
+                    'non_vo_member_count' => (int)$row['non_vo_member_count'],
+                ];
+            }
+
+            return new JSONResponse([
+                'success' => true,
+                'groups' => $results,
+                'count' => count($results)
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to fetch managed groups', [
+                'app' => 'user_vo',
+                'error' => $e->getMessage()
+            ]);
+
+            return new JSONResponse([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 }

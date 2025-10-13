@@ -19,5 +19,9 @@ return [
         ['name' => 'admin#searchVOUsers', 'url' => '/admin/search-vo-users', 'verb' => 'GET'],
         ['name' => 'admin#createAccountFromVO', 'url' => '/admin/create-account-from-vo', 'verb' => 'POST'],
         ['name' => 'admin#bulkCreateAccountsFromVO', 'url' => '/admin/bulk-create-accounts-from-vo', 'verb' => 'POST'],
+
+        // Group management
+        ['name' => 'admin#fetchAllVOGroups', 'url' => '/admin/fetch-all-vo-groups', 'verb' => 'GET'],
+        ['name' => 'admin#fetchManagedGroups', 'url' => '/admin/fetch-managed-groups', 'verb' => 'GET'],
     ]
 ]; 
