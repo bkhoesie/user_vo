@@ -1703,10 +1703,16 @@ class AdminController extends Controller {
             foreach ($allGroups as $group) {
                 $voGroupId = $group['id'] ?? null;
                 $voGroupName = $group['name'] ?? '';
+                $voParentId = $group['parentid'] ?? null;
+                $voPosition = isset($group['pos']) ? (int)$group['pos'] : null;
 
                 if (!$voGroupId) {
                     continue; // Skip groups without ID
                 }
+
+                // Harmonize the group name
+                $harmonizer = new \OCA\UserVO\Service\GroupNameHarmonizer();
+                $ncGroupId = $harmonizer->harmonize($voGroupName);
 
                 // Check if this group exists in our database (is managed)
                 $qb = $this->connection->getQueryBuilder();
@@ -1718,13 +1724,14 @@ class AdminController extends Controller {
                 $result->closeCursor();
 
                 $isManaged = ($dbRow !== false);
-                $ncGroupId = $isManaged ? $dbRow['nc_group_id'] : null;
                 $deletedInVO = $isManaged && $dbRow['deleted_in_vo'];
 
                 $results[] = [
                     'vo_group_id' => $voGroupId,
                     'vo_group_name' => $voGroupName,
-                    'nc_group_id' => $ncGroupId,
+                    'vo_parent_id' => $voParentId,
+                    'vo_position' => $voPosition,
+                    'nc_group_id' => $isManaged ? $dbRow['nc_group_id'] : $ncGroupId,
                     'is_managed' => $isManaged,
                     'deleted_in_vo' => $deletedInVO,
                     'last_synced' => $isManaged ? $dbRow['last_synced'] : null,
@@ -1762,10 +1769,10 @@ class AdminController extends Controller {
         try {
             // Get all managed groups from database
             $qb = $this->connection->getQueryBuilder();
-            $qb->select('vo_group_id', 'vo_group_name', 'nc_group_id', 'deleted_in_vo', 'last_synced',
-                        'member_count', 'vo_member_count', 'non_vo_member_count')
+            $qb->select('vo_group_id', 'vo_group_name', 'nc_group_id', 'vo_parent_id', 'vo_position',
+                        'deleted_in_vo', 'last_synced', 'member_count', 'vo_member_count', 'non_vo_member_count')
                 ->from('user_vo_groups')
-                ->orderBy('vo_group_name', 'ASC');
+                ->orderBy('vo_position', 'ASC');
             $result = $qb->executeQuery();
             $rows = $result->fetchAll();
             $result->closeCursor();
@@ -1781,6 +1788,8 @@ class AdminController extends Controller {
                     'vo_group_id' => $row['vo_group_id'],
                     'vo_group_name' => $row['vo_group_name'],
                     'nc_group_id' => $ncGroupId,
+                    'vo_parent_id' => $row['vo_parent_id'],
+                    'vo_position' => $row['vo_position'] ? (int)$row['vo_position'] : null,
                     'nc_group_exists' => $ncGroupExists,
                     'is_managed' => true,
                     'deleted_in_vo' => (bool)$row['deleted_in_vo'],

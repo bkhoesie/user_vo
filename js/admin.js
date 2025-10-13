@@ -1141,4 +1141,393 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
+    // ========================================
+    // Group Management
+    // ========================================
+
+    const loadAllVOGroupsButton = document.getElementById('load-all-vo-groups');
+    const loadManagedGroupsButton = document.getElementById('load-managed-groups');
+    const groupsStatus = document.getElementById('groups-status');
+    const groupsResults = document.getElementById('groups-results');
+    const groupsSummary = document.getElementById('groups-summary');
+    const groupsList = document.getElementById('groups-list');
+
+    // Helper function to render group status badge
+    function renderGroupStatusBadge(group) {
+        if (group.deleted_in_vo) {
+            return '<span class="vo-badge vo-badge-error">⚠ ' + escapeHtml(t('user_vo', 'Deleted in VO')) + '</span>';
+        }
+
+        if (group.is_managed) {
+            return '<span class="vo-badge vo-badge-success">✓ ' + escapeHtml(t('user_vo', 'Created')) + '</span>';
+        }
+
+        return '<span class="vo-badge vo-badge-warning">' + escapeHtml(t('user_vo', 'Not created')) + '</span>';
+    }
+
+    // Helper function to render group actions
+    function renderGroupActions(group) {
+        if (group.deleted_in_vo) {
+            // Deleted groups - only show info
+            return '<span class="vo-text-muted">—</span>';
+        }
+
+        if (group.is_managed) {
+            // Managed groups - show Sync and Delete buttons
+            return `
+                <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" disabled>
+                    ${escapeHtml(t('user_vo', 'Sync'))}
+                </button>
+                <button class="button delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" disabled>
+                    ${escapeHtml(t('user_vo', 'Delete'))}
+                </button>
+            `;
+        } else {
+            // Not created groups - show Create button
+            return `
+                <button class="button create-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" disabled>
+                    ${escapeHtml(t('user_vo', 'Create'))}
+                </button>
+            `;
+        }
+    }
+
+    // Helper function to sort groups hierarchically by VO position and calculate depth
+    function sortGroupsHierarchically(groups) {
+        // Build a map of groups by parent_id for efficient lookup
+        const groupsByParent = {};
+        const groupMap = {};
+
+        groups.forEach(group => {
+            groupMap[group.vo_group_id] = group;
+            const parentId = group.vo_parent_id || '0';
+            if (!groupsByParent[parentId]) {
+                groupsByParent[parentId] = [];
+            }
+            groupsByParent[parentId].push(group);
+        });
+
+        // Mark groups that have children
+        const hasChildren = {};
+        Object.keys(groupsByParent).forEach(parentId => {
+            if (parentId !== '0' && groupsByParent[parentId].length > 0) {
+                hasChildren[parentId] = true;
+            }
+        });
+
+        // Sort siblings within each parent by position, then by name
+        Object.keys(groupsByParent).forEach(parentId => {
+            groupsByParent[parentId].sort((a, b) => {
+                const posA = a.vo_position || 0;
+                const posB = b.vo_position || 0;
+                if (posA !== posB) {
+                    return posA - posB;
+                }
+                // Secondary sort by name when positions are equal
+                return a.vo_group_name.localeCompare(b.vo_group_name);
+            });
+        });
+
+        // Recursively build the sorted flat list with depth and position index
+        const result = [];
+        function addGroupsRecursively(parentId, depth = 0, parentPositionIndex = '') {
+            const children = groupsByParent[parentId] || [];
+            children.forEach((group, index) => {
+                // Build position index (e.g., "1", "2", "5.1", "5.2")
+                const position = group.vo_position || 0;
+                const positionIndex = parentPositionIndex
+                    ? `${parentPositionIndex}.${position}`
+                    : position.toString();
+
+                // Add depth, isLast, hasChildren, and position index for display
+                const isLast = index === children.length - 1;
+                result.push({
+                    ...group,
+                    _depth: depth,
+                    _isLast: isLast,
+                    _positionIndex: positionIndex,
+                    _hasChildren: hasChildren[group.vo_group_id] || false,
+                    _expanded: false // Start collapsed by default
+                });
+                // Add this group's children recursively
+                addGroupsRecursively(group.vo_group_id, depth + 1, positionIndex);
+            });
+        }
+
+        // Start with root groups (parent_id = '0' or null)
+        addGroupsRecursively('0');
+
+        return result;
+    }
+
+    // Display groups in the table
+    function displayGroups(groups, viewType) {
+        const managedCount = groups.filter(g => g.is_managed).length;
+        const deletedCount = groups.filter(g => g.deleted_in_vo).length;
+        const totalCount = groups.length;
+
+        // Sort groups hierarchically using VO's defined sort order
+        const sortedGroups = sortGroupsHierarchically(groups);
+
+        // Show summary
+        let summaryHTML = '';
+        if (viewType === 'all') {
+            summaryHTML = `
+                <p><strong>${t('user_vo', 'All VereinOnline Groups:')}</strong></p>
+                <ul>
+                    <li>${t('user_vo', 'Showing:')} ${totalCount} ${t('user_vo', 'groups')}</li>
+                    <li>${t('user_vo', 'Managed in NC:')} ${managedCount}</li>
+                    <li>${t('user_vo', 'Not created:')} ${totalCount - managedCount}</li>
+                </ul>
+            `;
+        } else {
+            summaryHTML = `
+                <p><strong>${t('user_vo', 'Managed Groups:')}</strong></p>
+                <ul>
+                    <li>${t('user_vo', 'Showing:')} ${totalCount} ${t('user_vo', 'managed groups')}</li>
+                    ${deletedCount > 0 ? `<li class="error">${t('user_vo', 'Deleted in VO:')} ${deletedCount}</li>` : ''}
+                </ul>
+            `;
+        }
+        groupsSummary.innerHTML = summaryHTML;
+
+        // Show groups table
+        groupsList.innerHTML = '';
+
+        if (groups.length === 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `<td colspan="8" style="text-align: center; padding: 20px;">${escapeHtml(t('user_vo', 'No groups found.'))}</td>`;
+            groupsList.appendChild(row);
+            return;
+        }
+
+        sortedGroups.forEach(group => {
+            const row = document.createElement('tr');
+
+            // Apply row class based on status
+            if (group.deleted_in_vo) {
+                row.className = 'vo-group-deleted';
+            } else if (group.is_managed) {
+                row.className = 'vo-group-managed';
+            }
+
+            const checkbox = group.is_managed
+                ? '<span class="vo-text-muted">—</span>'
+                : `<input type="checkbox" class="vo-group-checkbox" data-vo-group-id="${escapeHtml(group.vo_group_id)}" />`;
+
+            const voMemberCount = group.vo_member_count !== null ? group.vo_member_count.toString() : '-';
+
+            // Build indented group name with visual indicator
+            const depth = group._depth || 0;
+
+            // Build indent using invisible spacers for exact alignment
+            let indent = '';
+            if (depth > 0) {
+                // For each parent level, add invisible spacer containing "└─ " to align with arrow tip
+                for (let i = 1; i < depth; i++) {
+                    indent += '<span style="visibility: hidden;">└─ </span>';
+                }
+            }
+
+            const treeIndicator = depth > 0 ? '└─ ' : '';
+
+            // Add expand/collapse icon for groups with children (after tree indicator)
+            let expandIcon = '';
+            if (group._hasChildren) {
+                // Arrow with one space after for separation
+                expandIcon = `<span class="vo-group-toggle" data-group-id="${escapeHtml(group.vo_group_id)}" style="cursor: pointer;">▶</span>&nbsp;`;
+            } else if (depth > 0) {
+                // For groups without children, add spacing to align with siblings that have arrows
+                expandIcon = '&nbsp;&nbsp;';
+            }
+
+            const groupNameWithIndent = indent + escapeHtml(treeIndicator) + expandIcon + escapeHtml(group.vo_group_name);
+
+            // Position index (e.g., "1", "2", "5.1", "5.2")
+            const positionIndex = group._positionIndex || '-';
+
+            // Add data attributes for parent-child relationship
+            row.setAttribute('data-group-id', group.vo_group_id);
+            row.setAttribute('data-parent-id', group.vo_parent_id || '0');
+            row.setAttribute('data-depth', depth.toString());
+
+            // Hide child rows initially (start collapsed)
+            if (depth > 0) {
+                row.style.display = 'none';
+            }
+
+            row.innerHTML = `
+                <td>${checkbox}</td>
+                <td>${escapeHtml(positionIndex)}</td>
+                <td style="white-space: pre-wrap;">${groupNameWithIndent}</td>
+                <td>${escapeHtml(group.nc_group_id)}</td>
+                <td>${renderGroupStatusBadge(group)}</td>
+                <td>${escapeHtml(voMemberCount)}</td>
+                <td>${escapeHtml(group.last_synced || '-')}</td>
+                <td>${renderGroupActions(group)}</td>
+            `;
+            groupsList.appendChild(row);
+        });
+
+        // Add click handlers for expand/collapse toggles
+        groupsList.querySelectorAll('.vo-group-toggle').forEach(toggle => {
+            toggle.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const groupId = this.getAttribute('data-group-id');
+                const parentRow = this.closest('tr');
+                const isExpanded = this.textContent === '▼';
+
+                // Toggle icon
+                this.textContent = isExpanded ? '▶' : '▼';
+
+                // Find all descendant rows recursively
+                function getDescendants(parentId) {
+                    const descendants = [];
+                    const directChildren = Array.from(groupsList.querySelectorAll(`tr[data-parent-id="${parentId}"]`));
+
+                    directChildren.forEach(childRow => {
+                        descendants.push(childRow);
+                        const childGroupId = childRow.getAttribute('data-group-id');
+                        // Recursively get children's descendants
+                        descendants.push(...getDescendants(childGroupId));
+                    });
+
+                    return descendants;
+                }
+
+                const descendantRows = getDescendants(groupId);
+
+                // Toggle visibility of all descendants
+                descendantRows.forEach(row => {
+                    if (isExpanded) {
+                        row.style.display = 'none';
+                    } else {
+                        // Only show direct children; nested collapsed groups stay collapsed
+                        const parentId = row.getAttribute('data-parent-id');
+                        const parentRow = groupsList.querySelector(`tr[data-group-id="${parentId}"]`);
+                        const parentToggle = parentRow ? parentRow.querySelector('.vo-group-toggle') : null;
+                        const parentIsExpanded = parentToggle ? parentToggle.textContent === '▼' : true;
+
+                        if (parentIsExpanded || parentId === groupId) {
+                            row.style.display = '';
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    // Load all VO groups
+    if (loadAllVOGroupsButton) {
+        loadAllVOGroupsButton.addEventListener('click', function() {
+            loadAllVOGroupsButton.disabled = true;
+            groupsStatus.textContent = t('user_vo', 'Loading groups from VO... (this may take a moment)');
+            groupsStatus.className = 'sync-status syncing';
+            groupsResults.style.display = 'none';
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/fetch-all-vo-groups'), {
+                method: 'GET',
+                headers: {
+                    'requesttoken': OC.requestToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadAllVOGroupsButton.disabled = false;
+
+                if (data.success) {
+                    groupsStatus.textContent = '';
+                    displayGroups(data.groups, 'all');
+                    groupsResults.style.display = 'block';
+                } else {
+                    groupsStatus.textContent = t('user_vo', 'Failed to load groups:') + ' ' + (data.error || 'Unknown error');
+                    groupsStatus.className = 'sync-status error';
+                }
+            })
+            .catch(error => {
+                loadAllVOGroupsButton.disabled = false;
+                groupsStatus.textContent = t('user_vo', 'Error:') + ' ' + error;
+                groupsStatus.className = 'sync-status error';
+            });
+        });
+    }
+
+    // Load managed groups
+    if (loadManagedGroupsButton) {
+        loadManagedGroupsButton.addEventListener('click', function() {
+            loadManagedGroupsButton.disabled = true;
+            groupsStatus.textContent = t('user_vo', 'Loading managed groups...');
+            groupsStatus.className = 'sync-status syncing';
+            groupsResults.style.display = 'none';
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/fetch-managed-groups'), {
+                method: 'GET',
+                headers: {
+                    'requesttoken': OC.requestToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadManagedGroupsButton.disabled = false;
+
+                if (data.success) {
+                    groupsStatus.textContent = '';
+                    displayGroups(data.groups, 'managed');
+                    groupsResults.style.display = 'block';
+                } else {
+                    groupsStatus.textContent = t('user_vo', 'Failed to load groups:') + ' ' + (data.error || 'Unknown error');
+                    groupsStatus.className = 'sync-status error';
+                }
+            })
+            .catch(error => {
+                loadManagedGroupsButton.disabled = false;
+                groupsStatus.textContent = t('user_vo', 'Error:') + ' ' + error;
+                groupsStatus.className = 'sync-status error';
+            });
+        });
+    }
+
+    // Select all checkbox
+    const selectAllGroupsCheckbox = document.getElementById('select-all-groups');
+    if (selectAllGroupsCheckbox) {
+        selectAllGroupsCheckbox.addEventListener('change', function() {
+            document.querySelectorAll('.vo-group-checkbox').forEach(checkbox => {
+                checkbox.checked = selectAllGroupsCheckbox.checked;
+            });
+        });
+    }
+
+    // Expand all groups button
+    const expandAllGroupsButton = document.getElementById('expand-all-groups');
+    if (expandAllGroupsButton) {
+        expandAllGroupsButton.addEventListener('click', function() {
+            // Show all rows
+            groupsList.querySelectorAll('tr').forEach(row => {
+                row.style.display = '';
+            });
+            // Change all toggle icons to expanded (▼)
+            groupsList.querySelectorAll('.vo-group-toggle').forEach(toggle => {
+                toggle.textContent = '▼';
+            });
+        });
+    }
+
+    // Collapse all groups button
+    const collapseAllGroupsButton = document.getElementById('collapse-all-groups');
+    if (collapseAllGroupsButton) {
+        collapseAllGroupsButton.addEventListener('click', function() {
+            // Hide all child rows (depth > 0)
+            groupsList.querySelectorAll('tr').forEach(row => {
+                const depth = parseInt(row.getAttribute('data-depth') || '0');
+                if (depth > 0) {
+                    row.style.display = 'none';
+                }
+            });
+            // Change all toggle icons to collapsed (▶)
+            groupsList.querySelectorAll('.vo-group-toggle').forEach(toggle => {
+                toggle.textContent = '▶';
+            });
+        });
+    }
 });

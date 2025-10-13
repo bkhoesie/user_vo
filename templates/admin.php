@@ -343,4 +343,46 @@ style('user_vo', 'admin');
             </div>
         </div>
     </div>
+
+    <!-- Group Management Section -->
+    <div class="user-sync-section">
+        <h3><?php p($l->t('Group Management')); ?></h3>
+
+        <div class="vo-notice">
+            <span class="icon icon-info"></span>
+            <?php p($l->t('Manage VereinOnline groups in Nextcloud. Create and synchronize groups from VO, preserving non-VO members.')); ?>
+        </div>
+
+        <h4><?php p($l->t('View Groups')); ?></h4>
+        <p><?php p($l->t('Load groups from VereinOnline or view groups that are already managed in Nextcloud.')); ?></p>
+        <p>
+            <button id="load-all-vo-groups" class="button"><?php p($l->t('Load All VO Groups')); ?></button>
+            <button id="load-managed-groups" class="button"><?php p($l->t('Load Managed Groups')); ?></button>
+            <span id="groups-status"></span>
+        </p>
+
+        <div id="groups-results" style="display:none; margin-top: 20px;">
+            <h4><?php p($l->t('Group List')); ?></h4>
+            <div id="groups-summary"></div>
+            <div style="margin-bottom: 10px;">
+                <button id="expand-all-groups" class="button"><?php p($l->t('Expand All')); ?></button>
+                <button id="collapse-all-groups" class="button"><?php p($l->t('Collapse All')); ?></button>
+            </div>
+            <table class="vo-groups-table">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="select-all-groups" /></th>
+                        <th><?php p($l->t('Pos')); ?></th>
+                        <th><?php p($l->t('VO Group Name')); ?></th>
+                        <th><?php p($l->t('NC Group Name')); ?></th>
+                        <th><?php p($l->t('Status')); ?></th>
+                        <th><?php p($l->t('VO Members')); ?></th>
+                        <th><?php p($l->t('Last Synced')); ?></th>
+                        <th><?php p($l->t('Actions')); ?></th>
+                    </tr>
+                </thead>
+                <tbody id="groups-list"></tbody>
+            </table>
+        </div>
+    </div>
 </div>

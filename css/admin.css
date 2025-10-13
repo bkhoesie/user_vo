@@ -1254,3 +1254,287 @@
     filter: invert(1) brightness(1.5);
     opacity: 0.9;
 }
+
+/* ========================================
+   Group Management Section
+   ======================================== */
+
+/* Tab navigation */
+.vo-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid #ddd;
+    margin: 20px 0 15px 0;
+}
+
+.vo-tab-button {
+    padding: 10px 20px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 14px;
+    color: #666;
+    transition: all 0.2s;
+}
+
+.vo-tab-button:hover {
+    color: #0082c9;
+    background: rgba(0, 130, 201, 0.05);
+}
+
+.vo-tab-button.active {
+    color: #0082c9;
+    border-bottom-color: #0082c9;
+    background: rgba(0, 130, 201, 0.08);
+}
+
+/* Tab content */
+.vo-tab-content {
+    display: none;
+    padding: 20px 0;
+}
+
+.vo-tab-content.active {
+    display: block;
+}
+
+/* Groups table */
+.vo-groups-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+    background: white;
+}
+
+.vo-groups-table th,
+.vo-groups-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.vo-groups-table th {
+    background-color: #f8f8f8;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+/* Group row highlighting */
+.vo-groups-table tr.vo-group-managed {
+    background: #f1f8f1;
+}
+
+.vo-groups-table tr.vo-group-deleted {
+    background: #fff3cd;
+}
+
+.vo-groups-table tr:hover {
+    background: #f5f5f5;
+}
+
+.vo-groups-table tr.vo-group-managed:hover {
+    background: #e6f4e6;
+}
+
+.vo-groups-table tr.vo-group-deleted:hover {
+    background: #ffe8a8;
+}
+
+/* Status badges for groups (extend existing badge styles) */
+.vo-badge-error {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffc107;
+}
+
+/* Group actions buttons */
+.vo-groups-table .button {
+    padding: 5px 10px;
+    font-size: 12px;
+    margin-right: 5px;
+}
+
+/* Summary box for groups */
+#all-vo-groups-summary,
+#managed-groups-summary {
+    background: #f8f8f8;
+    padding: 15px;
+    border-radius: 3px;
+    margin-bottom: 15px;
+}
+
+#all-vo-groups-summary strong,
+#managed-groups-summary strong {
+    color: #222;
+}
+
+#all-vo-groups-summary ul,
+#managed-groups-summary ul {
+    margin: 10px 0;
+    padding-left: 20px;
+}
+
+#all-vo-groups-summary li.error,
+#managed-groups-summary li.error {
+    color: #d73a49;
+    font-weight: 500;
+}
+
+/* Dark mode for group management */
+@media (prefers-color-scheme: dark) {
+    .vo-tabs {
+        border-bottom-color: #444b58;
+    }
+
+    .vo-tab-button {
+        color: #ccc;
+    }
+
+    .vo-tab-button:hover {
+        color: #4da3ff;
+        background: rgba(77, 163, 255, 0.1);
+    }
+
+    .vo-tab-button.active {
+        color: #4da3ff;
+        border-bottom-color: #4da3ff;
+        background: rgba(77, 163, 255, 0.15);
+    }
+
+    .vo-groups-table {
+        background: #23272f;
+    }
+
+    .vo-groups-table th {
+        background: #3d4451 !important;
+        border-bottom: 2px solid #555 !important;
+        color: #f5f5f5 !important;
+    }
+
+    .vo-groups-table td {
+        border-bottom-color: #444b58;
+        color: #e8e8e8 !important;
+    }
+
+    .vo-groups-table tr.vo-group-managed {
+        background: #1e3a2f;
+    }
+
+    .vo-groups-table tr.vo-group-deleted {
+        background: #3a331e;
+    }
+
+    .vo-groups-table tr:hover {
+        background: #2d323b;
+    }
+
+    .vo-groups-table tr.vo-group-managed:hover {
+        background: #254d3a;
+    }
+
+    .vo-groups-table tr.vo-group-deleted:hover {
+        background: #4a4026;
+    }
+
+    .vo-badge-error {
+        background-color: #4a4000;
+        color: #ffeb99;
+        border-color: #ffc107;
+    }
+
+    #all-vo-groups-summary,
+    #managed-groups-summary {
+        background: #2d323b;
+        color: #f3f3f3;
+        border: 1px solid #444b58;
+    }
+
+    #all-vo-groups-summary strong,
+    #managed-groups-summary strong {
+        color: #fff;
+    }
+
+    #all-vo-groups-summary li.error,
+    #managed-groups-summary li.error {
+        color: #f87171;
+    }
+}
+
+[data-theme-dark] .vo-tabs {
+    border-bottom-color: #444b58;
+}
+
+[data-theme-dark] .vo-tab-button {
+    color: #ccc;
+}
+
+[data-theme-dark] .vo-tab-button:hover {
+    color: #4da3ff;
+    background: rgba(77, 163, 255, 0.1);
+}
+
+[data-theme-dark] .vo-tab-button.active {
+    color: #4da3ff;
+    border-bottom-color: #4da3ff;
+    background: rgba(77, 163, 255, 0.15);
+}
+
+[data-theme-dark] .vo-groups-table {
+    background: #23272f;
+}
+
+[data-theme-dark] .vo-groups-table th {
+    background: #3d4451 !important;
+    border-bottom: 2px solid #555 !important;
+    color: #f5f5f5 !important;
+}
+
+[data-theme-dark] .vo-groups-table td {
+    border-bottom-color: #444b58;
+    color: #e8e8e8 !important;
+}
+
+[data-theme-dark] .vo-groups-table tr.vo-group-managed {
+    background: #1e3a2f;
+}
+
+[data-theme-dark] .vo-groups-table tr.vo-group-deleted {
+    background: #3a331e;
+}
+
+[data-theme-dark] .vo-groups-table tr:hover {
+    background: #2d323b;
+}
+
+[data-theme-dark] .vo-groups-table tr.vo-group-managed:hover {
+    background: #254d3a;
+}
+
+[data-theme-dark] .vo-groups-table tr.vo-group-deleted:hover {
+    background: #4a4026;
+}
+
+[data-theme-dark] .vo-badge-error {
+    background-color: #4a4000;
+    color: #ffeb99;
+    border-color: #ffc107;
+}
+
+[data-theme-dark] #all-vo-groups-summary,
+[data-theme-dark] #managed-groups-summary {
+    background: #2d323b;
+    color: #f3f3f3;
+    border: 1px solid #444b58;
+}
+
+[data-theme-dark] #all-vo-groups-summary strong,
+[data-theme-dark] #managed-groups-summary strong {
+    color: #fff;
+}
+
+[data-theme-dark] #all-vo-groups-summary li.error,
+[data-theme-dark] #managed-groups-summary li.error {
+    color: #f87171;
+}

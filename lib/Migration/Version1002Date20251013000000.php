@@ -82,6 +82,25 @@ class Version1002Date20251013000000 extends SimpleMigrationStep {
 				'comment' => 'Harmonized group name in Nextcloud'
 			]);
 
+			// Hierarchy and sorting
+			$table->addColumn('vo_parent_id', Types::STRING, [
+				'notnull' => false,
+				'length' => 64,
+				'comment' => 'Parent group ID in VereinOnline (0 or empty = root group)'
+			]);
+
+			$table->addColumn('vo_position', Types::INTEGER, [
+				'notnull' => false,
+				'unsigned' => true,
+				'comment' => 'Sort position within sibling groups in VereinOnline'
+			]);
+
+			$table->addColumn('vo_position_index', Types::STRING, [
+				'notnull' => false,
+				'length' => 64,
+				'comment' => 'Full hierarchical position index (e.g., "2", "2.5", "2.5.1") for sorting'
+			]);
+
 			// Deleted flag (set when group no longer exists in VO)
 			$table->addColumn('deleted_in_vo', Types::SMALLINT, [
 				'notnull' => true,
