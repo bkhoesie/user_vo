@@ -1153,6 +1153,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const groupsSummary = document.getElementById('groups-summary');
     const groupsList = document.getElementById('groups-list');
 
+    // Store expanded group IDs and current view type for state preservation
+    let expandedGroupIds = new Set();
+    let currentViewType = null; // 'all' or 'managed'
+
     // Helper function to render group status badge
     function renderGroupStatusBadge(group) {
         if (group.deleted_in_vo) {
@@ -1184,22 +1188,129 @@ document.addEventListener('DOMContentLoaded', function() {
                 </button>
             `;
         } else {
-            // Not created groups - show Create button
+            // Not created groups - show Create button (enabled for Step 5)
             return `
-                <button class="button create-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" disabled>
+                <button class="button create-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
                     ${escapeHtml(t('user_vo', 'Create'))}
                 </button>
             `;
         }
     }
 
+    // Helper function to create placeholder rows for missing parents in "managed" view
+    function addPlaceholdersForMissingParents(groups) {
+        const placeholders = [];
+        // Map of position index -> group (to check if a parent at that index exists)
+        const groupsByIndex = new Map();
+        groups.forEach(g => {
+            if (g.vo_position_index) {
+                groupsByIndex.set(g.vo_position_index, g);
+            }
+        });
+
+        // Track which placeholder indices we've already created
+        const placeholderIndices = new Set();
+
+        groups.forEach(group => {
+            const posIndex = group.vo_position_index || '';
+            const parts = posIndex.split('.');
+
+            // For groups with hierarchical indices (e.g., "13.2.3"), check if parents exist
+            if (parts.length > 1) {
+                // Build each parent level
+                for (let i = 1; i < parts.length; i++) {
+                    const parentIndexParts = parts.slice(0, i);
+                    const parentIndex = parentIndexParts.join('.');
+
+                    // Skip if a real group exists at this index
+                    if (groupsByIndex.has(parentIndex)) {
+                        continue;
+                    }
+
+                    // Skip if we already created a placeholder for this index
+                    if (placeholderIndices.has(parentIndex)) {
+                        continue;
+                    }
+
+                    // Determine this placeholder's parent
+                    const grandparentIndexParts = parentIndexParts.slice(0, -1);
+                    const grandparentIndex = grandparentIndexParts.join('.');
+
+                    // Check if grandparent exists (real or placeholder)
+                    let grandparentId;
+                    if (grandparentIndexParts.length === 0) {
+                        grandparentId = '0'; // Root
+                    } else if (groupsByIndex.has(grandparentIndex)) {
+                        grandparentId = groupsByIndex.get(grandparentIndex).vo_group_id;
+                    } else {
+                        grandparentId = 'placeholder_' + grandparentIndex.replace(/\./g, '_');
+                    }
+
+                    const parentId = 'placeholder_' + parentIndex.replace(/\./g, '_');
+
+                    placeholders.push({
+                        vo_group_id: parentId,
+                        vo_group_name: '',
+                        vo_parent_id: grandparentId,
+                        vo_position: parseInt(parentIndexParts[parentIndexParts.length - 1]) || 0,
+                        vo_position_index: parentIndex,
+                        nc_group_id: '',
+                        is_managed: false,
+                        _is_placeholder: true
+                    });
+
+                    placeholderIndices.add(parentIndex);
+                }
+            }
+        });
+
+        return placeholders;
+    }
+
     // Helper function to sort groups hierarchically by VO position and calculate depth
     function sortGroupsHierarchically(groups) {
+        // In "managed" view, add placeholders for missing parents
+        let workingGroups = [...groups];
+        if (currentViewType === 'managed') {
+            const placeholders = addPlaceholdersForMissingParents(groups);
+
+            // Update real groups to point to their immediate parent (placeholder or real)
+            // Build index map first (including placeholders)
+            const indexToId = new Map();
+            groups.forEach(g => {
+                if (g.vo_position_index) {
+                    indexToId.set(g.vo_position_index, g.vo_group_id);
+                }
+            });
+            placeholders.forEach(p => {
+                indexToId.set(p.vo_position_index, p.vo_group_id);
+            });
+
+            // Update parent_id for groups whose parent is a placeholder
+            workingGroups.forEach(group => {
+                const posIndex = group.vo_position_index || '';
+                const parts = posIndex.split('.');
+
+                if (parts.length > 1) {
+                    // Calculate parent index
+                    const parentIndexParts = parts.slice(0, -1);
+                    const parentIndex = parentIndexParts.join('.');
+
+                    // If parent exists (real or placeholder), update parent_id
+                    if (indexToId.has(parentIndex)) {
+                        group.vo_parent_id = indexToId.get(parentIndex);
+                    }
+                }
+            });
+
+            workingGroups = [...workingGroups, ...placeholders];
+        }
+
         // Build a map of groups by parent_id for efficient lookup
         const groupsByParent = {};
         const groupMap = {};
 
-        groups.forEach(group => {
+        workingGroups.forEach(group => {
             groupMap[group.vo_group_id] = group;
             const parentId = group.vo_parent_id || '0';
             if (!groupsByParent[parentId]) {
@@ -1267,8 +1378,20 @@ document.addEventListener('DOMContentLoaded', function() {
         const deletedCount = groups.filter(g => g.deleted_in_vo).length;
         const totalCount = groups.length;
 
+        // Track current view type for state handling
+        currentViewType = viewType;
+
         // Sort groups hierarchically using VO's defined sort order
         const sortedGroups = sortGroupsHierarchically(groups);
+
+        // In "managed" view, initialize all groups as expanded since we show all by default
+        if (viewType === 'managed') {
+            sortedGroups.forEach(group => {
+                if (group._hasChildren) {
+                    expandedGroupIds.add(group.vo_group_id);
+                }
+            });
+        }
 
         // Show summary
         let summaryHTML = '';
@@ -1305,18 +1428,24 @@ document.addEventListener('DOMContentLoaded', function() {
         sortedGroups.forEach(group => {
             const row = document.createElement('tr');
 
+            // Check if this is a placeholder for a missing parent
+            const isPlaceholder = group._is_placeholder === true;
+
             // Apply row class based on status
-            if (group.deleted_in_vo) {
+            if (isPlaceholder) {
+                row.className = 'vo-group-placeholder';
+                row.style.opacity = '0.5'; // Dim placeholder rows
+            } else if (group.deleted_in_vo) {
                 row.className = 'vo-group-deleted';
             } else if (group.is_managed) {
                 row.className = 'vo-group-managed';
             }
 
-            const checkbox = group.is_managed
+            const checkbox = (isPlaceholder || !group.is_managed)
                 ? '<span class="vo-text-muted">—</span>'
                 : `<input type="checkbox" class="vo-group-checkbox" data-vo-group-id="${escapeHtml(group.vo_group_id)}" />`;
 
-            const voMemberCount = group.vo_member_count !== null ? group.vo_member_count.toString() : '-';
+            const voMemberCount = (isPlaceholder || group.vo_member_count === null) ? '-' : group.vo_member_count.toString();
 
             // Build indented group name with visual indicator
             const depth = group._depth || 0;
@@ -1333,16 +1462,23 @@ document.addEventListener('DOMContentLoaded', function() {
             const treeIndicator = depth > 0 ? '└─ ' : '';
 
             // Add expand/collapse icon for groups with children (after tree indicator)
+            // Check if this group should be expanded based on stored state
+            const isExpanded = expandedGroupIds.has(group.vo_group_id);
             let expandIcon = '';
             if (group._hasChildren) {
-                // Arrow with one space after for separation
-                expandIcon = `<span class="vo-group-toggle" data-group-id="${escapeHtml(group.vo_group_id)}" style="cursor: pointer;">▶</span>&nbsp;`;
+                // Arrow with one space after for separation - use stored state for initial icon
+                const arrowIcon = isExpanded ? '▼' : '▶';
+                expandIcon = `<span class="vo-group-toggle" data-group-id="${escapeHtml(group.vo_group_id)}" style="cursor: pointer;">${arrowIcon}</span>&nbsp;`;
             } else if (depth > 0) {
                 // For groups without children, add spacing to align with siblings that have arrows
                 expandIcon = '&nbsp;&nbsp;';
             }
 
-            const groupNameWithIndent = indent + escapeHtml(treeIndicator) + expandIcon + escapeHtml(group.vo_group_name);
+            // For placeholders, show tree structure but no name
+            const groupNameDisplay = isPlaceholder
+                ? '<span class="vo-text-muted" style="font-style: italic;">(parent not managed)</span>'
+                : escapeHtml(group.vo_group_name);
+            const groupNameWithIndent = indent + escapeHtml(treeIndicator) + expandIcon + groupNameDisplay;
 
             // Position index (e.g., "1", "2", "5.1", "5.2")
             const positionIndex = group._positionIndex || '-';
@@ -1352,21 +1488,38 @@ document.addEventListener('DOMContentLoaded', function() {
             row.setAttribute('data-parent-id', group.vo_parent_id || '0');
             row.setAttribute('data-depth', depth.toString());
 
-            // Hide child rows initially (start collapsed)
+            // Hide child rows if parent is not expanded
             if (depth > 0) {
-                row.style.display = 'none';
+                const parentId = group.vo_parent_id || '0';
+                if (!expandedGroupIds.has(parentId)) {
+                    row.style.display = 'none';
+                }
             }
 
-            row.innerHTML = `
-                <td>${checkbox}</td>
-                <td>${escapeHtml(positionIndex)}</td>
-                <td style="white-space: pre-wrap;">${groupNameWithIndent}</td>
-                <td>${escapeHtml(group.nc_group_id)}</td>
-                <td>${renderGroupStatusBadge(group)}</td>
-                <td>${escapeHtml(voMemberCount)}</td>
-                <td>${escapeHtml(group.last_synced || '-')}</td>
-                <td>${renderGroupActions(group)}</td>
-            `;
+            // Render placeholder rows with minimal data
+            if (isPlaceholder) {
+                row.innerHTML = `
+                    <td>${checkbox}</td>
+                    <td>${escapeHtml(positionIndex)}</td>
+                    <td style="white-space: pre-wrap;">${groupNameWithIndent}</td>
+                    <td><span class="vo-text-muted">—</span></td>
+                    <td><span class="vo-text-muted">—</span></td>
+                    <td><span class="vo-text-muted">—</span></td>
+                    <td><span class="vo-text-muted">—</span></td>
+                    <td><span class="vo-text-muted">—</span></td>
+                `;
+            } else {
+                row.innerHTML = `
+                    <td>${checkbox}</td>
+                    <td>${escapeHtml(positionIndex)}</td>
+                    <td style="white-space: pre-wrap;">${groupNameWithIndent}</td>
+                    <td>${escapeHtml(group.nc_group_id)}</td>
+                    <td>${renderGroupStatusBadge(group)}</td>
+                    <td>${escapeHtml(voMemberCount)}</td>
+                    <td>${escapeHtml(group.last_synced || '-')}</td>
+                    <td>${renderGroupActions(group)}</td>
+                `;
+            }
             groupsList.appendChild(row);
         });
 
@@ -1378,8 +1531,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const parentRow = this.closest('tr');
                 const isExpanded = this.textContent === '▼';
 
-                // Toggle icon
-                this.textContent = isExpanded ? '▶' : '▼';
+                // Toggle icon and update state
+                if (isExpanded) {
+                    this.textContent = '▶';
+                    expandedGroupIds.delete(groupId);
+                } else {
+                    this.textContent = '▼';
+                    expandedGroupIds.add(groupId);
+                }
 
                 // Find all descendant rows recursively
                 function getDescendants(parentId) {
@@ -1506,9 +1665,11 @@ document.addEventListener('DOMContentLoaded', function() {
             groupsList.querySelectorAll('tr').forEach(row => {
                 row.style.display = '';
             });
-            // Change all toggle icons to expanded (▼)
+            // Change all toggle icons to expanded (▼) and update state
             groupsList.querySelectorAll('.vo-group-toggle').forEach(toggle => {
                 toggle.textContent = '▼';
+                const groupId = toggle.getAttribute('data-group-id');
+                expandedGroupIds.add(groupId);
             });
         });
     }
@@ -1524,10 +1685,74 @@ document.addEventListener('DOMContentLoaded', function() {
                     row.style.display = 'none';
                 }
             });
-            // Change all toggle icons to collapsed (▶)
+            // Change all toggle icons to collapsed (▶) and clear state
             groupsList.querySelectorAll('.vo-group-toggle').forEach(toggle => {
                 toggle.textContent = '▶';
             });
+            expandedGroupIds.clear();
         });
     }
+
+    // Create single group (event delegation for dynamically created buttons)
+    document.addEventListener('click', function(e) {
+        if (e.target && e.target.classList.contains('create-group-btn')) {
+            const voGroupId = e.target.getAttribute('data-vo-group-id');
+            const button = e.target;
+            const originalText = button.textContent;
+
+            // Find the group data to get parent chain
+            const row = button.closest('tr');
+            const parentId = row ? row.getAttribute('data-parent-id') : null;
+
+            button.disabled = true;
+            button.textContent = t('user_vo', 'Creating...');
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/create-group'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                },
+                body: JSON.stringify({ vo_group_id: voGroupId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    OC.Notification.showTemporary(
+                        t('user_vo', "Group '{name}' created successfully", { name: data.nc_group_id })
+                    );
+
+                    // Expand parent chain so newly created group is visible
+                    if (parentId && parentId !== '0') {
+                        // Build parent chain by walking up
+                        let currentParentId = parentId;
+                        while (currentParentId && currentParentId !== '0') {
+                            expandedGroupIds.add(currentParentId);
+                            // Find parent's parent
+                            const parentRow = groupsList.querySelector(`tr[data-group-id="${currentParentId}"]`);
+                            currentParentId = parentRow ? parentRow.getAttribute('data-parent-id') : null;
+                        }
+                    }
+
+                    // Refresh the appropriate view
+                    if (loadAllVOGroupsButton && !loadAllVOGroupsButton.disabled) {
+                        // We're in "All VO Groups" view - refresh it
+                        loadAllVOGroupsButton.click();
+                    } else if (loadManagedGroupsButton && !loadManagedGroupsButton.disabled) {
+                        // We're in "Load managed groups" view - refresh it
+                        loadManagedGroupsButton.click();
+                    }
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + data.error, { type: 'error' });
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }
+            })
+            .catch(error => {
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
+                button.disabled = false;
+                button.textContent = originalText;
+            });
+        }
+    });
 });

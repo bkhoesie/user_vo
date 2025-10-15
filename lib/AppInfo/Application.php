@@ -10,6 +10,8 @@ use OCP\AppFramework\Bootstrap\IBootstrap;
 use OCP\AppFramework\Bootstrap\IRegistrationContext;
 use OCA\UserVO\Controller\AdminController;
 use OCA\UserVO\UserVOAuth;
+use OCA\UserVO\Listener\GroupDeletedListener;
+use OCP\Group\Events\GroupDeletedEvent;
 use OCP\IConfig;
 
 class Application extends App implements IBootstrap {
@@ -18,6 +20,8 @@ class Application extends App implements IBootstrap {
     }
 
     public function register(IRegistrationContext $context): void {
+        // Register event listener for group deletion
+        $context->registerEventListener(GroupDeletedEvent::class, GroupDeletedListener::class);
     }
 
     public function boot(IBootContext $context): void {
