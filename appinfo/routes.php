@@ -24,5 +24,6 @@ return [
         ['name' => 'admin#fetchAllVOGroups', 'url' => '/admin/fetch-all-vo-groups', 'verb' => 'GET'],
         ['name' => 'admin#fetchManagedGroups', 'url' => '/admin/fetch-managed-groups', 'verb' => 'GET'],
         ['name' => 'admin#createGroup', 'url' => '/admin/create-group', 'verb' => 'POST'],
+        ['name' => 'admin#deleteGroup', 'url' => '/admin/delete-group', 'verb' => 'POST'],
     ]
 ]; 

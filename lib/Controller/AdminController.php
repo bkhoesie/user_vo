@@ -2046,4 +2046,80 @@ class AdminController extends Controller {
         return $chain;
     }
 
+    /**
+     * Delete a single managed group
+     *
+     * @return JSONResponse
+     */
+    public function deleteGroup() {
+        try {
+            $voGroupId = $this->request->getParam('vo_group_id', '');
+
+            if (empty($voGroupId)) {
+                return new JSONResponse([
+                    'success' => false,
+                    'error' => 'VO group ID is required'
+                ], 400);
+            }
+
+            // Get group info from database
+            $qb = $this->connection->getQueryBuilder();
+            $qb->select('nc_group_id', 'vo_group_name')
+                ->from('user_vo_groups')
+                ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
+            $result = $qb->executeQuery();
+            $groupRow = $result->fetch();
+            $result->closeCursor();
+
+            if (!$groupRow) {
+                return new JSONResponse([
+                    'success' => false,
+                    'error' => 'Group is not managed'
+                ], 404);
+            }
+
+            $ncGroupId = $groupRow['nc_group_id'];
+            $voGroupName = $groupRow['vo_group_name'];
+
+            // Delete the NC group (if it exists)
+            if ($this->groupManager->groupExists($ncGroupId)) {
+                $ncGroup = $this->groupManager->get($ncGroupId);
+                if ($ncGroup) {
+                    $ncGroup->delete();
+                    $this->logger->info("Deleted NC group", [
+                        'app' => 'user_vo',
+                        'nc_group_id' => $ncGroupId,
+                        'vo_group_id' => $voGroupId
+                    ]);
+                }
+            }
+
+            // Remove from tracking table (GroupDeletedListener will handle this,
+            // but we do it explicitly here in case the event doesn't fire)
+            $deleteQb = $this->connection->getQueryBuilder();
+            $deleteQb->delete('user_vo_groups')
+                ->where($deleteQb->expr()->eq('vo_group_id', $deleteQb->createNamedParameter($voGroupId)));
+            $deleteQb->executeStatement();
+
+            return new JSONResponse([
+                'success' => true,
+                'message' => "Group deleted successfully",
+                'nc_group_id' => $ncGroupId,
+                'vo_group_id' => $voGroupId
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to delete group', [
+                'app' => 'user_vo',
+                'vo_group_id' => $voGroupId ?? 'unknown',
+                'error' => $e->getMessage()
+            ]);
+
+            return new JSONResponse([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 }

@@ -1153,8 +1153,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const groupsSummary = document.getElementById('groups-summary');
     const groupsList = document.getElementById('groups-list');
 
-    // Store expanded group IDs and current view type for state preservation
-    let expandedGroupIds = new Set();
+    // Store expanded group position indices and current view type for state preservation
+    // Using position index instead of group ID allows expansion state to work for placeholder parents
+    let expandedGroupIndices = new Set();
     let currentViewType = null; // 'all' or 'managed'
 
     // Helper function to render group status badge
@@ -1178,12 +1179,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (group.is_managed) {
-            // Managed groups - show Sync and Delete buttons
+            // Managed groups - show Sync and Delete buttons (Sync disabled for now, Delete enabled for Step 6)
             return `
                 <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" disabled>
                     ${escapeHtml(t('user_vo', 'Sync'))}
                 </button>
-                <button class="button delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" disabled>
+                <button class="button delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}">
                     ${escapeHtml(t('user_vo', 'Delete'))}
                 </button>
             `;
@@ -1384,11 +1385,12 @@ document.addEventListener('DOMContentLoaded', function() {
         // Sort groups hierarchically using VO's defined sort order
         const sortedGroups = sortGroupsHierarchically(groups);
 
-        // In "managed" view, initialize all groups as expanded since we show all by default
-        if (viewType === 'managed') {
+        // In "managed" view, initialize all groups as expanded on first load only
+        // (when expandedGroupIndices is empty, indicating first time showing this view)
+        if (viewType === 'managed' && expandedGroupIndices.size === 0) {
             sortedGroups.forEach(group => {
                 if (group._hasChildren) {
-                    expandedGroupIds.add(group.vo_group_id);
+                    expandedGroupIndices.add(group._positionIndex);
                 }
             });
         }
@@ -1462,13 +1464,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const treeIndicator = depth > 0 ? '└─ ' : '';
 
             // Add expand/collapse icon for groups with children (after tree indicator)
-            // Check if this group should be expanded based on stored state
-            const isExpanded = expandedGroupIds.has(group.vo_group_id);
+            // Check if this group should be expanded based on stored state (using position index)
+            const isExpanded = expandedGroupIndices.has(group._positionIndex);
             let expandIcon = '';
             if (group._hasChildren) {
                 // Arrow with one space after for separation - use stored state for initial icon
                 const arrowIcon = isExpanded ? '▼' : '▶';
-                expandIcon = `<span class="vo-group-toggle" data-group-id="${escapeHtml(group.vo_group_id)}" style="cursor: pointer;">${arrowIcon}</span>&nbsp;`;
+                expandIcon = `<span class="vo-group-toggle" data-position-index="${escapeHtml(group._positionIndex)}" style="cursor: pointer;">${arrowIcon}</span>&nbsp;`;
             } else if (depth > 0) {
                 // For groups without children, add spacing to align with siblings that have arrows
                 expandIcon = '&nbsp;&nbsp;';
@@ -1483,15 +1485,25 @@ document.addEventListener('DOMContentLoaded', function() {
             // Position index (e.g., "1", "2", "5.1", "5.2")
             const positionIndex = group._positionIndex || '-';
 
-            // Add data attributes for parent-child relationship
+            // Add data attributes for parent-child relationship (using position index for expansion tracking)
             row.setAttribute('data-group-id', group.vo_group_id);
             row.setAttribute('data-parent-id', group.vo_parent_id || '0');
+            row.setAttribute('data-position-index', group._positionIndex);
             row.setAttribute('data-depth', depth.toString());
 
-            // Hide child rows if parent is not expanded
+            // Hide child rows if ANY ancestor is not expanded (check entire ancestor chain)
             if (depth > 0) {
-                const parentId = group.vo_parent_id || '0';
-                if (!expandedGroupIds.has(parentId)) {
+                const parts = group._positionIndex.split('.');
+                // Check all ancestor levels from root down to immediate parent
+                let shouldHide = false;
+                for (let i = 1; i < parts.length; i++) {
+                    const ancestorIndex = parts.slice(0, i).join('.');
+                    if (!expandedGroupIndices.has(ancestorIndex)) {
+                        shouldHide = true;
+                        break;
+                    }
+                }
+                if (shouldHide) {
                     row.style.display = 'none';
                 }
             }
@@ -1527,20 +1539,21 @@ document.addEventListener('DOMContentLoaded', function() {
         groupsList.querySelectorAll('.vo-group-toggle').forEach(toggle => {
             toggle.addEventListener('click', function(e) {
                 e.stopPropagation();
-                const groupId = this.getAttribute('data-group-id');
+                const positionIndex = this.getAttribute('data-position-index');
                 const parentRow = this.closest('tr');
+                const groupId = parentRow.getAttribute('data-group-id');
                 const isExpanded = this.textContent === '▼';
 
-                // Toggle icon and update state
+                // Toggle icon and update state (using position index)
                 if (isExpanded) {
                     this.textContent = '▶';
-                    expandedGroupIds.delete(groupId);
+                    expandedGroupIndices.delete(positionIndex);
                 } else {
                     this.textContent = '▼';
-                    expandedGroupIds.add(groupId);
+                    expandedGroupIndices.add(positionIndex);
                 }
 
-                // Find all descendant rows recursively
+                // Find all descendant rows recursively (still using group ID for DOM traversal)
                 function getDescendants(parentId) {
                     const descendants = [];
                     const directChildren = Array.from(groupsList.querySelectorAll(`tr[data-parent-id="${parentId}"]`));
@@ -1668,8 +1681,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // Change all toggle icons to expanded (▼) and update state
             groupsList.querySelectorAll('.vo-group-toggle').forEach(toggle => {
                 toggle.textContent = '▼';
-                const groupId = toggle.getAttribute('data-group-id');
-                expandedGroupIds.add(groupId);
+                const positionIndex = toggle.getAttribute('data-position-index');
+                expandedGroupIndices.add(positionIndex);
             });
         });
     }
@@ -1689,7 +1702,7 @@ document.addEventListener('DOMContentLoaded', function() {
             groupsList.querySelectorAll('.vo-group-toggle').forEach(toggle => {
                 toggle.textContent = '▶';
             });
-            expandedGroupIds.clear();
+            expandedGroupIndices.clear();
         });
     }
 
@@ -1700,9 +1713,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const button = e.target;
             const originalText = button.textContent;
 
-            // Find the group data to get parent chain
+            // Find the group data to get parent chain (using position index)
             const row = button.closest('tr');
-            const parentId = row ? row.getAttribute('data-parent-id') : null;
+            const positionIndex = row ? row.getAttribute('data-position-index') : null;
 
             button.disabled = true;
             button.textContent = t('user_vo', 'Creating...');
@@ -1722,24 +1735,71 @@ document.addEventListener('DOMContentLoaded', function() {
                         t('user_vo', "Group '{name}' created successfully", { name: data.nc_group_id })
                     );
 
-                    // Expand parent chain so newly created group is visible
-                    if (parentId && parentId !== '0') {
-                        // Build parent chain by walking up
-                        let currentParentId = parentId;
-                        while (currentParentId && currentParentId !== '0') {
-                            expandedGroupIds.add(currentParentId);
-                            // Find parent's parent
-                            const parentRow = groupsList.querySelector(`tr[data-group-id="${currentParentId}"]`);
-                            currentParentId = parentRow ? parentRow.getAttribute('data-parent-id') : null;
+                    // Expand parent chain so newly created group is visible (using position indices)
+                    if (positionIndex) {
+                        const parts = positionIndex.split('.');
+                        // Add all parent position indices to expanded set
+                        for (let i = 1; i < parts.length; i++) {
+                            const parentPositionIndex = parts.slice(0, i).join('.');
+                            expandedGroupIndices.add(parentPositionIndex);
                         }
                     }
 
-                    // Refresh the appropriate view
-                    if (loadAllVOGroupsButton && !loadAllVOGroupsButton.disabled) {
-                        // We're in "All VO Groups" view - refresh it
+                    // Refresh the current view while preserving state
+                    if (currentViewType === 'all') {
                         loadAllVOGroupsButton.click();
-                    } else if (loadManagedGroupsButton && !loadManagedGroupsButton.disabled) {
-                        // We're in "Load managed groups" view - refresh it
+                    } else if (currentViewType === 'managed') {
+                        loadManagedGroupsButton.click();
+                    }
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + data.error, { type: 'error' });
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }
+            })
+            .catch(error => {
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
+                button.disabled = false;
+                button.textContent = originalText;
+            });
+        }
+    });
+
+    // Delete single group (event delegation for dynamically created buttons)
+    document.addEventListener('click', function(e) {
+        if (e.target && e.target.classList.contains('delete-group-btn')) {
+            const voGroupId = e.target.getAttribute('data-vo-group-id');
+            const ncGroupId = e.target.getAttribute('data-nc-group-id');
+            const button = e.target;
+
+            // Confirm deletion
+            if (!confirm(t('user_vo', "Are you sure you want to delete group '{name}'?", { name: ncGroupId }))) {
+                return;
+            }
+
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = t('user_vo', 'Deleting...');
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/delete-group'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                },
+                body: JSON.stringify({ vo_group_id: voGroupId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    OC.Notification.showTemporary(
+                        t('user_vo', "Group '{name}' deleted successfully", { name: data.nc_group_id })
+                    );
+
+                    // Refresh the current view while preserving state
+                    if (currentViewType === 'all') {
+                        loadAllVOGroupsButton.click();
+                    } else if (currentViewType === 'managed') {
                         loadManagedGroupsButton.click();
                     }
                 } else {
