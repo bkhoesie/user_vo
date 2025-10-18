@@ -1382,6 +1382,20 @@ document.addEventListener('DOMContentLoaded', function() {
         // Track current view type for state handling
         currentViewType = viewType;
 
+        // Enable/disable bulk buttons based on view
+        const bulkCreateButton = document.getElementById('bulk-create-groups');
+        const bulkDeleteButton = document.getElementById('bulk-delete-groups');
+
+        if (viewType === 'all') {
+            // In "All VO Groups" view: enable create, enable delete
+            if (bulkCreateButton) bulkCreateButton.disabled = false;
+            if (bulkDeleteButton) bulkDeleteButton.disabled = false;
+        } else if (viewType === 'managed') {
+            // In "Managed Groups" view: disable create (no unmanaged groups), enable delete
+            if (bulkCreateButton) bulkCreateButton.disabled = true;
+            if (bulkDeleteButton) bulkDeleteButton.disabled = false;
+        }
+
         // Sort groups hierarchically using VO's defined sort order
         const sortedGroups = sortGroupsHierarchically(groups);
 
@@ -1443,9 +1457,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 row.className = 'vo-group-managed';
             }
 
-            const checkbox = (isPlaceholder || !group.is_managed)
+            // Show checkbox for all real groups (both managed and unmanaged), but not for placeholders or deleted groups
+            const checkbox = (isPlaceholder || group.deleted_in_vo)
                 ? '<span class="vo-text-muted">—</span>'
-                : `<input type="checkbox" class="vo-group-checkbox" data-vo-group-id="${escapeHtml(group.vo_group_id)}" />`;
+                : `<input type="checkbox" class="vo-group-checkbox" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-is-managed="${group.is_managed ? 'true' : 'false'}" />`;
 
             const voMemberCount = (isPlaceholder || group.vo_member_count === null) ? '-' : group.vo_member_count.toString();
 
@@ -1815,4 +1830,178 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
     });
+
+    // Bulk create groups
+    const bulkCreateGroupsButton = document.getElementById('bulk-create-groups');
+    if (bulkCreateGroupsButton) {
+        bulkCreateGroupsButton.addEventListener('click', function() {
+            // Filter for unmanaged groups only (those that can be created)
+            const unmanagedGroupIds = [];
+            let skippedCount = 0;
+
+            document.querySelectorAll('.vo-group-checkbox:checked').forEach(checkbox => {
+                const voGroupId = checkbox.getAttribute('data-vo-group-id');
+                const isManaged = checkbox.getAttribute('data-is-managed') === 'true';
+
+                if (!isManaged) {
+                    unmanagedGroupIds.push(voGroupId);
+                } else {
+                    skippedCount++;
+                }
+            });
+
+            if (unmanagedGroupIds.length === 0) {
+                if (skippedCount > 0) {
+                    OC.Notification.showTemporary(t('user_vo', 'All selected groups are already created'), { type: 'error' });
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Please select at least one group'), { type: 'error' });
+                }
+                return;
+            }
+
+            // Show detailed confirmation
+            let confirmMsg = t('user_vo', 'Create {count} group(s)?', { count: unmanagedGroupIds.length });
+            if (skippedCount > 0) {
+                confirmMsg += '\n' + t('user_vo', '({skipped} already created will be skipped)', { skipped: skippedCount });
+            }
+
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+
+            const bulkGroupsStatus = document.getElementById('bulk-groups-status');
+            bulkCreateGroupsButton.disabled = true;
+            bulkGroupsStatus.textContent = t('user_vo', 'Creating groups...');
+            bulkGroupsStatus.className = 'sync-status';
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/bulk-create-groups'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                },
+                body: JSON.stringify({ vo_group_ids: unmanagedGroupIds })
+            })
+            .then(response => response.json())
+            .then(data => {
+                bulkCreateGroupsButton.disabled = false;
+
+                if (data.success) {
+                    const summary = data.summary;
+                    const message = t('user_vo', 'Created: {created}, Skipped: {skipped}, Errors: {errors}', {
+                        created: summary.created,
+                        skipped: summary.skipped,
+                        errors: summary.errors
+                    });
+                    bulkGroupsStatus.textContent = message;
+                    bulkGroupsStatus.className = 'sync-status success';
+                    OC.Notification.showTemporary(t('user_vo', 'Bulk group creation completed'));
+
+                    // Refresh the current view
+                    setTimeout(() => {
+                        if (currentViewType === 'all') {
+                            loadAllVOGroupsButton.click();
+                        } else if (currentViewType === 'managed') {
+                            loadManagedGroupsButton.click();
+                        }
+                    }, 1000);
+                } else {
+                    bulkGroupsStatus.textContent = t('user_vo', 'Error:') + ' ' + (data.error || 'Unknown error');
+                    bulkGroupsStatus.className = 'sync-status error';
+                }
+            })
+            .catch(error => {
+                bulkCreateGroupsButton.disabled = false;
+                bulkGroupsStatus.textContent = t('user_vo', 'Error:') + ' ' + error;
+                bulkGroupsStatus.className = 'sync-status error';
+            });
+        });
+    }
+
+    // Bulk delete groups
+    const bulkDeleteGroupsButton = document.getElementById('bulk-delete-groups');
+    if (bulkDeleteGroupsButton) {
+        bulkDeleteGroupsButton.addEventListener('click', function() {
+            // Filter for managed groups only (those that can be deleted)
+            const managedGroupIds = [];
+            let skippedCount = 0;
+
+            document.querySelectorAll('.vo-group-checkbox:checked').forEach(checkbox => {
+                const voGroupId = checkbox.getAttribute('data-vo-group-id');
+                const isManaged = checkbox.getAttribute('data-is-managed') === 'true';
+
+                if (isManaged) {
+                    managedGroupIds.push(voGroupId);
+                } else {
+                    skippedCount++;
+                }
+            });
+
+            if (managedGroupIds.length === 0) {
+                if (skippedCount > 0) {
+                    OC.Notification.showTemporary(t('user_vo', 'Selected groups are not created yet'), { type: 'error' });
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Please select at least one group'), { type: 'error' });
+                }
+                return;
+            }
+
+            // Show detailed confirmation
+            let confirmMsg = t('user_vo', 'Delete {count} group(s)? This will remove them from Nextcloud.', { count: managedGroupIds.length });
+            if (skippedCount > 0) {
+                confirmMsg += '\n' + t('user_vo', '({skipped} not created will be skipped)', { skipped: skippedCount });
+            }
+
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+
+            const bulkGroupsStatus = document.getElementById('bulk-groups-status');
+            bulkDeleteGroupsButton.disabled = true;
+            bulkGroupsStatus.textContent = t('user_vo', 'Deleting groups...');
+            bulkGroupsStatus.className = 'sync-status';
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/bulk-delete-groups'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                },
+                body: JSON.stringify({ vo_group_ids: managedGroupIds })
+            })
+            .then(response => response.json())
+            .then(data => {
+                bulkDeleteGroupsButton.disabled = false;
+
+                if (data.success) {
+                    const summary = data.summary;
+                    const message = t('user_vo', 'Deleted: {deleted}, Not found: {not_found}, Errors: {errors}', {
+                        deleted: summary.deleted,
+                        not_found: summary.not_found,
+                        errors: summary.errors
+                    });
+                    bulkGroupsStatus.textContent = message;
+                    bulkGroupsStatus.className = 'sync-status success';
+                    OC.Notification.showTemporary(t('user_vo', 'Bulk group deletion completed'));
+
+                    // Refresh the current view
+                    setTimeout(() => {
+                        if (currentViewType === 'all') {
+                            loadAllVOGroupsButton.click();
+                        } else if (currentViewType === 'managed') {
+                            loadManagedGroupsButton.click();
+                        }
+                    }, 1000);
+                } else {
+                    bulkGroupsStatus.textContent = t('user_vo', 'Error:') + ' ' + (data.error || 'Unknown error');
+                    bulkGroupsStatus.className = 'sync-status error';
+                }
+            })
+            .catch(error => {
+                bulkDeleteGroupsButton.disabled = false;
+                bulkGroupsStatus.textContent = t('user_vo', 'Error:') + ' ' + error;
+                bulkGroupsStatus.className = 'sync-status error';
+            });
+        });
+    }
 });

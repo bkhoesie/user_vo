@@ -2122,4 +2122,267 @@ class AdminController extends Controller {
         }
     }
 
+    /**
+     * Bulk create groups from VereinOnline
+     *
+     * @return JSONResponse
+     */
+    public function bulkCreateGroups() {
+        try {
+            $voGroupIds = $this->request->getParam('vo_group_ids', []);
+
+            if (empty($voGroupIds) || !is_array($voGroupIds)) {
+                return new JSONResponse([
+                    'success' => false,
+                    'error' => 'No group IDs provided'
+                ], 400);
+            }
+
+            $results = [
+                'created' => [],
+                'skipped' => [],
+                'errors' => []
+            ];
+
+            // Get UserVOAuth instance to access API methods
+            $configuration = $this->configService->loadConfiguration(maskPassword: false);
+            $backend = new UserVOAuth(
+                $configuration['api_url'],
+                $configuration['api_username'],
+                $configuration['api_password']
+            );
+
+            // Fetch all groups once for efficiency
+            $allGroups = $backend->fetchAllGroups();
+
+            if (!$allGroups) {
+                return new JSONResponse([
+                    'success' => false,
+                    'error' => 'Failed to fetch groups from VereinOnline'
+                ], 500);
+            }
+
+            // Build a map for quick lookup
+            $groupMap = [];
+            foreach ($allGroups as $group) {
+                if (isset($group['id'])) {
+                    $groupMap[$group['id']] = $group;
+                }
+            }
+
+            foreach ($voGroupIds as $voGroupId) {
+                try {
+                    // Check if already managed
+                    $qb = $this->connection->getQueryBuilder();
+                    $qb->select('vo_group_id')
+                        ->from('user_vo_groups')
+                        ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
+                    $result = $qb->executeQuery();
+                    $existing = $result->fetch();
+                    $result->closeCursor();
+
+                    if ($existing) {
+                        $results['skipped'][] = [
+                            'vo_group_id' => $voGroupId,
+                            'reason' => 'Already managed'
+                        ];
+                        continue;
+                    }
+
+                    // Find the specific group
+                    if (!isset($groupMap[$voGroupId])) {
+                        $results['errors'][] = [
+                            'vo_group_id' => $voGroupId,
+                            'error' => 'Group not found in VereinOnline'
+                        ];
+                        continue;
+                    }
+
+                    $groupData = $groupMap[$voGroupId];
+                    $voGroupName = $groupData['name'] ?? '';
+                    $voParentId = $groupData['parentid'] ?? null;
+                    $voPosition = isset($groupData['pos']) ? (int)$groupData['pos'] : null;
+
+                    // Harmonize the group name
+                    $harmonizer = new \OCA\UserVO\Service\GroupNameHarmonizer();
+                    $ncGroupId = $harmonizer->harmonize($voGroupName);
+
+                    // Check if NC group already exists
+                    if (!$this->groupManager->groupExists($ncGroupId)) {
+                        // Create the NC group
+                        $ncGroup = $this->groupManager->createGroup($ncGroupId);
+                        if (!$ncGroup) {
+                            $results['errors'][] = [
+                                'vo_group_id' => $voGroupId,
+                                'error' => 'Failed to create Nextcloud group'
+                            ];
+                            continue;
+                        }
+
+                        $this->logger->info("Created NC group (bulk)", [
+                            'app' => 'user_vo',
+                            'nc_group_id' => $ncGroupId,
+                            'vo_group_id' => $voGroupId
+                        ]);
+                    }
+
+                    // Calculate position index
+                    $positionIndex = $this->calculatePositionIndex($voParentId, $voPosition, $allGroups);
+
+                    // Insert record into database
+                    $insertQb = $this->connection->getQueryBuilder();
+                    $insertQb->insert('user_vo_groups')
+                        ->values([
+                            'vo_group_id' => $insertQb->createNamedParameter($voGroupId),
+                            'vo_group_name' => $insertQb->createNamedParameter($voGroupName),
+                            'nc_group_id' => $insertQb->createNamedParameter($ncGroupId),
+                            'vo_parent_id' => $insertQb->createNamedParameter($voParentId),
+                            'vo_position' => $insertQb->createNamedParameter($voPosition, \PDO::PARAM_INT),
+                            'vo_position_index' => $insertQb->createNamedParameter($positionIndex),
+                            'deleted_in_vo' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
+                            'member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
+                            'vo_member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
+                            'non_vo_member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
+                        ]);
+                    $insertQb->executeStatement();
+
+                    $results['created'][] = [
+                        'vo_group_id' => $voGroupId,
+                        'nc_group_id' => $ncGroupId,
+                        'vo_group_name' => $voGroupName
+                    ];
+
+                } catch (\Exception $e) {
+                    $results['errors'][] = [
+                        'vo_group_id' => $voGroupId,
+                        'error' => $e->getMessage()
+                    ];
+                }
+            }
+
+            return new JSONResponse([
+                'success' => true,
+                'summary' => [
+                    'total' => count($voGroupIds),
+                    'created' => count($results['created']),
+                    'skipped' => count($results['skipped']),
+                    'errors' => count($results['errors'])
+                ],
+                'results' => $results
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to bulk create groups', [
+                'app' => 'user_vo',
+                'error' => $e->getMessage()
+            ]);
+
+            return new JSONResponse([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk delete managed groups
+     *
+     * @return JSONResponse
+     */
+    public function bulkDeleteGroups() {
+        try {
+            $voGroupIds = $this->request->getParam('vo_group_ids', []);
+
+            if (empty($voGroupIds) || !is_array($voGroupIds)) {
+                return new JSONResponse([
+                    'success' => false,
+                    'error' => 'No group IDs provided'
+                ], 400);
+            }
+
+            $results = [
+                'deleted' => [],
+                'not_found' => [],
+                'errors' => []
+            ];
+
+            foreach ($voGroupIds as $voGroupId) {
+                try {
+                    // Get group info from database
+                    $qb = $this->connection->getQueryBuilder();
+                    $qb->select('nc_group_id', 'vo_group_name')
+                        ->from('user_vo_groups')
+                        ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
+                    $result = $qb->executeQuery();
+                    $groupRow = $result->fetch();
+                    $result->closeCursor();
+
+                    if (!$groupRow) {
+                        $results['not_found'][] = [
+                            'vo_group_id' => $voGroupId,
+                            'reason' => 'Not managed'
+                        ];
+                        continue;
+                    }
+
+                    $ncGroupId = $groupRow['nc_group_id'];
+                    $voGroupName = $groupRow['vo_group_name'];
+
+                    // Delete the NC group (if it exists)
+                    if ($this->groupManager->groupExists($ncGroupId)) {
+                        $ncGroup = $this->groupManager->get($ncGroupId);
+                        if ($ncGroup) {
+                            $ncGroup->delete();
+                            $this->logger->info("Deleted NC group (bulk)", [
+                                'app' => 'user_vo',
+                                'nc_group_id' => $ncGroupId,
+                                'vo_group_id' => $voGroupId
+                            ]);
+                        }
+                    }
+
+                    // Remove from tracking table
+                    $deleteQb = $this->connection->getQueryBuilder();
+                    $deleteQb->delete('user_vo_groups')
+                        ->where($deleteQb->expr()->eq('vo_group_id', $deleteQb->createNamedParameter($voGroupId)));
+                    $deleteQb->executeStatement();
+
+                    $results['deleted'][] = [
+                        'vo_group_id' => $voGroupId,
+                        'nc_group_id' => $ncGroupId,
+                        'vo_group_name' => $voGroupName
+                    ];
+
+                } catch (\Exception $e) {
+                    $results['errors'][] = [
+                        'vo_group_id' => $voGroupId,
+                        'error' => $e->getMessage()
+                    ];
+                }
+            }
+
+            return new JSONResponse([
+                'success' => true,
+                'summary' => [
+                    'total' => count($voGroupIds),
+                    'deleted' => count($results['deleted']),
+                    'not_found' => count($results['not_found']),
+                    'errors' => count($results['errors'])
+                ],
+                'results' => $results
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to bulk delete groups', [
+                'app' => 'user_vo',
+                'error' => $e->getMessage()
+            ]);
+
+            return new JSONResponse([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 }

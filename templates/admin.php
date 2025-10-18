@@ -367,6 +367,9 @@ style('user_vo', 'admin');
             <div style="margin-bottom: 10px;">
                 <button id="expand-all-groups" class="button"><?php p($l->t('Expand All')); ?></button>
                 <button id="collapse-all-groups" class="button"><?php p($l->t('Collapse All')); ?></button>
+                <button id="bulk-create-groups" class="button" style="margin-left: 15px;"><?php p($l->t('Create Selected')); ?></button>
+                <button id="bulk-delete-groups" class="button"><?php p($l->t('Delete Selected')); ?></button>
+                <span id="bulk-groups-status"></span>
             </div>
             <table class="vo-groups-table">
                 <thead>

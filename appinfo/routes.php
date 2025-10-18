@@ -25,5 +25,7 @@ return [
         ['name' => 'admin#fetchManagedGroups', 'url' => '/admin/fetch-managed-groups', 'verb' => 'GET'],
         ['name' => 'admin#createGroup', 'url' => '/admin/create-group', 'verb' => 'POST'],
         ['name' => 'admin#deleteGroup', 'url' => '/admin/delete-group', 'verb' => 'POST'],
+        ['name' => 'admin#bulkCreateGroups', 'url' => '/admin/bulk-create-groups', 'verb' => 'POST'],
+        ['name' => 'admin#bulkDeleteGroups', 'url' => '/admin/bulk-delete-groups', 'verb' => 'POST'],
     ]
 ]; 
