@@ -364,7 +364,7 @@ class AdminController extends Controller {
 
             // Get all users from user_vo table
             $qb = $this->connection->getQueryBuilder();
-            $qb->select('uid', 'vo_user_id', 'vo_username', 'displayname', 'last_synced')
+            $qb->select('uid', 'vo_user_id', 'vo_username', 'displayname', 'vo_group_ids', 'last_synced')
                 ->from('user_vo')
                 ->where($qb->expr()->eq('backend', $qb->createNamedParameter('user_vo')))
                 ->orderBy('uid', 'ASC');
@@ -406,6 +406,7 @@ class AdminController extends Controller {
                     'uid' => $uid,
                     'vo_username' => $voUsername ?: '-',
                     'vo_user_id' => $voUserId ?: '-',
+                    'vo_group_ids' => $userRow['vo_group_ids'] ?: '',
                     'display_name' => $userRow['displayname'] ?: '-',
                     'email' => $email ?: '-',
                     'photo_status' => $photoStatus,
@@ -471,6 +472,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => '',
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -489,6 +491,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -510,6 +513,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -535,6 +539,7 @@ class AdminController extends Controller {
                     'uid' => $uid,
                     'vo_username' => $voUserData['username'] ?? '',
                     'vo_user_id' => $voUserId,
+                    'vo_group_ids' => $voUserData['group_ids'] ?? '',
                     'display_name' => trim($voUserData['firstname'] . ' ' . $voUserData['lastname']),
                     'email' => $voUserData['email'] ?? '',
                     'photo_status' => $photoStatus,
@@ -648,6 +653,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => '',
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -667,6 +673,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -690,6 +697,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -712,7 +720,7 @@ class AdminController extends Controller {
                 if ($success || $isDeleted) {
                     // Get last_synced from database
                     $qb = $this->connection->getQueryBuilder();
-                    $qb->select('vo_username', 'displayname', 'last_synced')
+                    $qb->select('vo_username', 'displayname', 'vo_group_ids', 'last_synced')
                         ->from('user_vo')
                         ->where($qb->expr()->eq('uid', $qb->createNamedParameter($uid)));
                     $userResult = $qb->executeQuery();
@@ -744,6 +752,7 @@ class AdminController extends Controller {
                             'uid' => $uid,
                             'vo_username' => $voUserData['username'] ?? '',
                             'vo_user_id' => $voUserId,
+                            'vo_group_ids' => $userData['vo_group_ids'] ?? '',
                             'display_name' => trim($voUserData['firstname'] . ' ' . $voUserData['lastname']),
                             'email' => $voUserData['email'] ?? '',
                             'photo_status' => $photoStatus,
@@ -758,6 +767,7 @@ class AdminController extends Controller {
                             'uid' => $uid,
                             'vo_username' => $userData['vo_username'] ?? '',
                             'vo_user_id' => $voUserId,
+                            'vo_group_ids' => $userData['vo_group_ids'] ?? '',
                             'display_name' => $userData['displayname'] ?? '',
                             'email' => $email,
                             'photo_status' => $photoStatus,
@@ -773,6 +783,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -870,6 +881,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => '',
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -889,6 +901,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -912,6 +925,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -934,7 +948,7 @@ class AdminController extends Controller {
                 if ($success || $isDeleted) {
                     // Get last_synced from database
                     $qb = $this->connection->getQueryBuilder();
-                    $qb->select('vo_username', 'displayname', 'last_synced')
+                    $qb->select('vo_username', 'displayname', 'vo_group_ids', 'last_synced')
                         ->from('user_vo')
                         ->where($qb->expr()->eq('uid', $qb->createNamedParameter($uid)));
                     $userResult = $qb->executeQuery();
@@ -966,6 +980,7 @@ class AdminController extends Controller {
                             'uid' => $uid,
                             'vo_username' => $voUserData['username'] ?? '',
                             'vo_user_id' => $voUserId,
+                            'vo_group_ids' => $userData['vo_group_ids'] ?? '',
                             'display_name' => trim($voUserData['firstname'] . ' ' . $voUserData['lastname']),
                             'email' => $voUserData['email'] ?? '',
                             'photo_status' => $photoStatus,
@@ -980,6 +995,7 @@ class AdminController extends Controller {
                             'uid' => $uid,
                             'vo_username' => $userData['vo_username'] ?? '',
                             'vo_user_id' => $voUserId,
+                            'vo_group_ids' => $userData['vo_group_ids'] ?? '',
                             'display_name' => $userData['displayname'] ?? '',
                             'email' => $email,
                             'photo_status' => $photoStatus,
@@ -995,6 +1011,7 @@ class AdminController extends Controller {
                         'uid' => $uid,
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
+                        'vo_group_ids' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',

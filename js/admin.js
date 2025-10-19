@@ -652,11 +652,29 @@ document.addEventListener('DOMContentLoaded', function() {
                         const statusIcon = result.status === 'info' ? 'ℹ' :
                                          result.status === 'skipped' ? '○' : '○';
 
+                        // Format VO Groups column
+                        let voGroupsDisplay = '-';
+                        if (result.vo_group_ids) {
+                            const groupIds = result.vo_group_ids.split(',').filter(id => id.trim());
+                            const groupCount = groupIds.length;
+                            if (groupCount > 0) {
+                                if (groupCount <= 4) {
+                                    // Show all groups inline
+                                    voGroupsDisplay = escapeHtml(groupIds.join(', '));
+                                } else {
+                                    // Show first 2 + "... (N total)" with tooltip
+                                    const visibleGroups = groupIds.slice(0, 2).join(', ');
+                                    voGroupsDisplay = `<span title="${escapeHtml(groupIds.join(', '))}">${escapeHtml(visibleGroups)}, ... (${groupCount} total)</span>`;
+                                }
+                            }
+                        }
+
                         row.innerHTML = `
                             <td><input type="checkbox" class="sync-user-checkbox" data-uid="${escapeHtml(result.uid)}" /></td>
                             <td>${escapeHtml(result.uid)}</td>
                             <td>${escapeHtml(result.vo_username || '-')}</td>
                             <td>${escapeHtml(result.vo_user_id || '-')}</td>
+                            <td>${voGroupsDisplay}</td>
                             <td>${escapeHtml(result.display_name || '-')}</td>
                             <td>${escapeHtml(result.email || '-')}</td>
                             <td>${escapeHtml(result.photo_status || '-')}</td>
@@ -723,11 +741,29 @@ document.addEventListener('DOMContentLoaded', function() {
                                          result.status === 'failed' ? '✗' :
                                          result.status === 'skipped' ? '○' : '○';
 
+                        // Format VO Groups column
+                        let voGroupsDisplay = '-';
+                        if (result.vo_group_ids) {
+                            const groupIds = result.vo_group_ids.split(',').filter(id => id.trim());
+                            const groupCount = groupIds.length;
+                            if (groupCount > 0) {
+                                if (groupCount <= 4) {
+                                    // Show all groups inline
+                                    voGroupsDisplay = escapeHtml(groupIds.join(', '));
+                                } else {
+                                    // Show first 2 + "... (N total)" with tooltip
+                                    const visibleGroups = groupIds.slice(0, 2).join(', ');
+                                    voGroupsDisplay = `<span title="${escapeHtml(groupIds.join(', '))}">${escapeHtml(visibleGroups)}, ... (${groupCount} total)</span>`;
+                                }
+                            }
+                        }
+
                         row.innerHTML = `
                             <td><input type="checkbox" class="sync-user-checkbox" data-uid="${escapeHtml(result.uid)}" /></td>
                             <td>${escapeHtml(result.uid)}</td>
                             <td>${escapeHtml(result.vo_username || '-')}</td>
                             <td>${escapeHtml(result.vo_user_id || '-')}</td>
+                            <td>${voGroupsDisplay}</td>
                             <td>${escapeHtml(result.display_name || '-')}</td>
                             <td>${escapeHtml(result.email || '-')}</td>
                             <td>${escapeHtml(result.photo_status || '-')}</td>
@@ -794,11 +830,29 @@ document.addEventListener('DOMContentLoaded', function() {
                             photoDisplay = '⚠ ' + photoDisplay;
                         }
 
+                        // Format VO Groups column
+                        let voGroupsDisplay = '-';
+                        if (result.vo_group_ids) {
+                            const groupIds = result.vo_group_ids.split(',').filter(id => id.trim());
+                            const groupCount = groupIds.length;
+                            if (groupCount > 0) {
+                                if (groupCount <= 4) {
+                                    // Show all groups inline
+                                    voGroupsDisplay = escapeHtml(groupIds.join(', '));
+                                } else {
+                                    // Show first 2 + "... (N total)" with tooltip
+                                    const visibleGroups = groupIds.slice(0, 2).join(', ');
+                                    voGroupsDisplay = `<span title="${escapeHtml(groupIds.join(', '))}">${escapeHtml(visibleGroups)}, ... (${groupCount} total)</span>`;
+                                }
+                            }
+                        }
+
                         row.innerHTML = `
                             <td><input type="checkbox" class="sync-user-checkbox" data-uid="${escapeHtml(result.uid)}" /></td>
                             <td>${escapeHtml(result.uid)}</td>
                             <td>${escapeHtml(result.vo_username || '-')}</td>
                             <td>${escapeHtml(result.vo_user_id || '-')}</td>
+                            <td>${voGroupsDisplay}</td>
                             <td>${escapeHtml(result.display_name || '-')}</td>
                             <td>${escapeHtml(result.email || '-')}</td>
                             <td>${photoDisplay}</td>
@@ -1104,6 +1158,23 @@ document.addEventListener('DOMContentLoaded', function() {
                                     photoDisplay = '⚠ ' + photoDisplay;
                                 }
 
+                                // Format VO Groups column
+                                let voGroupsDisplay = '-';
+                                if (result.vo_group_ids) {
+                                    const groupIds = result.vo_group_ids.split(',').filter(id => id.trim());
+                                    const groupCount = groupIds.length;
+                                    if (groupCount > 0) {
+                                        if (groupCount <= 4) {
+                                            // Show all groups inline
+                                            voGroupsDisplay = escapeHtml(groupIds.join(', '));
+                                        } else {
+                                            // Show first 2 + "... (N total)" with tooltip
+                                            const visibleGroups = groupIds.slice(0, 2).join(', ');
+                                            voGroupsDisplay = `<span title="${escapeHtml(groupIds.join(', '))}">${escapeHtml(visibleGroups)}, ... (${groupCount} total)</span>`;
+                                        }
+                                    }
+                                }
+
                                 // Update the row with new data
                                 existingRow.className = result.status;
                                 existingRow.innerHTML = `
@@ -1111,6 +1182,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <td>${escapeHtml(result.uid)}</td>
                                     <td>${escapeHtml(result.vo_username || '-')}</td>
                                     <td>${escapeHtml(result.vo_user_id || '-')}</td>
+                                    <td>${voGroupsDisplay}</td>
                                     <td>${escapeHtml(result.display_name || '-')}</td>
                                     <td>${escapeHtml(result.email || '-')}</td>
                                     <td>${photoDisplay}</td>
