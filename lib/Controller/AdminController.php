@@ -2528,11 +2528,28 @@ class AdminController extends Controller {
                 }
             }
 
-            // Update last_synced timestamp
+            // Calculate member counts
+            $allMembers = $ncGroup->getUsers();
+            $totalCount = count($allMembers);
+            $voCount = 0;
+            $nonVoCount = 0;
+
+            foreach ($allMembers as $member) {
+                if ($member->getBackendClassName() === 'OCA\\UserVO\\UserVOAuth') {
+                    $voCount++;
+                } else {
+                    $nonVoCount++;
+                }
+            }
+
+            // Update last_synced timestamp and member counts
             $now = new \DateTime();
             $updateQb = $this->connection->getQueryBuilder();
             $updateQb->update('user_vo_groups')
                 ->set('last_synced', $updateQb->createNamedParameter($now->format('Y-m-d H:i:s')))
+                ->set('member_count', $updateQb->createNamedParameter($totalCount, \PDO::PARAM_INT))
+                ->set('vo_member_count', $updateQb->createNamedParameter($voCount, \PDO::PARAM_INT))
+                ->set('non_vo_member_count', $updateQb->createNamedParameter($nonVoCount, \PDO::PARAM_INT))
                 ->where($updateQb->expr()->eq('vo_group_id', $updateQb->createNamedParameter($voGroupId)));
             $updateQb->executeStatement();
 
@@ -2554,11 +2571,16 @@ class AdminController extends Controller {
                 'added' => $added,
                 'removed' => $removed,
                 'skipped' => $skipped,
+                'member_count' => $totalCount,
+                'vo_member_count' => $voCount,
+                'non_vo_member_count' => $nonVoCount,
                 'summary' => [
                     'added' => count($added),
                     'removed' => count($removed),
                     'skipped' => count($skipped),
-                    'total_members' => count($ncGroup->getUsers())
+                    'total_members' => $totalCount,
+                    'vo_members' => $voCount,
+                    'non_vo_members' => $nonVoCount
                 ]
             ]);
 

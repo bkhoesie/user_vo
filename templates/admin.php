@@ -381,6 +381,7 @@ style('user_vo', 'admin');
                         <th><?php p($l->t('NC Group Name')); ?></th>
                         <th><?php p($l->t('Status')); ?></th>
                         <th><?php p($l->t('VO Members')); ?></th>
+                        <th><?php p($l->t('Non-VO Members')); ?></th>
                         <th><?php p($l->t('Last Synced')); ?></th>
                         <th><?php p($l->t('Actions')); ?></th>
                     </tr>

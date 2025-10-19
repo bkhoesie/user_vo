@@ -1508,7 +1508,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (groups.length === 0) {
             const row = document.createElement('tr');
-            row.innerHTML = `<td colspan="8" style="text-align: center; padding: 20px;">${escapeHtml(t('user_vo', 'No groups found.'))}</td>`;
+            row.innerHTML = `<td colspan="9" style="text-align: center; padding: 20px;">${escapeHtml(t('user_vo', 'No groups found.'))}</td>`;
             groupsList.appendChild(row);
             return;
         }
@@ -1534,7 +1534,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 ? '<span class="vo-text-muted">—</span>'
                 : `<input type="checkbox" class="vo-group-checkbox" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-is-managed="${group.is_managed ? 'true' : 'false'}" />`;
 
-            const voMemberCount = (isPlaceholder || group.vo_member_count === null) ? '-' : group.vo_member_count.toString();
+            // Format member count displays
+            let voMemberCountDisplay = '-';
+            let nonVoMemberCountDisplay = '-';
+            if (!isPlaceholder && group.member_count !== null && group.member_count !== undefined) {
+                voMemberCountDisplay = (group.vo_member_count || 0).toString();
+                nonVoMemberCountDisplay = (group.non_vo_member_count || 0).toString();
+            }
 
             // Build indented group name with visual indicator
             const depth = group._depth || 0;
@@ -1606,6 +1612,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td><span class="vo-text-muted">—</span></td>
                     <td><span class="vo-text-muted">—</span></td>
                     <td><span class="vo-text-muted">—</span></td>
+                    <td><span class="vo-text-muted">—</span></td>
                 `;
             } else {
                 row.innerHTML = `
@@ -1614,7 +1621,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td style="white-space: pre-wrap;">${groupNameWithIndent}</td>
                     <td>${escapeHtml(group.nc_group_id)}</td>
                     <td>${renderGroupStatusBadge(group)}</td>
-                    <td>${escapeHtml(voMemberCount)}</td>
+                    <td>${escapeHtml(voMemberCountDisplay)}</td>
+                    <td>${escapeHtml(nonVoMemberCountDisplay)}</td>
                     <td>${escapeHtml(group.last_synced || '-')}</td>
                     <td>${renderGroupActions(group)}</td>
                 `;
