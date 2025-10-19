@@ -27,5 +27,6 @@ return [
         ['name' => 'admin#deleteGroup', 'url' => '/admin/delete-group', 'verb' => 'POST'],
         ['name' => 'admin#bulkCreateGroups', 'url' => '/admin/bulk-create-groups', 'verb' => 'POST'],
         ['name' => 'admin#bulkDeleteGroups', 'url' => '/admin/bulk-delete-groups', 'verb' => 'POST'],
+        ['name' => 'admin#syncGroup', 'url' => '/admin/sync-group', 'verb' => 'POST'],
     ]
 ]; 

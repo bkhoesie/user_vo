@@ -2385,4 +2385,178 @@ class AdminController extends Controller {
         }
     }
 
+    /**
+     * Sync a single group's members from VereinOnline
+     *
+     * @return JSONResponse
+     */
+    public function syncGroup() {
+        try {
+            $voGroupId = $this->request->getParam('vo_group_id', '');
+
+            if (empty($voGroupId)) {
+                return new JSONResponse([
+                    'success' => false,
+                    'error' => 'VO group ID is required'
+                ], 400);
+            }
+
+            // Check if group is managed
+            $qb = $this->connection->getQueryBuilder();
+            $qb->select('nc_group_id', 'vo_group_name')
+                ->from('user_vo_groups')
+                ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
+            $result = $qb->executeQuery();
+            $groupRow = $result->fetch();
+            $result->closeCursor();
+
+            if (!$groupRow) {
+                return new JSONResponse([
+                    'success' => false,
+                    'error' => 'Group is not managed'
+                ], 404);
+            }
+
+            $ncGroupId = $groupRow['nc_group_id'];
+            $voGroupName = $groupRow['vo_group_name'];
+
+            // Get the NC group
+            $ncGroup = $this->groupManager->get($ncGroupId);
+            if (!$ncGroup) {
+                return new JSONResponse([
+                    'success' => false,
+                    'error' => 'NC group does not exist'
+                ], 404);
+            }
+
+            // Get all VO users who should be in this group
+            // Query user_vo table for users whose vo_group_ids contains this group ID
+            $qb = $this->connection->getQueryBuilder();
+            $qb->select('uid', 'vo_user_id', 'vo_group_ids')
+                ->from('user_vo')
+                ->where($qb->expr()->eq('backend', $qb->createNamedParameter('user_vo')));
+            $result = $qb->executeQuery();
+            $allUsers = $result->fetchAll();
+            $result->closeCursor();
+
+            // Filter users who should be in this group
+            $expectedVOUsernames = [];
+            foreach ($allUsers as $userRow) {
+                $uid = $userRow['uid'];
+                $voGroupIds = $userRow['vo_group_ids'];
+
+                // Skip users with !duplicate marker
+                if (str_ends_with($uid, '!duplicate')) {
+                    continue;
+                }
+
+                // Skip users without vo_group_ids
+                if (empty($voGroupIds)) {
+                    continue;
+                }
+
+                // Parse group IDs (comma-separated)
+                $groupIdArray = array_map('trim', explode(',', $voGroupIds));
+
+                // Check if this group is in the user's group list
+                if (in_array($voGroupId, $groupIdArray, true)) {
+                    $expectedVOUsernames[] = $uid;
+                }
+            }
+
+            // Get current NC group members
+            $currentMembers = $ncGroup->getUsers();
+            $currentMemberIds = array_map(fn($user) => $user->getUID(), $currentMembers);
+
+            // Sync: add missing users, remove departed users
+            $added = [];
+            $removed = [];
+            $skipped = [];
+
+            // Add users who should be in the group but aren't
+            foreach ($expectedVOUsernames as $username) {
+                if (!in_array($username, $currentMemberIds, true)) {
+                    $user = \OC::$server->getUserManager()->get($username);
+                    if ($user) {
+                        $ncGroup->addUser($user);
+                        $added[] = $username;
+                        $this->logger->debug("Added user to group", [
+                            'app' => 'user_vo',
+                            'username' => $username,
+                            'group' => $ncGroupId
+                        ]);
+                    } else {
+                        $skipped[] = [
+                            'username' => $username,
+                            'reason' => 'User not found in NC'
+                        ];
+                    }
+                }
+            }
+
+            // Remove users who are no longer in VO group
+            foreach ($currentMemberIds as $username) {
+                if (!in_array($username, $expectedVOUsernames, true)) {
+                    // Only remove if user is from user_vo backend
+                    $user = \OC::$server->getUserManager()->get($username);
+                    if ($user && $user->getBackendClassName() === 'OCA\\UserVO\\UserVOAuth') {
+                        $ncGroup->removeUser($user);
+                        $removed[] = $username;
+                        $this->logger->debug("Removed user from group", [
+                            'app' => 'user_vo',
+                            'username' => $username,
+                            'group' => $ncGroupId
+                        ]);
+                    }
+                }
+            }
+
+            // Update last_synced timestamp
+            $now = new \DateTime();
+            $updateQb = $this->connection->getQueryBuilder();
+            $updateQb->update('user_vo_groups')
+                ->set('last_synced', $updateQb->createNamedParameter($now->format('Y-m-d H:i:s')))
+                ->where($updateQb->expr()->eq('vo_group_id', $updateQb->createNamedParameter($voGroupId)));
+            $updateQb->executeStatement();
+
+            $this->logger->info("Synced group members", [
+                'app' => 'user_vo',
+                'vo_group_id' => $voGroupId,
+                'nc_group_id' => $ncGroupId,
+                'added' => count($added),
+                'removed' => count($removed),
+                'skipped' => count($skipped)
+            ]);
+
+            return new JSONResponse([
+                'success' => true,
+                'message' => 'Group synced successfully',
+                'vo_group_id' => $voGroupId,
+                'nc_group_id' => $ncGroupId,
+                'vo_group_name' => $voGroupName,
+                'added' => $added,
+                'removed' => $removed,
+                'skipped' => $skipped,
+                'summary' => [
+                    'added' => count($added),
+                    'removed' => count($removed),
+                    'skipped' => count($skipped),
+                    'total_members' => count($ncGroup->getUsers())
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to sync group', [
+                'app' => 'user_vo',
+                'vo_group_id' => $voGroupId ?? 'unknown',
+                'error' => $e->getMessage()
+            ]);
+
+            return new JSONResponse([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 }

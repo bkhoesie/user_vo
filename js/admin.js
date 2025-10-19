@@ -1179,9 +1179,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (group.is_managed) {
-            // Managed groups - show Sync and Delete buttons (Sync disabled for now, Delete enabled for Step 6)
+            // Managed groups - show Sync and Delete buttons
             return `
-                <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" disabled>
+                <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
                     ${escapeHtml(t('user_vo', 'Sync'))}
                 </button>
                 <button class="button delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}">
@@ -1189,7 +1189,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 </button>
             `;
         } else {
-            // Not created groups - show Create button (enabled for Step 5)
+            // Not created groups - show Create button
             return `
                 <button class="button create-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
                     ${escapeHtml(t('user_vo', 'Create'))}
@@ -1812,6 +1812,56 @@ document.addEventListener('DOMContentLoaded', function() {
                     );
 
                     // Refresh the current view while preserving state
+                    if (currentViewType === 'all') {
+                        loadAllVOGroupsButton.click();
+                    } else if (currentViewType === 'managed') {
+                        loadManagedGroupsButton.click();
+                    }
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + data.error, { type: 'error' });
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }
+            })
+            .catch(error => {
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
+                button.disabled = false;
+                button.textContent = originalText;
+            });
+        }
+    });
+
+    // Sync single group (event delegation for dynamically created buttons)
+    document.addEventListener('click', function(e) {
+        if (e.target && e.target.classList.contains('sync-group-btn')) {
+            const voGroupId = e.target.getAttribute('data-vo-group-id');
+            const button = e.target;
+            const originalText = button.textContent;
+
+            button.disabled = true;
+            button.textContent = t('user_vo', 'Syncing...');
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/sync-group'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                },
+                body: JSON.stringify({ vo_group_id: voGroupId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const summary = data.summary;
+                    const message = t('user_vo', "Group '{name}' synced: {added} added, {removed} removed, {skipped} skipped", {
+                        name: data.nc_group_id,
+                        added: summary.added,
+                        removed: summary.removed,
+                        skipped: summary.skipped
+                    });
+                    OC.Notification.showTemporary(message);
+
+                    // Refresh the current view to update the "Last Synced" timestamp
                     if (currentViewType === 'all') {
                         loadAllVOGroupsButton.click();
                     } else if (currentViewType === 'managed') {
