@@ -1715,6 +1715,57 @@ class AdminController extends Controller {
                 ], 500);
             }
 
+            // Build set of VO group IDs that exist in the API response
+            $voGroupIds = [];
+            foreach ($allGroups as $group) {
+                if (isset($group['id'])) {
+                    $voGroupIds[] = $group['id'];
+                }
+            }
+
+            // Detect deleted groups: managed groups in DB but not in VO API response
+            // Also restore groups: managed groups that were marked deleted but are now back in VO
+            $qb = $this->connection->getQueryBuilder();
+            $qb->select('vo_group_id', 'deleted_in_vo')
+                ->from('user_vo_groups');
+            $result = $qb->executeQuery();
+            $managedGroups = $result->fetchAll();
+            $result->closeCursor();
+
+            foreach ($managedGroups as $managedGroup) {
+                $voGroupId = $managedGroup['vo_group_id'];
+                $currentlyDeleted = (bool)$managedGroup['deleted_in_vo'];
+                $existsInVO = in_array($voGroupId, $voGroupIds, true);
+
+                // Group was deleted in VO (exists in DB but not in API)
+                if (!$existsInVO && !$currentlyDeleted) {
+                    $updateQb = $this->connection->getQueryBuilder();
+                    $updateQb->update('user_vo_groups')
+                        ->set('deleted_in_vo', $updateQb->createNamedParameter(1, \PDO::PARAM_INT))
+                        ->where($updateQb->expr()->eq('vo_group_id', $updateQb->createNamedParameter($voGroupId)));
+                    $updateQb->executeStatement();
+
+                    $this->logger->info('Marked group as deleted in VO', [
+                        'app' => 'user_vo',
+                        'vo_group_id' => $voGroupId
+                    ]);
+                }
+
+                // Group was restored in VO (was marked deleted but now exists in API)
+                if ($existsInVO && $currentlyDeleted) {
+                    $updateQb = $this->connection->getQueryBuilder();
+                    $updateQb->update('user_vo_groups')
+                        ->set('deleted_in_vo', $updateQb->createNamedParameter(0, \PDO::PARAM_INT))
+                        ->where($updateQb->expr()->eq('vo_group_id', $updateQb->createNamedParameter($voGroupId)));
+                    $updateQb->executeStatement();
+
+                    $this->logger->info('Restored group (no longer deleted in VO)', [
+                        'app' => 'user_vo',
+                        'vo_group_id' => $voGroupId
+                    ]);
+                }
+            }
+
             // For each group, determine if it's already managed (created in NC)
             $results = [];
             foreach ($allGroups as $group) {
@@ -1784,6 +1835,25 @@ class AdminController extends Controller {
      */
     public function fetchManagedGroups() {
         try {
+            // Fetch all groups from VO to detect deletions
+            $configuration = $this->configService->loadConfiguration(maskPassword: false);
+            $backend = new UserVOAuth(
+                $configuration['api_url'],
+                $configuration['api_username'],
+                $configuration['api_password']
+            );
+            $allVOGroups = $backend->fetchAllGroups();
+
+            // Build set of VO group IDs that exist in the API response
+            $voGroupIds = [];
+            if ($allVOGroups) {
+                foreach ($allVOGroups as $group) {
+                    if (isset($group['id'])) {
+                        $voGroupIds[] = $group['id'];
+                    }
+                }
+            }
+
             // Get all managed groups from database
             $qb = $this->connection->getQueryBuilder();
             $qb->select('vo_group_id', 'vo_group_name', 'nc_group_id', 'vo_parent_id', 'vo_position', 'vo_position_index',
@@ -1793,6 +1863,58 @@ class AdminController extends Controller {
             $result = $qb->executeQuery();
             $rows = $result->fetchAll();
             $result->closeCursor();
+
+            // Detect deleted groups (managed groups not in VO API response)
+            $updatedGroups = false;
+            if ($allVOGroups) {
+                foreach ($rows as $row) {
+                    $voGroupId = $row['vo_group_id'];
+                    $currentlyDeleted = (bool)$row['deleted_in_vo'];
+                    $existsInVO = in_array($voGroupId, $voGroupIds, true);
+
+                    // Group was deleted in VO
+                    if (!$existsInVO && !$currentlyDeleted) {
+                        $updateQb = $this->connection->getQueryBuilder();
+                        $updateQb->update('user_vo_groups')
+                            ->set('deleted_in_vo', $updateQb->createNamedParameter(1, \PDO::PARAM_INT))
+                            ->where($updateQb->expr()->eq('vo_group_id', $updateQb->createNamedParameter($voGroupId)));
+                        $updateQb->executeStatement();
+                        $updatedGroups = true;
+
+                        $this->logger->info('Marked group as deleted in VO', [
+                            'app' => 'user_vo',
+                            'vo_group_id' => $voGroupId
+                        ]);
+                    }
+
+                    // Group was restored in VO
+                    if ($existsInVO && $currentlyDeleted) {
+                        $updateQb = $this->connection->getQueryBuilder();
+                        $updateQb->update('user_vo_groups')
+                            ->set('deleted_in_vo', $updateQb->createNamedParameter(0, \PDO::PARAM_INT))
+                            ->where($updateQb->expr()->eq('vo_group_id', $updateQb->createNamedParameter($voGroupId)));
+                        $updateQb->executeStatement();
+                        $updatedGroups = true;
+
+                        $this->logger->info('Restored group (no longer deleted in VO)', [
+                            'app' => 'user_vo',
+                            'vo_group_id' => $voGroupId
+                        ]);
+                    }
+                }
+            }
+
+            // Re-query if we updated any groups to get fresh deleted_in_vo values
+            if ($updatedGroups) {
+                $qb = $this->connection->getQueryBuilder();
+                $qb->select('vo_group_id', 'vo_group_name', 'nc_group_id', 'vo_parent_id', 'vo_position', 'vo_position_index',
+                            'deleted_in_vo', 'last_synced', 'member_count', 'vo_member_count', 'non_vo_member_count')
+                    ->from('user_vo_groups')
+                    ->orderBy('vo_position', 'ASC');
+                $result = $qb->executeQuery();
+                $rows = $result->fetchAll();
+                $result->closeCursor();
+            }
 
             $results = [];
             foreach ($rows as $row) {

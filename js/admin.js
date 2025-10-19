@@ -1246,8 +1246,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Helper function to render group actions
     function renderGroupActions(group) {
         if (group.deleted_in_vo) {
-            // Deleted groups - only show info
-            return '<span class="vo-text-muted">—</span>';
+            // Deleted groups - only show Delete button (can't sync a deleted group)
+            return `
+                <button class="button delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}">
+                    ${escapeHtml(t('user_vo', 'Delete'))}
+                </button>
+            `;
         }
 
         if (group.is_managed) {
