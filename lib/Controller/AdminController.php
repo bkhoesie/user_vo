@@ -11,6 +11,7 @@ use OCP\IGroupManager;
 use OCP\IConfig;
 use OCA\UserVO\UserVOAuth;
 use OCA\UserVO\Service\ConfigService;
+use OCA\UserVO\Service\GroupNameHarmonizer;
 use Psr\Log\LoggerInterface;
 
 class AdminController extends Controller {
@@ -20,6 +21,7 @@ class AdminController extends Controller {
     private $groupManager;
     private $config;
     private $configService;
+    private $groupNameHarmonizer;
 
     public function __construct(
         $appName,
@@ -28,7 +30,8 @@ class AdminController extends Controller {
         LoggerInterface $logger,
         IGroupManager $groupManager,
         IConfig $config,
-        ConfigService $configService
+        ConfigService $configService,
+        GroupNameHarmonizer $groupNameHarmonizer
     ) {
         parent::__construct($appName, $request);
         $this->connection = $connection;
@@ -36,6 +39,7 @@ class AdminController extends Controller {
         $this->groupManager = $groupManager;
         $this->config = $config;
         $this->configService = $configService;
+        $this->groupNameHarmonizer = $groupNameHarmonizer;
     }
 
     /**
@@ -1784,7 +1788,7 @@ class AdminController extends Controller {
 
                 // Check if this group exists in our database (is managed)
                 $qb = $this->connection->getQueryBuilder();
-                $qb->select('nc_group_id', 'deleted_in_vo', 'last_synced', 'member_count', 'vo_member_count', 'non_vo_member_count')
+                $qb->select('nc_group_id', 'vo_group_name', 'deleted_in_vo', 'last_synced', 'member_count', 'vo_member_count', 'non_vo_member_count')
                     ->from('user_vo_groups')
                     ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
                 $result = $qb->executeQuery();
@@ -1793,6 +1797,48 @@ class AdminController extends Controller {
 
                 $isManaged = ($dbRow !== false);
                 $deletedInVO = $isManaged && $dbRow['deleted_in_vo'];
+                $nameChanged = false;
+
+                // Detect renamed groups: Update stored VO name if changed, and check if harmonized name differs from NC group ID
+                if ($isManaged && $dbRow['vo_group_name'] !== $voGroupName) {
+                    // Update the stored VO group name
+                    $updateQb = $this->connection->getQueryBuilder();
+                    $updateQb->update('user_vo_groups')
+                        ->set('vo_group_name', $updateQb->createNamedParameter($voGroupName))
+                        ->where($updateQb->expr()->eq('vo_group_id', $updateQb->createNamedParameter($voGroupId)));
+                    $updateQb->executeStatement();
+
+                    $this->logger->info('Detected group name change in VO', [
+                        'app' => 'user_vo',
+                        'vo_group_id' => $voGroupId,
+                        'old_name' => $dbRow['vo_group_name'],
+                        'new_name' => $voGroupName
+                    ]);
+                }
+
+                // Check if harmonized current VO name differs from NC group ID (indicates meaningful rename)
+                // Use collision handling to determine what the NC name should be
+                $currentHarmonizedName = null;
+                if ($isManaged) {
+                    // Get all existing NC group IDs except the current one
+                    $existingNcGroupNames = [];
+                    $qb2 = $this->connection->getQueryBuilder();
+                    $qb2->select('nc_group_id')
+                        ->from('user_vo_groups')
+                        ->where($qb2->expr()->neq('vo_group_id', $qb2->createNamedParameter($voGroupId)));
+                    $result2 = $qb2->executeQuery();
+                    while ($row = $result2->fetch()) {
+                        $existingNcGroupNames[] = $row['nc_group_id'];
+                    }
+                    $result2->closeCursor();
+
+                    $currentHarmonizedName = $this->groupNameHarmonizer->harmonizeWithCollisionHandling(
+                        $voGroupName,
+                        $existingNcGroupNames,
+                        $dbRow['nc_group_id'] // Current NC name shouldn't be treated as collision
+                    );
+                    $nameChanged = ($currentHarmonizedName !== $dbRow['nc_group_id']);
+                }
 
                 $results[] = [
                     'vo_group_id' => $voGroupId,
@@ -1800,8 +1846,10 @@ class AdminController extends Controller {
                     'vo_parent_id' => $voParentId,
                     'vo_position' => $voPosition,
                     'nc_group_id' => $isManaged ? $dbRow['nc_group_id'] : $ncGroupId,
+                    'expected_nc_group_id' => $currentHarmonizedName,
                     'is_managed' => $isManaged,
                     'deleted_in_vo' => $deletedInVO,
+                    'name_changed' => $nameChanged,
                     'last_synced' => $isManaged ? $dbRow['last_synced'] : null,
                     'member_count' => $isManaged ? (int)$dbRow['member_count'] : null,
                     'vo_member_count' => $isManaged ? (int)$dbRow['vo_member_count'] : null,
@@ -1864,7 +1912,17 @@ class AdminController extends Controller {
             $rows = $result->fetchAll();
             $result->closeCursor();
 
-            // Detect deleted groups (managed groups not in VO API response)
+            // Build map of VO group ID to current VO group data for rename detection
+            $voGroupsById = [];
+            if ($allVOGroups) {
+                foreach ($allVOGroups as $group) {
+                    if (isset($group['id'])) {
+                        $voGroupsById[$group['id']] = $group;
+                    }
+                }
+            }
+
+            // Detect deleted and renamed groups
             $updatedGroups = false;
             if ($allVOGroups) {
                 foreach ($rows as $row) {
@@ -1901,10 +1959,32 @@ class AdminController extends Controller {
                             'vo_group_id' => $voGroupId
                         ]);
                     }
+
+                    // Group was renamed in VO
+                    if ($existsInVO && isset($voGroupsById[$voGroupId])) {
+                        $currentVOName = $voGroupsById[$voGroupId]['name'] ?? '';
+                        $storedVOName = $row['vo_group_name'];
+
+                        if ($currentVOName !== '' && $currentVOName !== $storedVOName) {
+                            $updateQb = $this->connection->getQueryBuilder();
+                            $updateQb->update('user_vo_groups')
+                                ->set('vo_group_name', $updateQb->createNamedParameter($currentVOName))
+                                ->where($updateQb->expr()->eq('vo_group_id', $updateQb->createNamedParameter($voGroupId)));
+                            $updateQb->executeStatement();
+                            $updatedGroups = true;
+
+                            $this->logger->info('Detected group name change in VO', [
+                                'app' => 'user_vo',
+                                'vo_group_id' => $voGroupId,
+                                'old_name' => $storedVOName,
+                                'new_name' => $currentVOName
+                            ]);
+                        }
+                    }
                 }
             }
 
-            // Re-query if we updated any groups to get fresh deleted_in_vo values
+            // Re-query if we updated any groups to get fresh values
             if ($updatedGroups) {
                 $qb = $this->connection->getQueryBuilder();
                 $qb->select('vo_group_id', 'vo_group_name', 'nc_group_id', 'vo_parent_id', 'vo_position', 'vo_position_index',
@@ -1916,23 +1996,45 @@ class AdminController extends Controller {
                 $result->closeCursor();
             }
 
+            // Build list of all existing NC group names for collision detection
+            $allNcGroupNames = [];
+            foreach ($rows as $row) {
+                $allNcGroupNames[] = $row['nc_group_id'];
+            }
+
             $results = [];
             foreach ($rows as $row) {
                 $ncGroupId = $row['nc_group_id'];
+                $voGroupName = $row['vo_group_name'];
+                $voGroupId = $row['vo_group_id'];
 
                 // Check if NC group still exists
                 $ncGroupExists = $this->groupManager->groupExists($ncGroupId);
 
+                // Check if harmonized current VO name differs from NC group ID (indicates meaningful rename)
+                // Use collision handling - exclude current group's NC name from collision check
+                $otherNcGroupNames = array_filter($allNcGroupNames, function($name) use ($ncGroupId) {
+                    return $name !== $ncGroupId;
+                });
+                $currentHarmonizedName = $this->groupNameHarmonizer->harmonizeWithCollisionHandling(
+                    $voGroupName,
+                    $otherNcGroupNames,
+                    $ncGroupId
+                );
+                $nameChanged = ($currentHarmonizedName !== $ncGroupId);
+
                 $results[] = [
                     'vo_group_id' => $row['vo_group_id'],
-                    'vo_group_name' => $row['vo_group_name'],
+                    'vo_group_name' => $voGroupName,
                     'nc_group_id' => $ncGroupId,
+                    'expected_nc_group_id' => $currentHarmonizedName,
                     'vo_parent_id' => $row['vo_parent_id'],
                     'vo_position' => $row['vo_position'] ? (int)$row['vo_position'] : null,
                     'vo_position_index' => $row['vo_position_index'],
                     'nc_group_exists' => $ncGroupExists,
                     'is_managed' => true,
                     'deleted_in_vo' => (bool)$row['deleted_in_vo'],
+                    'name_changed' => $nameChanged,
                     'last_synced' => $row['last_synced'],
                     'member_count' => (int)$row['member_count'],
                     'vo_member_count' => (int)$row['vo_member_count'],
@@ -2029,11 +2131,21 @@ class AdminController extends Controller {
             $voParentId = $groupData['parentid'] ?? null;
             $voPosition = isset($groupData['pos']) ? (int)$groupData['pos'] : null;
 
-            // Harmonize the group name
-            $harmonizer = new \OCA\UserVO\Service\GroupNameHarmonizer();
-            $ncGroupId = $harmonizer->harmonize($voGroupName);
+            // Get all existing NC group IDs for collision detection
+            $existingNcGroupNames = [];
+            $qb2 = $this->connection->getQueryBuilder();
+            $qb2->select('nc_group_id')
+                ->from('user_vo_groups');
+            $result2 = $qb2->executeQuery();
+            while ($row = $result2->fetch()) {
+                $existingNcGroupNames[] = $row['nc_group_id'];
+            }
+            $result2->closeCursor();
 
-            // Check if NC group already exists (might have been created manually)
+            // Harmonize the group name with collision handling
+            $ncGroupId = $this->groupNameHarmonizer->harmonizeWithCollisionHandling($voGroupName, $existingNcGroupNames);
+
+            // Check if NC group already exists (might have been created manually or collision resolution)
             if ($this->groupManager->groupExists($ncGroupId)) {
                 // Group exists in NC but not in our database - we can still proceed to track it
                 $this->logger->info("NC group already exists, adding to management", [

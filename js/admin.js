@@ -1233,7 +1233,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // Helper function to render group status badge
     function renderGroupStatusBadge(group) {
         if (group.deleted_in_vo) {
-            return '<span class="vo-badge vo-badge-error">⚠ ' + escapeHtml(t('user_vo', 'Deleted in VO')) + '</span>';
+            const tooltipText = 'Group ID ' + group.vo_group_id + ' (' + group.vo_group_name + ') was not found in VereinOnline';
+            return '<span class="vo-badge vo-badge-error" title="' + escapeHtml(tooltipText) + '">⚠ ' + escapeHtml(t('user_vo', 'Deleted in VO')) + '</span>';
+        }
+
+        // Check if harmonized VO name differs from NC group ID (indicates meaningful rename)
+        if (group.is_managed && group.name_changed) {
+            const tooltipText = 'Expected NC group name: ' + group.expected_nc_group_id;
+            return '<span class="vo-badge vo-badge-info" title="' + escapeHtml(tooltipText) + '">ℹ ' + escapeHtml(t('user_vo', 'Name Changed')) + '</span>';
         }
 
         if (group.is_managed) {
@@ -1246,9 +1253,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Helper function to render group actions
     function renderGroupActions(group) {
         if (group.deleted_in_vo) {
-            // Deleted groups - only show Delete button (can't sync a deleted group)
+            // Deleted groups - show Sync (to update member counts) and Delete buttons
             return `
-                <button class="button delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}">
+                <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
+                    ${escapeHtml(t('user_vo', 'Sync'))}
+                </button>
+                <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}">
                     ${escapeHtml(t('user_vo', 'Delete'))}
                 </button>
             `;
@@ -1260,7 +1270,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
                     ${escapeHtml(t('user_vo', 'Sync'))}
                 </button>
-                <button class="button delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}">
+                <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}">
                     ${escapeHtml(t('user_vo', 'Delete'))}
                 </button>
             `;
@@ -1512,7 +1522,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (groups.length === 0) {
             const row = document.createElement('tr');
-            row.innerHTML = `<td colspan="9" style="text-align: center; padding: 20px;">${escapeHtml(t('user_vo', 'No groups found.'))}</td>`;
+            row.innerHTML = `<td colspan="10" style="text-align: center; padding: 20px;">${escapeHtml(t('user_vo', 'No groups found.'))}</td>`;
             groupsList.appendChild(row);
             return;
         }
@@ -1529,6 +1539,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 row.style.opacity = '0.5'; // Dim placeholder rows
             } else if (group.deleted_in_vo) {
                 row.className = 'vo-group-deleted';
+            } else if (group.is_managed && group.name_changed) {
+                row.className = 'vo-group-renamed';
             } else if (group.is_managed) {
                 row.className = 'vo-group-managed';
             }
@@ -1617,6 +1629,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td><span class="vo-text-muted">—</span></td>
                     <td><span class="vo-text-muted">—</span></td>
                     <td><span class="vo-text-muted">—</span></td>
+                    <td><span class="vo-text-muted">—</span></td>
                 `;
             } else {
                 row.innerHTML = `
@@ -1625,6 +1638,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td style="white-space: pre-wrap;">${groupNameWithIndent}</td>
                     <td>${escapeHtml(group.nc_group_id)}</td>
                     <td>${renderGroupStatusBadge(group)}</td>
+                    <td>${escapeHtml(group.vo_group_id)}</td>
                     <td>${escapeHtml(voMemberCountDisplay)}</td>
                     <td>${escapeHtml(nonVoMemberCountDisplay)}</td>
                     <td>${escapeHtml(group.last_synced || '-')}</td>

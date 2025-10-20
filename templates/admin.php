@@ -369,7 +369,7 @@ style('user_vo', 'admin');
                 <button id="expand-all-groups" class="button"><?php p($l->t('Expand All')); ?></button>
                 <button id="collapse-all-groups" class="button"><?php p($l->t('Collapse All')); ?></button>
                 <button id="bulk-create-groups" class="button" style="margin-left: 15px;"><?php p($l->t('Create Selected')); ?></button>
-                <button id="bulk-delete-groups" class="button"><?php p($l->t('Delete Selected')); ?></button>
+                <button id="bulk-delete-groups" class="button button-danger"><?php p($l->t('Delete Selected')); ?></button>
                 <span id="bulk-groups-status"></span>
             </div>
             <table class="vo-groups-table">
@@ -380,6 +380,7 @@ style('user_vo', 'admin');
                         <th><?php p($l->t('VO Group Name')); ?></th>
                         <th><?php p($l->t('NC Group Name')); ?></th>
                         <th><?php p($l->t('Status')); ?></th>
+                        <th><?php p($l->t('VO Group ID')); ?></th>
                         <th><?php p($l->t('VO Members')); ?></th>
                         <th><?php p($l->t('Non-VO Members')); ?></th>
                         <th><?php p($l->t('Last Synced')); ?></th>

@@ -90,4 +90,45 @@ class GroupNameHarmonizer {
 			'changed' => $voName !== $harmonized
 		];
 	}
+
+	/**
+	 * Harmonize group name and handle collisions with existing NC group names
+	 *
+	 * If the harmonized name conflicts with an existing NC group, append " (2)", " (3)", etc.
+	 *
+	 * @param string $voName Original VO group name
+	 * @param array $existingNcGroupNames Array of existing NC group names to check for collisions
+	 * @param string|null $currentNcGroupName Current NC group name (for rename detection - don't treat as collision)
+	 * @return string Harmonized name without collisions
+	 */
+	public function harmonizeWithCollisionHandling(string $voName, array $existingNcGroupNames, ?string $currentNcGroupName = null): string {
+		$baseName = $this->harmonize($voName);
+		$candidate = $baseName;
+		$suffix = 2;
+
+		// Keep trying with suffix until we find a name that doesn't collide
+		while (in_array($candidate, $existingNcGroupNames, true) && $candidate !== $currentNcGroupName) {
+			// Format: "Group Name (2)", "Group Name (3)", etc.
+			$candidate = $baseName . " ($suffix)";
+
+			// Enforce 64 character limit (including suffix)
+			if (mb_strlen($candidate) > 64) {
+				// Calculate how much space the suffix takes (e.g., " (2)" = 4 chars)
+				$suffixLength = mb_strlen(" ($suffix)");
+				$maxBaseLength = 64 - $suffixLength;
+				$truncatedBase = mb_substr($baseName, 0, $maxBaseLength);
+				$truncatedBase = rtrim($truncatedBase);
+				$candidate = $truncatedBase . " ($suffix)";
+			}
+
+			$suffix++;
+
+			// Safety check to prevent infinite loop (very unlikely with 64 char limit)
+			if ($suffix > 1000) {
+				throw new \RuntimeException("Unable to resolve group name collision for: $voName");
+			}
+		}
+
+		return $candidate;
+	}
 }
