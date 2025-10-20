@@ -75,11 +75,18 @@ class Version1002Date20251013000000 extends SimpleMigrationStep {
 				'comment' => 'Current group name in VereinOnline (updated during sync)'
 			]);
 
-			// Nextcloud group ID (harmonized name)
+			// Nextcloud group ID (uservo_ prefix format)
 			$table->addColumn('nc_group_id', Types::STRING, [
 				'notnull' => true,
 				'length' => 64,
-				'comment' => 'Harmonized group name in Nextcloud'
+				'comment' => 'NC group ID in uservo_{vo_group_id} format'
+			]);
+
+			// Nextcloud group display name (harmonized from VO name)
+			$table->addColumn('nc_display_name', Types::STRING, [
+				'notnull' => false,
+				'length' => 255,
+				'comment' => 'Current display name in Nextcloud (auto-synced from VO)'
 			]);
 
 			// Hierarchy and sorting

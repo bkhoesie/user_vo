@@ -378,9 +378,10 @@ style('user_vo', 'admin');
                         <th><input type="checkbox" id="select-all-groups" /></th>
                         <th><?php p($l->t('Pos')); ?></th>
                         <th><?php p($l->t('VO Group Name')); ?></th>
-                        <th><?php p($l->t('NC Group Name')); ?></th>
-                        <th><?php p($l->t('Status')); ?></th>
                         <th><?php p($l->t('VO Group ID')); ?></th>
+                        <th><?php p($l->t('NC Display Name')); ?></th>
+                        <th><?php p($l->t('NC Group ID')); ?></th>
+                        <th><?php p($l->t('Status')); ?></th>
                         <th><?php p($l->t('VO Members')); ?></th>
                         <th><?php p($l->t('Non-VO Members')); ?></th>
                         <th><?php p($l->t('Last Synced')); ?></th>

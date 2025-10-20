@@ -1237,10 +1237,10 @@ document.addEventListener('DOMContentLoaded', function() {
             return '<span class="vo-badge vo-badge-error" title="' + escapeHtml(tooltipText) + '">⚠ ' + escapeHtml(t('user_vo', 'Deleted in VO')) + '</span>';
         }
 
-        // Check if harmonized VO name differs from NC group ID (indicates meaningful rename)
-        if (group.is_managed && group.name_changed) {
-            const tooltipText = 'Expected NC group name: ' + group.expected_nc_group_id;
-            return '<span class="vo-badge vo-badge-info" title="' + escapeHtml(tooltipText) + '">ℹ ' + escapeHtml(t('user_vo', 'Name Changed')) + '</span>';
+        if (group.is_managed && group.display_name_mismatch) {
+            const currentName = String(group.nc_display_name || '(empty)');
+            const expectedName = String(group.expected_display_name || '(empty)');
+            return '<span class="vo-badge vo-badge-info" title="Current: &quot;' + escapeHtml(currentName) + '&quot;, Expected: &quot;' + escapeHtml(expectedName) + '&quot; (will be fixed on next sync)">ℹ ' + escapeHtml(t('user_vo', 'Display Name Mismatch')) + '</span>';
         }
 
         if (group.is_managed) {
@@ -1258,7 +1258,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
                     ${escapeHtml(t('user_vo', 'Sync'))}
                 </button>
-                <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}">
+                <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}" data-vo-group-name="${escapeHtml(group.vo_group_name)}">
                     ${escapeHtml(t('user_vo', 'Delete'))}
                 </button>
             `;
@@ -1270,7 +1270,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
                     ${escapeHtml(t('user_vo', 'Sync'))}
                 </button>
-                <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}">
+                <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}" data-vo-group-name="${escapeHtml(group.vo_group_name)}">
                     ${escapeHtml(t('user_vo', 'Delete'))}
                 </button>
             `;
@@ -1539,7 +1539,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 row.style.opacity = '0.5'; // Dim placeholder rows
             } else if (group.deleted_in_vo) {
                 row.className = 'vo-group-deleted';
-            } else if (group.is_managed && group.name_changed) {
+            } else if (group.is_managed && group.display_name_mismatch) {
                 row.className = 'vo-group-renamed';
             } else if (group.is_managed) {
                 row.className = 'vo-group-managed';
@@ -1630,15 +1630,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td><span class="vo-text-muted">—</span></td>
                     <td><span class="vo-text-muted">—</span></td>
                     <td><span class="vo-text-muted">—</span></td>
+                    <td><span class="vo-text-muted">—</span></td>
                 `;
             } else {
                 row.innerHTML = `
                     <td>${checkbox}</td>
                     <td>${escapeHtml(positionIndex)}</td>
                     <td style="white-space: pre-wrap;">${groupNameWithIndent}</td>
-                    <td>${escapeHtml(group.nc_group_id)}</td>
-                    <td>${renderGroupStatusBadge(group)}</td>
                     <td>${escapeHtml(group.vo_group_id)}</td>
+                    <td>${escapeHtml(group.nc_display_name || '-')}</td>
+                    <td>${escapeHtml(group.nc_group_id || '-')}</td>
+                    <td>${renderGroupStatusBadge(group)}</td>
                     <td>${escapeHtml(voMemberCountDisplay)}</td>
                     <td>${escapeHtml(nonVoMemberCountDisplay)}</td>
                     <td>${escapeHtml(group.last_synced || '-')}</td>
@@ -1845,7 +1847,7 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 if (data.success) {
                     OC.Notification.showTemporary(
-                        t('user_vo', "Group '{name}' created successfully", { name: data.nc_group_id })
+                        t('user_vo', "Group '{name}' created successfully", { name: data.vo_group_name || data.nc_group_id })
                     );
 
                     // Expand parent chain so newly created group is visible (using position indices)
@@ -1883,10 +1885,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (e.target && e.target.classList.contains('delete-group-btn')) {
             const voGroupId = e.target.getAttribute('data-vo-group-id');
             const ncGroupId = e.target.getAttribute('data-nc-group-id');
+            const voGroupName = e.target.getAttribute('data-vo-group-name');
             const button = e.target;
 
             // Confirm deletion
-            if (!confirm(t('user_vo', "Are you sure you want to delete group '{name}'?", { name: ncGroupId }))) {
+            if (!confirm(t('user_vo', "Are you sure you want to delete group '{name}'?", { name: voGroupName || ncGroupId }))) {
                 return;
             }
 
@@ -1906,7 +1909,7 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 if (data.success) {
                     OC.Notification.showTemporary(
-                        t('user_vo', "Group '{name}' deleted successfully", { name: data.nc_group_id })
+                        t('user_vo', "Group '{name}' deleted successfully", { name: data.vo_group_name || data.nc_group_id })
                     );
 
                     // Refresh the current view while preserving state
@@ -1952,7 +1955,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.success) {
                     const summary = data.summary;
                     const message = t('user_vo', "Group '{name}' synced: {added} added, {removed} removed, {skipped} skipped", {
-                        name: data.nc_group_id,
+                        name: data.vo_group_name || data.nc_group_id,
                         added: summary.added,
                         removed: summary.removed,
                         skipped: summary.skipped
@@ -2017,10 +2020,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            const bulkGroupsStatus = document.getElementById('bulk-groups-status');
             bulkCreateGroupsButton.disabled = true;
-            bulkGroupsStatus.textContent = t('user_vo', 'Creating groups...');
-            bulkGroupsStatus.className = 'sync-status';
 
             fetch(OC.generateUrl('/apps/user_vo/admin/bulk-create-groups'), {
                 method: 'POST',
@@ -2041,9 +2041,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         skipped: summary.skipped,
                         errors: summary.errors
                     });
-                    bulkGroupsStatus.textContent = message;
-                    bulkGroupsStatus.className = 'sync-status success';
-                    OC.Notification.showTemporary(t('user_vo', 'Bulk group creation completed'));
+                    OC.Notification.showTemporary(message);
 
                     // Refresh the current view
                     setTimeout(() => {
@@ -2054,14 +2052,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }, 1000);
                 } else {
-                    bulkGroupsStatus.textContent = t('user_vo', 'Error:') + ' ' + (data.error || 'Unknown error');
-                    bulkGroupsStatus.className = 'sync-status error';
+                    OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + (data.error || 'Unknown error'), { type: 'error' });
                 }
             })
             .catch(error => {
                 bulkCreateGroupsButton.disabled = false;
-                bulkGroupsStatus.textContent = t('user_vo', 'Error:') + ' ' + error;
-                bulkGroupsStatus.className = 'sync-status error';
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
             });
         });
     }
@@ -2104,10 +2100,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            const bulkGroupsStatus = document.getElementById('bulk-groups-status');
             bulkDeleteGroupsButton.disabled = true;
-            bulkGroupsStatus.textContent = t('user_vo', 'Deleting groups...');
-            bulkGroupsStatus.className = 'sync-status';
 
             fetch(OC.generateUrl('/apps/user_vo/admin/bulk-delete-groups'), {
                 method: 'POST',
@@ -2128,9 +2121,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         not_found: summary.not_found,
                         errors: summary.errors
                     });
-                    bulkGroupsStatus.textContent = message;
-                    bulkGroupsStatus.className = 'sync-status success';
-                    OC.Notification.showTemporary(t('user_vo', 'Bulk group deletion completed'));
+                    OC.Notification.showTemporary(message);
 
                     // Refresh the current view
                     setTimeout(() => {
@@ -2141,14 +2132,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }, 1000);
                 } else {
-                    bulkGroupsStatus.textContent = t('user_vo', 'Error:') + ' ' + (data.error || 'Unknown error');
-                    bulkGroupsStatus.className = 'sync-status error';
+                    OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + (data.error || 'Unknown error'), { type: 'error' });
                 }
             })
             .catch(error => {
                 bulkDeleteGroupsButton.disabled = false;
-                bulkGroupsStatus.textContent = t('user_vo', 'Error:') + ' ' + error;
-                bulkGroupsStatus.className = 'sync-status error';
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
             });
         });
     }
