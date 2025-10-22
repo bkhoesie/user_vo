@@ -419,54 +419,55 @@ document.addEventListener('DOMContentLoaded', function() {
     // User Data Synchronization
     // ========================================
 
-    const saveUserSyncSettingsButton = document.getElementById('save-user-sync-settings');
     const syncEmailCheckbox = document.getElementById('sync-email');
     const syncPhotoCheckbox = document.getElementById('sync-photo');
-    const userSyncMessage = document.getElementById('user-sync-message');
     const syncAllUsersButton = document.getElementById('sync-all-users');
     const syncAllUsersStatus = document.getElementById('sync-all-users-status');
     const userSyncResults = document.getElementById('user-sync-results');
     const userSyncSummary = document.getElementById('user-sync-summary');
     const userSyncList = document.getElementById('user-sync-list');
 
-    // Save user sync settings
-    if (saveUserSyncSettingsButton) {
-        saveUserSyncSettingsButton.addEventListener('click', function() {
-            const syncEmail = syncEmailCheckbox ? syncEmailCheckbox.checked : false;
+    // Save user sync settings on change (instant save)
+    function saveSyncSettings(syncEmail, syncPhoto) {
+        fetch(OC.generateUrl('/apps/user_vo/admin/save-user-sync-settings'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'requesttoken': OC.requestToken
+            },
+            body: JSON.stringify({
+                sync_email: syncEmail,
+                sync_photo: syncPhoto
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                OC.Notification.showTemporary(t('user_vo', 'Sync settings saved'));
+            } else {
+                OC.Notification.showTemporary(t('user_vo', 'Error saving sync settings'), { type: 'error' });
+            }
+        })
+        .catch(error => {
+            OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
+        });
+    }
+
+    // Sync email checkbox - instant save
+    if (syncEmailCheckbox) {
+        syncEmailCheckbox.addEventListener('change', function() {
+            const syncEmail = this.checked;
             const syncPhoto = syncPhotoCheckbox ? syncPhotoCheckbox.checked : false;
+            saveSyncSettings(syncEmail, syncPhoto);
+        });
+    }
 
-            fetch(OC.generateUrl('/apps/user_vo/admin/save-user-sync-settings'), {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'requesttoken': OC.requestToken
-                },
-                body: JSON.stringify({
-                    sync_email: syncEmail,
-                    sync_photo: syncPhoto
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    userSyncMessage.textContent = data.message;
-                    userSyncMessage.className = 'config-message success';
-                    userSyncMessage.style.display = 'inline';
-
-                    setTimeout(() => {
-                        userSyncMessage.style.display = 'none';
-                    }, 3000);
-                } else {
-                    userSyncMessage.textContent = data.message || 'Error saving settings';
-                    userSyncMessage.className = 'config-message error';
-                    userSyncMessage.style.display = 'inline';
-                }
-            })
-            .catch(error => {
-                userSyncMessage.textContent = 'Error: ' + error;
-                userSyncMessage.className = 'config-message error';
-                userSyncMessage.style.display = 'inline';
-            });
+    // Sync photo checkbox - instant save
+    if (syncPhotoCheckbox) {
+        syncPhotoCheckbox.addEventListener('change', function() {
+            const syncEmail = syncEmailCheckbox ? syncEmailCheckbox.checked : true;
+            const syncPhoto = this.checked;
+            saveSyncSettings(syncEmail, syncPhoto);
         });
     }
 
@@ -478,10 +479,38 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Nightly sync checkbox handler
-    const nightlySyncCheckbox = document.getElementById('enable-nightly-sync');
-    if (nightlySyncCheckbox) {
-        nightlySyncCheckbox.addEventListener('change', function() {
+    // Nightly user sync toggle
+    const nightlyUserSyncCheckbox = document.getElementById('enable-nightly-user-sync');
+    const nightlyGroupSyncCheckbox = document.getElementById('enable-nightly-group-sync');
+
+    if (nightlyUserSyncCheckbox) {
+        nightlyUserSyncCheckbox.addEventListener('change', function() {
             const enabled = this.checked;
+
+            // Enable/disable group sync checkbox based on user sync state
+            if (nightlyGroupSyncCheckbox) {
+                if (enabled) {
+                    nightlyGroupSyncCheckbox.disabled = false;
+                } else {
+                    nightlyGroupSyncCheckbox.disabled = true;
+                    // If user sync is disabled, also disable group sync
+                    if (nightlyGroupSyncCheckbox.checked) {
+                        nightlyGroupSyncCheckbox.checked = false;
+                        // Save the group sync disabled state
+                        fetch(OC.generateUrl('/apps/user_vo/admin/save-nightly-sync'), {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'requesttoken': OC.requestToken
+                            },
+                            body: JSON.stringify({
+                                enabled: false,
+                                sync_type: 'group'
+                            })
+                        });
+                    }
+                }
+            }
 
             fetch(OC.generateUrl('/apps/user_vo/admin/save-nightly-sync'), {
                 method: 'POST',
@@ -489,13 +518,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Content-Type': 'application/json',
                     'requesttoken': OC.requestToken
                 },
-                body: JSON.stringify({ enabled: enabled })
+                body: JSON.stringify({
+                    enabled: enabled,
+                    sync_type: 'user'
+                })
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    OC.Notification.showTemporary(t('user_vo', 'Nightly sync setting saved'));
-                    // Refresh status display
+                    OC.Notification.showTemporary(t('user_vo', 'Nightly user sync setting saved'));
                     loadNightlySyncStatus();
                 } else {
                     OC.Notification.showTemporary(t('user_vo', 'Error saving nightly sync setting'), { type: 'error' });
@@ -505,8 +536,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
             });
         });
+    }
 
-        // Load status on page load
+    // Nightly group sync toggle
+    if (nightlyGroupSyncCheckbox) {
+        nightlyGroupSyncCheckbox.addEventListener('change', function() {
+            const enabled = this.checked;
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/save-nightly-sync'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                },
+                body: JSON.stringify({
+                    enabled: enabled,
+                    sync_type: 'group'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    OC.Notification.showTemporary(t('user_vo', 'Nightly group membership sync setting saved'));
+                    loadNightlySyncStatus();
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Error saving nightly sync setting'), { type: 'error' });
+                }
+            })
+            .catch(error => {
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
+            });
+        });
+    }
+
+    // Load status on page load
+    if (nightlyUserSyncCheckbox || nightlyGroupSyncCheckbox) {
         loadNightlySyncStatus();
     }
 
@@ -555,14 +619,56 @@ document.addEventListener('DOMContentLoaded', function() {
             lastRunElement.textContent = t('user_vo', 'Never');
         }
 
-        // Update summary
-        if (data.last_summary && data.last_summary.total !== undefined) {
+        // Update summary - handle both legacy format and new combined format
+        if (data.last_summary) {
             const summary = data.last_summary;
             const parts = [];
-            if (summary.synced > 0) parts.push(t('user_vo', '{synced} synced', {synced: summary.synced}));
-            if (summary.failed > 0) parts.push(t('user_vo', '{failed} failed', {failed: summary.failed}));
-            if (summary.skipped > 0) parts.push(t('user_vo', '{skipped} skipped', {skipped: summary.skipped}));
-            summaryElement.textContent = parts.length > 0 ? parts.join(', ') : t('user_vo', 'No users to sync');
+
+            // Check if we have the new combined format (users + groups)
+            if (summary.users || summary.groups) {
+                // New format: separate users and groups
+
+                // User sync status (based on LAST RUN, not current settings)
+                if (data.last_run) {
+                    // Job has run at least once
+                    if (summary.users && summary.users.total > 0) {
+                        // User sync ran and processed users
+                        const userParts = [];
+                        if (summary.users.synced > 0) userParts.push(t('user_vo', '{synced} synced', {synced: summary.users.synced}));
+                        if (summary.users.failed > 0) userParts.push(t('user_vo', '{failed} failed', {failed: summary.users.failed}));
+                        if (summary.users.skipped > 0) userParts.push(t('user_vo', '{skipped} skipped', {skipped: summary.users.skipped}));
+                        parts.push(t('user_vo', 'Users:') + ' ' + userParts.join(', '));
+                    } else {
+                        // User sync didn't run (was disabled) or found no users
+                        parts.push(t('user_vo', 'Users: not run'));
+                    }
+
+                    // Group sync status (based on LAST RUN, not current settings)
+                    if (summary.groups && summary.groups.total > 0) {
+                        // Group sync ran and processed groups
+                        const groupParts = [];
+                        if (summary.groups.succeeded > 0) groupParts.push(t('user_vo', '{succeeded} synced', {succeeded: summary.groups.succeeded}));
+                        if (summary.groups.failed > 0) groupParts.push(t('user_vo', '{failed} failed', {failed: summary.groups.failed}));
+                        parts.push(t('user_vo', 'Groups:') + ' ' + groupParts.join(', '));
+                    } else {
+                        // Group sync didn't run (was disabled) or found no groups
+                        parts.push(t('user_vo', 'Groups: not run'));
+                    }
+                } else {
+                    // Job has never run
+                    parts.push(t('user_vo', 'Never run'));
+                }
+
+                summaryElement.textContent = parts.length > 0 ? parts.join(' | ') : t('user_vo', 'No sync performed');
+            } else if (summary.total !== undefined) {
+                // Legacy format: just user sync data
+                if (summary.synced > 0) parts.push(t('user_vo', '{synced} synced', {synced: summary.synced}));
+                if (summary.failed > 0) parts.push(t('user_vo', '{failed} failed', {failed: summary.failed}));
+                if (summary.skipped > 0) parts.push(t('user_vo', '{skipped} skipped', {skipped: summary.skipped}));
+                summaryElement.textContent = parts.length > 0 ? parts.join(', ') : t('user_vo', 'No users to sync');
+            } else {
+                summaryElement.textContent = t('user_vo', 'No sync data available');
+            }
         } else {
             summaryElement.textContent = t('user_vo', 'No sync data available');
         }

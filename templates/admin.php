@@ -198,17 +198,35 @@ style('user_vo', 'admin');
                    <?php if (($_['sync_settings']['sync_photo'] ?? 'false') === 'true'): ?>checked<?php endif; ?> />
             <label for="sync-photo"><?php p($l->t('Sync profile pictures from VO (disabled by default)')); ?></label>
         </p>
-        <p>
-            <button id="save-user-sync-settings" class="button"><?php p($l->t('Save Sync Settings')); ?></button>
-            <span id="user-sync-message" class="config-message"></span>
-        </p>
 
         <h4><?php p($l->t('Nightly Sync')); ?></h4>
         <p>
-            <input type="checkbox" id="enable-nightly-sync" name="enable_nightly_sync" class="checkbox"
+            <input type="checkbox" id="enable-nightly-user-sync" name="enable_nightly_user_sync" class="checkbox"
                    <?php if (($_['nightly_sync']['enabled'] ?? false)): ?>checked<?php endif; ?> />
-            <label for="enable-nightly-sync"><?php p($l->t('Enable automatic nightly sync (runs once per day)')); ?></label>
+            <label for="enable-nightly-user-sync"><?php p($l->t('Enable automatic nightly user sync (runs once per day)')); ?></label>
         </p>
+        <p>
+            <input type="checkbox" id="enable-nightly-group-sync" name="enable_nightly_group_sync" class="checkbox"
+                   <?php if (($_['nightly_sync']['group_enabled'] ?? false)): ?>checked<?php endif; ?>
+                   <?php if (!($_['nightly_sync']['enabled'] ?? false)): ?>disabled<?php endif; ?> />
+            <label for="enable-nightly-group-sync">
+                <?php
+                $managedCount = $_['nightly_sync']['managed_groups_count'] ?? 0;
+                p($l->t('Enable automatic nightly group membership sync for %d managed VO group(s) (runs after user sync)', [$managedCount]));
+                ?>
+            </label>
+        </p>
+        <?php if (($_['nightly_sync']['managed_groups_count'] ?? 0) > 0): ?>
+        <p class="vo-notice" style="margin-left: 25px; margin-top: -8px;">
+            <span class="icon icon-info"></span>
+            <?php p($l->t('Syncs membership for VO groups that have been manually enabled in the Group Management section below.')); ?>
+        </p>
+        <?php else: ?>
+        <p class="vo-notice" style="margin-left: 25px; margin-top: -8px;">
+            <span class="icon icon-info"></span>
+            <?php p($l->t('No VO groups are currently managed. Enable groups in the Group Management section below to use this feature.')); ?>
+        </p>
+        <?php endif; ?>
         <div id="nightly-sync-status" class="nightly-sync-status">
             <div class="status-row">
                 <span class="status-label"><?php p($l->t('Last run:')); ?></span>

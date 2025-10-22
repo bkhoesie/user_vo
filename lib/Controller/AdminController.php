@@ -328,8 +328,16 @@ class AdminController extends Controller {
      */
     public function saveNightlySyncSetting() {
         $enabled = $this->request->getParam('enabled', false);
+        $syncType = $this->request->getParam('sync_type', 'user'); // 'user' or 'group'
 
-        $this->config->setAppValue('user_vo', 'enable_nightly_sync', $enabled ? 'true' : 'false');
+        if ($syncType === 'group') {
+            $this->config->setAppValue('user_vo', 'enable_nightly_group_sync', $enabled ? 'true' : 'false');
+        } else {
+            // User sync - also update new config key for consistency
+            $this->config->setAppValue('user_vo', 'enable_nightly_user_sync', $enabled ? 'true' : 'false');
+            // Keep legacy key for backward compatibility
+            $this->config->setAppValue('user_vo', 'enable_nightly_sync', $enabled ? 'true' : 'false');
+        }
 
         return new JSONResponse([
             'success' => true,
@@ -341,7 +349,11 @@ class AdminController extends Controller {
      * Get nightly sync status
      */
     public function getNightlySyncStatus() {
-        $enabled = $this->config->getAppValue('user_vo', 'enable_nightly_sync', 'false') === 'true';
+        // Get both user and group sync settings (backward compatible)
+        $legacyEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_sync', 'false') === 'true';
+        $userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', $legacyEnabled ? 'true' : 'false') === 'true';
+        $groupSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', 'false') === 'true';
+
         $lastRun = $this->config->getAppValue('user_vo', 'nightly_sync_last_run', '');
         $lastStatus = $this->config->getAppValue('user_vo', 'nightly_sync_last_status', 'never');
         $lastError = $this->config->getAppValue('user_vo', 'nightly_sync_last_error', '');
@@ -351,7 +363,8 @@ class AdminController extends Controller {
 
         return new JSONResponse([
             'success' => true,
-            'enabled' => $enabled,
+            'user_sync_enabled' => $userSyncEnabled,
+            'group_sync_enabled' => $groupSyncEnabled,
             'last_run' => $lastRun ? (int)$lastRun : null,
             'last_status' => $lastStatus,
             'last_error' => $lastError,

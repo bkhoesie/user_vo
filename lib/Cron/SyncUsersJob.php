@@ -17,6 +17,14 @@ use OCP\IConfig;
 use function OCP\Log\logger;
 use OCA\UserVO\Controller\AdminController;
 
+/**
+ * Coordinated nightly sync job for users and groups
+ *
+ * Runs user sync first (updates vo_group_ids), then group sync (uses those IDs).
+ * Each can be enabled/disabled independently via config.
+ *
+ * Backward compatible: Existing 'enable_nightly_sync' config enables user sync.
+ */
 class SyncUsersJob extends TimedJob {
     private IConfig $config;
     private AdminController $adminController;
@@ -31,60 +39,99 @@ class SyncUsersJob extends TimedJob {
     }
 
     protected function run($argument): void {
-        // Check if nightly sync is enabled
-        $enabled = $this->config->getAppValue('user_vo', 'enable_nightly_sync', 'false') === 'true';
+        // Backward compatibility: 'enable_nightly_sync' enables user sync
+        // New: 'enable_nightly_user_sync' explicitly controls user sync
+        // New: 'enable_nightly_group_sync' controls group sync
+        $legacyEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_sync', 'false') === 'true';
+        $userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', $legacyEnabled ? 'true' : 'false') === 'true';
+        $groupSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', 'false') === 'true';
 
-        if (!$enabled) {
-            logger('user_vo')->debug('Nightly sync is disabled, skipping');
+        if (!$userSyncEnabled && !$groupSyncEnabled) {
+            logger('user_vo')->debug('Nightly sync is disabled (both user and group sync disabled), skipping');
             return;
         }
 
-        logger('user_vo')->info('Starting nightly user sync');
+        logger('user_vo')->info('Starting nightly VO sync', [
+            'user_sync' => $userSyncEnabled,
+            'group_sync' => $groupSyncEnabled
+        ]);
 
         $startTime = time();
+        $userSummary = null;
+        $groupSummary = null;
+        $errors = [];
 
-        try {
-            // Call syncFromVO and extract data from JSON response
-            $response = $this->adminController->syncFromVO();
-            $data = $response->getData();
+        // Step 1: Sync users (if enabled)
+        if ($userSyncEnabled) {
+            try {
+                logger('user_vo')->info('Starting user sync');
+                $response = $this->adminController->syncFromVO();
+                $data = $response->getData();
 
-            if (!$data['success']) {
-                throw new \Exception($data['error'] ?? 'Sync failed');
+                if (!$data['success']) {
+                    throw new \Exception($data['error'] ?? 'User sync failed');
+                }
+
+                // Convert 'success' key to 'synced' for consistency
+                $userSummary = [
+                    'total' => $data['summary']['total'],
+                    'synced' => $data['summary']['success'],
+                    'failed' => $data['summary']['failed'],
+                    'skipped' => $data['summary']['skipped']
+                ];
+
+                logger('user_vo')->info('User sync completed', $userSummary);
+
+            } catch (\Exception $e) {
+                $error = 'User sync failed: ' . $e->getMessage();
+                $errors[] = $error;
+                logger('user_vo')->error($error, ['trace' => $e->getTraceAsString()]);
+
+                // Don't proceed to group sync if user sync failed
+                $groupSyncEnabled = false;
             }
+        }
 
-            // Convert 'success' key to 'synced' for consistency
-            $summary = [
-                'total' => $data['summary']['total'],
-                'synced' => $data['summary']['success'],
-                'failed' => $data['summary']['failed'],
-                'skipped' => $data['summary']['skipped']
-            ];
+        // Step 2: Sync groups (if enabled and user sync succeeded or was skipped)
+        if ($groupSyncEnabled) {
+            try {
+                logger('user_vo')->info('Starting group sync');
+                $response = $this->adminController->syncAllGroups();
+                $data = $response->getData();
 
-            // Store success status
-            $this->config->setAppValue('user_vo', 'nightly_sync_last_run', (string)$startTime);
-            $this->config->setAppValue('user_vo', 'nightly_sync_last_status', 'success');
-            $this->config->setAppValue('user_vo', 'nightly_sync_last_error', '');
-            $this->config->setAppValue('user_vo', 'nightly_sync_last_summary', json_encode($summary));
+                if (!$data['success']) {
+                    throw new \Exception($data['error'] ?? 'Group sync failed');
+                }
 
-            logger('user_vo')->info('Nightly user sync completed', $summary);
+                $groupSummary = [
+                    'total' => $data['summary']['total'],
+                    'succeeded' => $data['summary']['succeeded'],
+                    'failed' => $data['summary']['failed']
+                ];
 
-        } catch (\Exception $e) {
-            // Store failure status
-            $error = $e->getMessage();
-            $this->config->setAppValue('user_vo', 'nightly_sync_last_run', (string)$startTime);
-            $this->config->setAppValue('user_vo', 'nightly_sync_last_status', 'failed');
-            $this->config->setAppValue('user_vo', 'nightly_sync_last_error', $error);
-            $this->config->setAppValue('user_vo', 'nightly_sync_last_summary', json_encode([
-                'total' => 0,
-                'synced' => 0,
-                'failed' => 0,
-                'skipped' => 0
-            ]));
+                logger('user_vo')->info('Group sync completed', $groupSummary);
 
-            logger('user_vo')->error('Nightly user sync failed', [
-                'error' => $error,
-                'trace' => $e->getTraceAsString()
-            ]);
+            } catch (\Exception $e) {
+                $error = 'Group sync failed: ' . $e->getMessage();
+                $errors[] = $error;
+                logger('user_vo')->error($error, ['trace' => $e->getTraceAsString()]);
+            }
+        }
+
+        // Store combined status
+        $overallStatus = empty($errors) ? 'success' : 'failed';
+        $this->config->setAppValue('user_vo', 'nightly_sync_last_run', (string)$startTime);
+        $this->config->setAppValue('user_vo', 'nightly_sync_last_status', $overallStatus);
+        $this->config->setAppValue('user_vo', 'nightly_sync_last_error', implode('; ', $errors));
+        $this->config->setAppValue('user_vo', 'nightly_sync_last_summary', json_encode([
+            'users' => $userSummary ?: ['total' => 0, 'synced' => 0, 'failed' => 0, 'skipped' => 0],
+            'groups' => $groupSummary ?: ['total' => 0, 'succeeded' => 0, 'failed' => 0]
+        ]));
+
+        if ($overallStatus === 'success') {
+            logger('user_vo')->info('Nightly VO sync completed successfully');
+        } else {
+            logger('user_vo')->error('Nightly VO sync completed with errors', ['errors' => $errors]);
         }
     }
 }
