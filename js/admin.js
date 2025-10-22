@@ -1548,7 +1548,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Show checkbox for all real groups (both managed and unmanaged), but not for placeholders or deleted groups
             const checkbox = (isPlaceholder || group.deleted_in_vo)
                 ? '<span class="vo-text-muted">—</span>'
-                : `<input type="checkbox" class="vo-group-checkbox" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-is-managed="${group.is_managed ? 'true' : 'false'}" />`;
+                : `<input type="checkbox" class="vo-group-checkbox" value="${escapeHtml(group.vo_group_id)}" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-is-managed="${group.is_managed ? 'true' : 'false'}" />`;
 
             // Format member count displays
             let voMemberCountDisplay = '-';
@@ -1599,6 +1599,7 @@ document.addEventListener('DOMContentLoaded', function() {
             row.setAttribute('data-parent-id', group.vo_parent_id || '0');
             row.setAttribute('data-position-index', group._positionIndex);
             row.setAttribute('data-depth', depth.toString());
+            row.setAttribute('data-is-managed', group.is_managed ? 'true' : 'false');
 
             // Hide child rows if ANY ancestor is not expanded (check entire ancestor chain)
             if (depth > 0) {
@@ -1728,14 +1729,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     displayGroups(data.groups, 'all');
                     groupsResults.style.display = 'block';
                 } else {
-                    groupsStatus.textContent = t('user_vo', 'Failed to load groups:') + ' ' + (data.error || 'Unknown error');
-                    groupsStatus.className = 'sync-status error';
+                    groupsStatus.textContent = '';
+                    OC.Notification.showTemporary(t('user_vo', 'Failed to load groups:') + ' ' + (data.error || 'Unknown error'), { type: 'error' });
                 }
             })
             .catch(error => {
                 loadAllVOGroupsButton.disabled = false;
-                groupsStatus.textContent = t('user_vo', 'Error:') + ' ' + error;
-                groupsStatus.className = 'sync-status error';
+                groupsStatus.textContent = '';
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
             });
         });
     }
@@ -1763,14 +1764,98 @@ document.addEventListener('DOMContentLoaded', function() {
                     displayGroups(data.groups, 'managed');
                     groupsResults.style.display = 'block';
                 } else {
-                    groupsStatus.textContent = t('user_vo', 'Failed to load groups:') + ' ' + (data.error || 'Unknown error');
-                    groupsStatus.className = 'sync-status error';
+                    groupsStatus.textContent = '';
+                    OC.Notification.showTemporary(t('user_vo', 'Failed to load groups:') + ' ' + (data.error || 'Unknown error'), { type: 'error' });
                 }
             })
             .catch(error => {
                 loadManagedGroupsButton.disabled = false;
-                groupsStatus.textContent = t('user_vo', 'Error:') + ' ' + error;
-                groupsStatus.className = 'sync-status error';
+                groupsStatus.textContent = '';
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
+            });
+        });
+    }
+
+    // Sync Selected Groups button
+    const bulkSyncGroupsButton = document.getElementById('bulk-sync-groups');
+    if (bulkSyncGroupsButton) {
+        bulkSyncGroupsButton.addEventListener('click', function() {
+            // Collect selected checkboxes
+            const selectedCheckboxes = document.querySelectorAll('.vo-group-checkbox:checked');
+
+            if (selectedCheckboxes.length === 0) {
+                OC.Notification.showTemporary(t('user_vo', 'Please select at least one group'), { type: 'error' });
+                return;
+            }
+
+            // Filter only managed groups (those that have is_managed = true)
+            const voGroupIds = [];
+            selectedCheckboxes.forEach(checkbox => {
+                const row = checkbox.closest('tr');
+                const isManaged = row.getAttribute('data-is-managed') === 'true';
+                if (isManaged) {
+                    voGroupIds.push(checkbox.value);
+                }
+            });
+
+            if (voGroupIds.length === 0) {
+                OC.Notification.showTemporary(t('user_vo', 'Selected groups are not created yet (only created groups can be synced)'), { type: 'error' });
+                return;
+            }
+
+            bulkSyncGroupsButton.disabled = true;
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/sync-selected-groups'), {
+                method: 'POST',
+                headers: {
+                    'requesttoken': OC.requestToken,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    vo_group_ids: voGroupIds
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                bulkSyncGroupsButton.disabled = false;
+
+                if (data.success) {
+                    const summary = data.summary;
+                    const message = t('user_vo', 'Synced {total} groups ({succeeded} succeeded, {failed} failed)', {
+                        total: summary.total,
+                        succeeded: summary.succeeded,
+                        failed: summary.failed
+                    });
+
+                    OC.Notification.showTemporary(message);
+
+                    // Show detailed results in console
+                    if (data.results && data.results.length > 0) {
+                        console.log('Bulk sync results:', data.results);
+                        data.results.forEach(result => {
+                            if (result.status === 'error') {
+                                console.error('Failed to sync group:', result.vo_group_name, result.error);
+                            } else {
+                                console.log('Synced group:', result.vo_group_name,
+                                    'Added:', result.added.length,
+                                    'Removed:', result.removed.length);
+                            }
+                        });
+                    }
+
+                    // Reload groups view to show updated data
+                    if (currentViewType === 'managed' && loadManagedGroupsButton) {
+                        loadManagedGroupsButton.click();
+                    } else if (currentViewType === 'all' && loadAllVOGroupsButton) {
+                        loadAllVOGroupsButton.click();
+                    }
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + (data.error || 'Unknown error'), { type: 'error' });
+                }
+            })
+            .catch(error => {
+                bulkSyncGroupsButton.disabled = false;
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
             });
         });
     }
