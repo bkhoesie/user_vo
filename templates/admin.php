@@ -266,10 +266,11 @@ style('user_vo', 'admin');
                         <th><?php p($l->t('NC Username')); ?></th>
                         <th><?php p($l->t('VO Username')); ?></th>
                         <th><?php p($l->t('VO User ID')); ?></th>
-                        <th><?php p($l->t('VO Groups')); ?></th>
                         <th><?php p($l->t('Display Name')); ?></th>
                         <th><?php p($l->t('Email')); ?></th>
                         <th><?php p($l->t('Photo')); ?></th>
+                        <th><?php p($l->t('Group IDs')); ?></th>
+                        <th><?php p($l->t('Groups')); ?></th>
                         <th><?php p($l->t('Last Synced')); ?></th>
                         <th><?php p($l->t('Status')); ?></th>
                     </tr>

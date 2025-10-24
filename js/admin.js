@@ -359,7 +359,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!groups || groups.length === 0) {
             return '<span class="no-groups">—</span>';
         }
-        return '<span class="groups-list">' + escapeHtml(groups.join(', ')) + '</span>';
+
+        // Extract display names for tooltip
+        const displayNames = groups.map(g => g.display_name).join(', ');
+        const count = groups.length;
+
+        return '<span class="groups-list" title="All groups: ' + escapeHtml(displayNames) + '">' + count + '</span>';
     }
 
     function renderCreationDate(creationDate) {
@@ -758,21 +763,24 @@ document.addEventListener('DOMContentLoaded', function() {
                         const statusIcon = result.status === 'info' ? 'ℹ' :
                                          result.status === 'skipped' ? '○' : '○';
 
-                        // Format VO Groups column
-                        let voGroupsDisplay = '-';
+                        // Format VO Group IDs column
+                        let voGroupIdsDisplay = '-';
                         if (result.vo_group_ids) {
                             const groupIds = result.vo_group_ids.split(',').filter(id => id.trim());
                             const groupCount = groupIds.length;
                             if (groupCount > 0) {
-                                if (groupCount <= 4) {
-                                    // Show all groups inline
-                                    voGroupsDisplay = escapeHtml(groupIds.join(', '));
-                                } else {
-                                    // Show first 2 + "... (N total)" with tooltip
-                                    const visibleGroups = groupIds.slice(0, 2).join(', ');
-                                    voGroupsDisplay = `<span title="${escapeHtml(groupIds.join(', '))}">${escapeHtml(visibleGroups)}, ... (${groupCount} total)</span>`;
-                                }
+                                // Show count with full list in tooltip
+                                voGroupIdsDisplay = `<span title="All VO group IDs: ${escapeHtml(groupIds.join(', '))}">${groupCount}</span>`;
                             }
+                        }
+
+                        // Format Managed Groups column
+                        let managedGroupsDisplay = '-';
+                        if (result.managed_groups_count > 0) {
+                            const groupNames = result.managed_groups_names || '';
+                            managedGroupsDisplay = `<span title="Managed groups: ${escapeHtml(groupNames)}">${result.managed_groups_count}</span>`;
+                        } else {
+                            managedGroupsDisplay = `<span title="No managed groups">0</span>`;
                         }
 
                         row.innerHTML = `
@@ -780,10 +788,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             <td>${escapeHtml(result.uid)}</td>
                             <td>${escapeHtml(result.vo_username || '-')}</td>
                             <td>${escapeHtml(result.vo_user_id || '-')}</td>
-                            <td>${voGroupsDisplay}</td>
                             <td>${escapeHtml(result.display_name || '-')}</td>
                             <td>${escapeHtml(result.email || '-')}</td>
                             <td>${escapeHtml(result.photo_status || '-')}</td>
+                            <td>${voGroupIdsDisplay}</td>
+                            <td>${managedGroupsDisplay}</td>
                             <td>${escapeHtml(result.last_synced || '-')}</td>
                             <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
                         `;
@@ -847,21 +856,24 @@ document.addEventListener('DOMContentLoaded', function() {
                                          result.status === 'failed' ? '✗' :
                                          result.status === 'skipped' ? '○' : '○';
 
-                        // Format VO Groups column
-                        let voGroupsDisplay = '-';
+                        // Format VO Group IDs column
+                        let voGroupIdsDisplay = '-';
                         if (result.vo_group_ids) {
                             const groupIds = result.vo_group_ids.split(',').filter(id => id.trim());
                             const groupCount = groupIds.length;
                             if (groupCount > 0) {
-                                if (groupCount <= 4) {
-                                    // Show all groups inline
-                                    voGroupsDisplay = escapeHtml(groupIds.join(', '));
-                                } else {
-                                    // Show first 2 + "... (N total)" with tooltip
-                                    const visibleGroups = groupIds.slice(0, 2).join(', ');
-                                    voGroupsDisplay = `<span title="${escapeHtml(groupIds.join(', '))}">${escapeHtml(visibleGroups)}, ... (${groupCount} total)</span>`;
-                                }
+                                // Show count with full list in tooltip
+                                voGroupIdsDisplay = `<span title="All VO group IDs: ${escapeHtml(groupIds.join(', '))}">${groupCount}</span>`;
                             }
+                        }
+
+                        // Format Managed Groups column
+                        let managedGroupsDisplay = '-';
+                        if (result.managed_groups_count > 0) {
+                            const groupNames = result.managed_groups_names || '';
+                            managedGroupsDisplay = `<span title="Managed groups: ${escapeHtml(groupNames)}">${result.managed_groups_count}</span>`;
+                        } else {
+                            managedGroupsDisplay = `<span title="No managed groups">0</span>`;
                         }
 
                         row.innerHTML = `
@@ -869,10 +881,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             <td>${escapeHtml(result.uid)}</td>
                             <td>${escapeHtml(result.vo_username || '-')}</td>
                             <td>${escapeHtml(result.vo_user_id || '-')}</td>
-                            <td>${voGroupsDisplay}</td>
                             <td>${escapeHtml(result.display_name || '-')}</td>
                             <td>${escapeHtml(result.email || '-')}</td>
                             <td>${escapeHtml(result.photo_status || '-')}</td>
+                            <td>${voGroupIdsDisplay}</td>
+                            <td>${managedGroupsDisplay}</td>
                             <td>${escapeHtml(result.last_synced || '-')}</td>
                             <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
                         `;
@@ -936,21 +949,24 @@ document.addEventListener('DOMContentLoaded', function() {
                             photoDisplay = '⚠ ' + photoDisplay;
                         }
 
-                        // Format VO Groups column
-                        let voGroupsDisplay = '-';
+                        // Format VO Group IDs column
+                        let voGroupIdsDisplay = '-';
                         if (result.vo_group_ids) {
                             const groupIds = result.vo_group_ids.split(',').filter(id => id.trim());
                             const groupCount = groupIds.length;
                             if (groupCount > 0) {
-                                if (groupCount <= 4) {
-                                    // Show all groups inline
-                                    voGroupsDisplay = escapeHtml(groupIds.join(', '));
-                                } else {
-                                    // Show first 2 + "... (N total)" with tooltip
-                                    const visibleGroups = groupIds.slice(0, 2).join(', ');
-                                    voGroupsDisplay = `<span title="${escapeHtml(groupIds.join(', '))}">${escapeHtml(visibleGroups)}, ... (${groupCount} total)</span>`;
-                                }
+                                // Show count with full list in tooltip
+                                voGroupIdsDisplay = `<span title="All VO group IDs: ${escapeHtml(groupIds.join(', '))}">${groupCount}</span>`;
                             }
+                        }
+
+                        // Format Managed Groups column
+                        let managedGroupsDisplay = '-';
+                        if (result.managed_groups_count > 0) {
+                            const groupNames = result.managed_groups_names || '';
+                            managedGroupsDisplay = `<span title="Managed groups: ${escapeHtml(groupNames)}">${result.managed_groups_count}</span>`;
+                        } else {
+                            managedGroupsDisplay = `<span title="No managed groups">0</span>`;
                         }
 
                         row.innerHTML = `
@@ -958,10 +974,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             <td>${escapeHtml(result.uid)}</td>
                             <td>${escapeHtml(result.vo_username || '-')}</td>
                             <td>${escapeHtml(result.vo_user_id || '-')}</td>
-                            <td>${voGroupsDisplay}</td>
                             <td>${escapeHtml(result.display_name || '-')}</td>
                             <td>${escapeHtml(result.email || '-')}</td>
                             <td>${photoDisplay}</td>
+                            <td>${voGroupIdsDisplay}</td>
+                            <td>${managedGroupsDisplay}</td>
                             <td>${escapeHtml(result.last_synced || '-')}</td>
                             <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
                         `;
@@ -1264,21 +1281,24 @@ document.addEventListener('DOMContentLoaded', function() {
                                     photoDisplay = '⚠ ' + photoDisplay;
                                 }
 
-                                // Format VO Groups column
-                                let voGroupsDisplay = '-';
+                                // Format VO Group IDs column
+                                let voGroupIdsDisplay = '-';
                                 if (result.vo_group_ids) {
                                     const groupIds = result.vo_group_ids.split(',').filter(id => id.trim());
                                     const groupCount = groupIds.length;
                                     if (groupCount > 0) {
-                                        if (groupCount <= 4) {
-                                            // Show all groups inline
-                                            voGroupsDisplay = escapeHtml(groupIds.join(', '));
-                                        } else {
-                                            // Show first 2 + "... (N total)" with tooltip
-                                            const visibleGroups = groupIds.slice(0, 2).join(', ');
-                                            voGroupsDisplay = `<span title="${escapeHtml(groupIds.join(', '))}">${escapeHtml(visibleGroups)}, ... (${groupCount} total)</span>`;
-                                        }
+                                        // Show count with full list in tooltip
+                                        voGroupIdsDisplay = `<span title="All VO group IDs: ${escapeHtml(groupIds.join(', '))}">${groupCount}</span>`;
                                     }
+                                }
+
+                                // Format Managed Groups column
+                                let managedGroupsDisplay = '-';
+                                if (result.managed_groups_count > 0) {
+                                    const groupNames = result.managed_groups_names || '';
+                                    managedGroupsDisplay = `<span title="Managed groups: ${escapeHtml(groupNames)}">${result.managed_groups_count}</span>`;
+                                } else {
+                                    managedGroupsDisplay = `<span title="No managed groups">0</span>`;
                                 }
 
                                 // Update the row with new data
@@ -1288,10 +1308,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <td>${escapeHtml(result.uid)}</td>
                                     <td>${escapeHtml(result.vo_username || '-')}</td>
                                     <td>${escapeHtml(result.vo_user_id || '-')}</td>
-                                    <td>${voGroupsDisplay}</td>
                                     <td>${escapeHtml(result.display_name || '-')}</td>
                                     <td>${escapeHtml(result.email || '-')}</td>
                                     <td>${photoDisplay}</td>
+                                    <td>${voGroupIdsDisplay}</td>
+                                    <td>${managedGroupsDisplay}</td>
                                     <td>${escapeHtml(result.last_synced || '-')}</td>
                                     <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
                                 `;

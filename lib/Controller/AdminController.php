@@ -377,6 +377,47 @@ class AdminController extends Controller {
     }
 
     /**
+     * Helper method to get managed group information for a user
+     *
+     * @param string $uid Nextcloud username
+     * @param string $voGroupIds Comma-separated VO group IDs
+     * @return array ['count' => int, 'names' => string] Count and comma-separated display names
+     */
+    private function getManagedGroupsForUser(string $uid, string $voGroupIds): array {
+        // If no VO group IDs, return empty
+        if (empty($voGroupIds)) {
+            return ['count' => 0, 'names' => ''];
+        }
+
+        // Parse VO group IDs
+        $groupIds = array_filter(array_map('trim', explode(',', $voGroupIds)));
+        if (empty($groupIds)) {
+            return ['count' => 0, 'names' => ''];
+        }
+
+        // Query managed groups table for these VO group IDs
+        $qb = $this->connection->getQueryBuilder();
+        $qb->select('nc_display_name', 'vo_group_id')
+            ->from('user_vo_groups')
+            ->where($qb->expr()->in('vo_group_id', $qb->createNamedParameter($groupIds, \Doctrine\DBAL\Connection::PARAM_STR_ARRAY)))
+            ->orderBy('nc_display_name', 'ASC');
+
+        $result = $qb->executeQuery();
+        $managedGroups = $result->fetchAll();
+        $result->closeCursor();
+
+        // Extract display names
+        $displayNames = array_map(function($row) {
+            return $row['nc_display_name'];
+        }, $managedGroups);
+
+        return [
+            'count' => count($displayNames),
+            'names' => implode(', ', $displayNames)
+        ];
+    }
+
+    /**
      * Preview local user data (no API calls)
      */
     public function previewLocalUsers() {
@@ -403,10 +444,14 @@ class AdminController extends Controller {
 
                 $voUserId = $userRow['vo_user_id'];
                 $voUsername = $userRow['vo_username'];
+                $voGroupIds = $userRow['vo_group_ids'] ?: '';
 
                 // Get user email
                 $user = \OC::$server->getUserManager()->get($uid);
                 $email = $user ? $user->getSystemEMailAddress() : '';
+
+                // Get managed groups for this user
+                $managedGroupsInfo = $this->getManagedGroupsForUser($uid, $voGroupIds);
 
                 // Check if user has a custom photo (not generated/default)
                 $photoStatus = '-';
@@ -427,7 +472,9 @@ class AdminController extends Controller {
                     'uid' => $uid,
                     'vo_username' => $voUsername ?: '-',
                     'vo_user_id' => $voUserId ?: '-',
-                    'vo_group_ids' => $userRow['vo_group_ids'] ?: '',
+                    'vo_group_ids' => $voGroupIds,
+                    'managed_groups_count' => $managedGroupsInfo['count'],
+                    'managed_groups_names' => $managedGroupsInfo['names'],
                     'display_name' => $userRow['displayname'] ?: '-',
                     'email' => $email ?: '-',
                     'photo_status' => $photoStatus,
@@ -494,6 +541,8 @@ class AdminController extends Controller {
                         'vo_username' => '',
                         'vo_user_id' => '',
                         'vo_group_ids' => '',
+                        'managed_groups_count' => 0,
+                        'managed_groups_names' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -513,6 +562,8 @@ class AdminController extends Controller {
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
                         'vo_group_ids' => '',
+                        'managed_groups_count' => 0,
+                        'managed_groups_names' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -535,6 +586,8 @@ class AdminController extends Controller {
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
                         'vo_group_ids' => '',
+                        'managed_groups_count' => 0,
+                        'managed_groups_names' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -556,11 +609,17 @@ class AdminController extends Controller {
                 // Check if user is deleted
                 $isDeleted = $voUserData['_deleted'] ?? false;
 
+                // Get managed groups for this user
+                $voGroupIds = $voUserData['group_ids'] ?? '';
+                $managedGroupsInfo = $this->getManagedGroupsForUser($uid, $voGroupIds);
+
                 $results[] = [
                     'uid' => $uid,
                     'vo_username' => $voUserData['username'] ?? '',
                     'vo_user_id' => $voUserId,
-                    'vo_group_ids' => $voUserData['group_ids'] ?? '',
+                    'vo_group_ids' => $voGroupIds,
+                    'managed_groups_count' => $managedGroupsInfo['count'],
+                    'managed_groups_names' => $managedGroupsInfo['names'],
                     'display_name' => trim($voUserData['firstname'] . ' ' . $voUserData['lastname']),
                     'email' => $voUserData['email'] ?? '',
                     'photo_status' => $photoStatus,
@@ -675,6 +734,8 @@ class AdminController extends Controller {
                         'vo_username' => '',
                         'vo_user_id' => '',
                         'vo_group_ids' => '',
+                        'managed_groups_count' => 0,
+                        'managed_groups_names' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -695,6 +756,8 @@ class AdminController extends Controller {
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
                         'vo_group_ids' => '',
+                        'managed_groups_count' => 0,
+                        'managed_groups_names' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -719,6 +782,8 @@ class AdminController extends Controller {
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
                         'vo_group_ids' => '',
+                        'managed_groups_count' => 0,
+                        'managed_groups_names' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -768,12 +833,18 @@ class AdminController extends Controller {
                         $photoStatus = 'Available (not synced)';
                     }
 
+                    // Get managed groups for this user
+                    $voGroupIds = $userData['vo_group_ids'] ?? '';
+                    $managedGroupsInfo = $this->getManagedGroupsForUser($uid, $voGroupIds);
+
                     if ($isDeleted) {
                         $results[] = [
                             'uid' => $uid,
                             'vo_username' => $voUserData['username'] ?? '',
                             'vo_user_id' => $voUserId,
-                            'vo_group_ids' => $userData['vo_group_ids'] ?? '',
+                            'vo_group_ids' => $voGroupIds,
+                            'managed_groups_count' => $managedGroupsInfo['count'],
+                            'managed_groups_names' => $managedGroupsInfo['names'],
                             'display_name' => trim($voUserData['firstname'] . ' ' . $voUserData['lastname']),
                             'email' => $voUserData['email'] ?? '',
                             'photo_status' => $photoStatus,
@@ -788,7 +859,9 @@ class AdminController extends Controller {
                             'uid' => $uid,
                             'vo_username' => $userData['vo_username'] ?? '',
                             'vo_user_id' => $voUserId,
-                            'vo_group_ids' => $userData['vo_group_ids'] ?? '',
+                            'vo_group_ids' => $voGroupIds,
+                            'managed_groups_count' => $managedGroupsInfo['count'],
+                            'managed_groups_names' => $managedGroupsInfo['names'],
                             'display_name' => $userData['displayname'] ?? '',
                             'email' => $email,
                             'photo_status' => $photoStatus,
@@ -903,6 +976,8 @@ class AdminController extends Controller {
                         'vo_username' => '',
                         'vo_user_id' => '',
                         'vo_group_ids' => '',
+                        'managed_groups_count' => 0,
+                        'managed_groups_names' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -923,6 +998,8 @@ class AdminController extends Controller {
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
                         'vo_group_ids' => '',
+                        'managed_groups_count' => 0,
+                        'managed_groups_names' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -947,6 +1024,8 @@ class AdminController extends Controller {
                         'vo_username' => '',
                         'vo_user_id' => $voUserId,
                         'vo_group_ids' => '',
+                        'managed_groups_count' => 0,
+                        'managed_groups_names' => '',
                         'display_name' => '',
                         'email' => '',
                         'photo_status' => '',
@@ -996,12 +1075,18 @@ class AdminController extends Controller {
                         $photoStatus = 'Available (not synced)';
                     }
 
+                    // Get managed groups for this user
+                    $voGroupIds = $userData['vo_group_ids'] ?? '';
+                    $managedGroupsInfo = $this->getManagedGroupsForUser($uid, $voGroupIds);
+
                     if ($isDeleted) {
                         $results[] = [
                             'uid' => $uid,
                             'vo_username' => $voUserData['username'] ?? '',
                             'vo_user_id' => $voUserId,
-                            'vo_group_ids' => $userData['vo_group_ids'] ?? '',
+                            'vo_group_ids' => $voGroupIds,
+                            'managed_groups_count' => $managedGroupsInfo['count'],
+                            'managed_groups_names' => $managedGroupsInfo['names'],
                             'display_name' => trim($voUserData['firstname'] . ' ' . $voUserData['lastname']),
                             'email' => $voUserData['email'] ?? '',
                             'photo_status' => $photoStatus,
@@ -1016,7 +1101,9 @@ class AdminController extends Controller {
                             'uid' => $uid,
                             'vo_username' => $userData['vo_username'] ?? '',
                             'vo_user_id' => $voUserId,
-                            'vo_group_ids' => $userData['vo_group_ids'] ?? '',
+                            'vo_group_ids' => $voGroupIds,
+                            'managed_groups_count' => $managedGroupsInfo['count'],
+                            'managed_groups_names' => $managedGroupsInfo['names'],
                             'display_name' => $userData['displayname'] ?? '',
                             'email' => $email,
                             'photo_status' => $photoStatus,
@@ -1318,6 +1405,7 @@ class AdminController extends Controller {
 
     /**
      * Get groups for a user
+     * Returns array of arrays with 'gid' and 'display_name'
      */
     private function getUserGroups($uid) {
         $user = \OC::$server->getUserManager()->get($uid);
@@ -1326,11 +1414,14 @@ class AdminController extends Controller {
         }
 
         $groups = $this->groupManager->getUserGroups($user);
-        $groupNames = [];
+        $groupData = [];
         foreach ($groups as $group) {
-            $groupNames[] = $group->getGID();
+            $groupData[] = [
+                'gid' => $group->getGID(),
+                'display_name' => $group->getDisplayName()
+            ];
         }
-        return $groupNames;
+        return $groupData;
     }
 
     /**
