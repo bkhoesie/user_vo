@@ -12,6 +12,7 @@ use OCP\IConfig;
 use OCA\UserVO\UserVOAuth;
 use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
+use OCA\UserVO\Service\GroupSyncService;
 use Psr\Log\LoggerInterface;
 
 class AdminController extends Controller {
@@ -22,6 +23,7 @@ class AdminController extends Controller {
     private $config;
     private $configService;
     private $groupNameHarmonizer;
+    private $groupSyncService;
 
     public function __construct(
         $appName,
@@ -31,7 +33,8 @@ class AdminController extends Controller {
         IGroupManager $groupManager,
         IConfig $config,
         ConfigService $configService,
-        GroupNameHarmonizer $groupNameHarmonizer
+        GroupNameHarmonizer $groupNameHarmonizer,
+        GroupSyncService $groupSyncService
     ) {
         parent::__construct($appName, $request);
         $this->connection = $connection;
@@ -40,6 +43,7 @@ class AdminController extends Controller {
         $this->config = $config;
         $this->configService = $configService;
         $this->groupNameHarmonizer = $groupNameHarmonizer;
+        $this->groupSyncService = $groupSyncService;
     }
 
     /**
@@ -3216,6 +3220,19 @@ class AdminController extends Controller {
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Sync specific groups by VO group IDs (for login-time sync)
+     *
+     * This is a thin wrapper around GroupSyncService for HTTP endpoint access.
+     * The actual logic is in the service layer for reusability.
+     *
+     * @param array $voGroupIds Array of VO group IDs to sync
+     * @return array Result with 'success', 'synced', 'failed', 'results'
+     */
+    public function syncGroupsByIds(array $voGroupIds): array {
+        return $this->groupSyncService->syncGroupsByIds($voGroupIds);
     }
 
     /**

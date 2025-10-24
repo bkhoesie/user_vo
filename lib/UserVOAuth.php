@@ -120,6 +120,9 @@ class UserVOAuth extends Base {
             if ($voUserData !== null) {
                 // Sync user data (display name, email, phone, metadata)
                 $this->syncUserData($uid, $voUserData);
+
+                // Sync user's group memberships (login-time group sync)
+                $this->syncUserGroupsOnLogin($uid, $voUserData);
             } else {
                 logger('user_vo')->warning('Failed to fetch user data from VO after successful login', [
                     'uid' => $uid,
@@ -702,4 +705,89 @@ class UserVOAuth extends Base {
             ]);
         }
     }
+
+    /**
+     * Sync user's group memberships at login time
+     *
+     * Performs full sync (metadata + membership) for all managed VO groups that this user
+     * is or was a member of. This ensures:
+     * - User is added to groups they should be in (after login vo_group_ids)
+     * - User is removed from groups they shouldn't be in anymore (comparing NC membership)
+     * - Group metadata is updated (display names, sync timestamps, member counts)
+     *
+     * @param string $uid NC username
+     * @param array $voUserData User data from VO API
+     */
+    private function syncUserGroupsOnLogin(string $uid, array $voUserData): void {
+        try {
+            // Get user's NEW VO group IDs (after login)
+            $newVoGroupIds = !empty($voUserData['group_ids'])
+                ? array_map('trim', explode(',', $voUserData['group_ids']))
+                : [];
+
+            // Get user's OLD NC group memberships (before this login sync)
+            $connection = \OC::$server->getDatabaseConnection();
+            $user = \OC::$server->getUserManager()->get($uid);
+            if (!$user) {
+                logger('user_vo')->warning("User not found during login-time group sync", ['uid' => $uid]);
+                return;
+            }
+
+            $groupManager = \OC::$server->getGroupManager();
+            $userGroups = $groupManager->getUserGroups($user);
+            $oldNcGroupIds = array_map(fn($g) => $g->getGID(), $userGroups);
+
+            // Get VO group IDs for the NC groups the user is currently in
+            $oldVoGroupIds = [];
+            if (!empty($oldNcGroupIds)) {
+                $qb = $connection->getQueryBuilder();
+                $qb->select('vo_group_id')
+                    ->from('user_vo_groups')
+                    ->where($qb->expr()->isNotNull('nc_group_id'))
+                    ->andWhere($qb->expr()->in('nc_group_id', $qb->createNamedParameter($oldNcGroupIds, \Doctrine\DBAL\Connection::PARAM_STR_ARRAY)));
+                $result = $qb->executeQuery();
+                $rows = $result->fetchAll();
+                $result->closeCursor();
+                $oldVoGroupIds = array_map(fn($r) => $r['vo_group_id'], $rows);
+            }
+
+            // Combine: sync all groups user is/was in (union of old and new)
+            $allGroupIdsToSync = array_unique(array_merge($oldVoGroupIds, $newVoGroupIds));
+
+            if (empty($allGroupIdsToSync)) {
+                logger('user_vo')->debug("User has no VO groups to sync (old or new), skipping login-time group sync", [
+                    'uid' => $uid
+                ]);
+                return;
+            }
+
+            // Use GroupSyncService to do full sync (metadata + membership)
+            $groupSyncService = \OC::$server->get(\OCA\UserVO\Service\GroupSyncService::class);
+            $result = $groupSyncService->syncGroupsByIds($allGroupIdsToSync);
+
+            if ($result['success']) {
+                logger('user_vo')->info("Login-time group sync completed", [
+                    'uid' => $uid,
+                    'synced' => $result['synced'],
+                    'failed' => $result['failed'],
+                    'total_groups' => count($allGroupIdsToSync),
+                    'old_groups' => count($oldVoGroupIds),
+                    'new_groups' => count($newVoGroupIds)
+                ]);
+            } else {
+                logger('user_vo')->error("Login-time group sync failed", [
+                    'uid' => $uid,
+                    'error' => $result['error'] ?? 'Unknown error'
+                ]);
+            }
+
+        } catch (\Exception $e) {
+            logger('user_vo')->error("Failed to sync groups during login", [
+                'uid' => $uid,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+
 }
