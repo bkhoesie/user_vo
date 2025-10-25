@@ -14,6 +14,7 @@ namespace OCA\UserVO;
 use function OCP\Log\logger;
 use OCA\UserVO\Base;
 use OCP\IConfig;
+use OCA\UserVO\Service\ApiClient;
 use OCA\UserVO\Service\ConfigService;
 
 class UserVOAuth extends Base {
@@ -22,11 +23,13 @@ class UserVOAuth extends Base {
     private $password;
     private $config;
     private $configService;
+    private $apiClient;
 
     public function __construct($apiUrl = null, $username = null, $password = null, IConfig $config = null) {
         parent::__construct('user_vo');
         $this->config = $config ?? \OC::$server->getConfig();
         $this->configService = new ConfigService($this->config);
+        $this->apiClient = \OC::$server->get(ApiClient::class);
 
         if ($apiUrl !== null && $username !== null && $password !== null) {
             // Use constructor parameters (for backward compatibility / testing)
@@ -152,39 +155,17 @@ class UserVOAuth extends Base {
      *
      * @return mixed The API response
      */
+    /**
+     * Make API request using centralized ApiClient service
+     *
+     * @param string $url API endpoint URL
+     * @param array $data Request payload
+     * @param string $token Authorization token
+     * @return array|null Response data or null on failure
+     */
     private function makeRequest($url, $data, $token) {
-        $curl = curl_init();
-        curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json',
-            'Authorization: ' . $token,
-        ]);
-        curl_setopt($curl, CURLOPT_POST, 1);
-        curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($data));
-        curl_setopt($curl, CURLOPT_HEADER, false);
-
-
-
-        $response = curl_exec($curl);
-        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        $error = curl_error($curl);
-
-        curl_close($curl);
-
-
-
-        if ($response === false) {
-            logger('user_vo')->error('API request failed: ' . $error);
-            return null;
-        }
-
-        if ($httpCode !== 200) {
-            logger('user_vo')->error('API request returned non-200 status code: ' . $httpCode);
-            return null;
-        }
-
-        return json_decode($response, true);
+        // Use ApiClient with throwOnError=false to return null on failure (matches original behavior)
+        return $this->apiClient->makeRequest($url, $data, $token, throwOnError: false);
     }
 
     /**

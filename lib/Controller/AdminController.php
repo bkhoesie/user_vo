@@ -10,6 +10,7 @@ use OCP\IDBConnection;
 use OCP\IGroupManager;
 use OCP\IConfig;
 use OCA\UserVO\UserVOAuth;
+use OCA\UserVO\Service\ApiClient;
 use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use OCA\UserVO\Service\GroupSyncService;
@@ -24,6 +25,7 @@ class AdminController extends Controller {
     private $configService;
     private $groupNameHarmonizer;
     private $groupSyncService;
+    private $apiClient;
 
     public function __construct(
         $appName,
@@ -34,7 +36,8 @@ class AdminController extends Controller {
         IConfig $config,
         ConfigService $configService,
         GroupNameHarmonizer $groupNameHarmonizer,
-        GroupSyncService $groupSyncService
+        GroupSyncService $groupSyncService,
+        ApiClient $apiClient
     ) {
         parent::__construct($appName, $request);
         $this->connection = $connection;
@@ -44,6 +47,24 @@ class AdminController extends Controller {
         $this->configService = $configService;
         $this->groupNameHarmonizer = $groupNameHarmonizer;
         $this->groupSyncService = $groupSyncService;
+        $this->apiClient = $apiClient;
+    }
+
+    /**
+     * Factory method to create UserVOAuth backend instance
+     *
+     * Eliminates repetitive instantiation code throughout the controller.
+     *
+     * @return UserVOAuth Configured backend instance
+     */
+    private function createBackend(): UserVOAuth {
+        $configuration = $this->configService->loadConfiguration(maskPassword: false);
+        return new UserVOAuth(
+            $configuration['api_url'],
+            $configuration['api_username'],
+            $configuration['api_password'],
+            $this->config
+        );
     }
 
     /**
@@ -240,39 +261,13 @@ class AdminController extends Controller {
     /**
      * Make a request to the VereinOnline API
      */
+    /**
+     * Make API request using centralized ApiClient service
+     *
+     * @deprecated Use $this->apiClient->makeRequest() directly
+     */
     private function makeApiRequest($url, $data, $token) {
-        $curl = curl_init();
-        curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json',
-            'Authorization: ' . $token,
-        ]);
-        curl_setopt($curl, CURLOPT_POST, 1);
-        curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($data));
-        curl_setopt($curl, CURLOPT_HEADER, false);
-        curl_setopt($curl, CURLOPT_TIMEOUT, 10); // 10 second timeout
-        curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 5); // 5 second connection timeout
-
-        $response = curl_exec($curl);
-        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        $error = curl_error($curl);
-
-        curl_close($curl);
-
-        if ($response === false) {
-            throw new \Exception('API request failed: ' . $error);
-        }
-
-        if ($httpCode === 401 || $httpCode === 403) {
-            throw new \Exception('Authentication failed (HTTP ' . $httpCode . ')');
-        }
-
-        if ($httpCode !== 200) {
-            throw new \Exception('API request returned HTTP ' . $httpCode);
-        }
-
-        return json_decode($response, true);
+        return $this->apiClient->makeRequest($url, $data, $token, throwOnError: true);
     }
 
     /**
@@ -517,13 +512,7 @@ class AdminController extends Controller {
             $result->closeCursor();
 
             // Get UserVOAuth instance to fetch data from VO
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $auth = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password'],
-                $this->config
-            );
+            $auth = $this->createBackend();
 
             foreach ($users as $userRow) {
                 $uid = $userRow['uid'];
@@ -666,13 +655,7 @@ class AdminController extends Controller {
             $result->closeCursor();
 
             // Get UserVOAuth instance to access sync methods
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $auth = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password'],
-                $this->config
-            );
+            $auth = $this->createBackend();
 
             // Auto-populate missing vo_user_ids from GetMembers (one-time migration after upgrade)
             $usersNeedingIds = array_filter($users, fn($u) => empty($u['vo_user_id']) && !str_ends_with($u['uid'], '!duplicate'));
@@ -951,13 +934,7 @@ class AdminController extends Controller {
             $result->closeCursor();
 
             // Get UserVOAuth instance to access sync methods
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $auth = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password'],
-                $this->config
-            );
+            $auth = $this->createBackend();
 
             foreach ($users as $userRow) {
                 $uid = $userRow['uid'];
@@ -1514,12 +1491,7 @@ class AdminController extends Controller {
             $this->logger->info('[searchVOUsers] Starting search', ['app' => 'user_vo', 'search_term' => $searchTerm]);
 
             // Get UserVOAuth instance to access API methods
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $backend = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password']
-            );
+            $backend = $this->createBackend();
 
             // Fetch all VO members
             $allMembers = $backend->fetchAllMembers();
@@ -1656,12 +1628,7 @@ class AdminController extends Controller {
             }
 
             // Get UserVOAuth instance to access API methods
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $backend = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password']
-            );
+            $backend = $this->createBackend();
 
             // Fetch user data from VO
             $memberData = $backend->fetchUserDataFromVO($voUserId);
@@ -1810,12 +1777,7 @@ class AdminController extends Controller {
     public function fetchAllVOGroups() {
         try {
             // Get UserVOAuth instance to access API methods
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $backend = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password']
-            );
+            $backend = $this->createBackend();
 
             // Fetch all groups from VO
             $allGroups = $backend->fetchAllGroups();
@@ -1961,12 +1923,7 @@ class AdminController extends Controller {
     public function fetchManagedGroups() {
         try {
             // Fetch all groups from VO to detect deletions
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $backend = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password']
-            );
+            $backend = $this->createBackend();
             $allVOGroups = $backend->fetchAllGroups();
 
             // Build set of VO group IDs that exist in the API response
@@ -2222,12 +2179,7 @@ class AdminController extends Controller {
             }
 
             // Get UserVOAuth instance to access API methods
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $backend = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password']
-            );
+            $backend = $this->createBackend();
 
             // Fetch all groups from VO to find this specific group
             $allGroups = $backend->fetchAllGroups();
@@ -2521,12 +2473,7 @@ class AdminController extends Controller {
             ];
 
             // Get UserVOAuth instance to access API methods
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $backend = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password']
-            );
+            $backend = $this->createBackend();
 
             // Fetch all groups once for efficiency
             $allGroups = $backend->fetchAllGroups();
@@ -2810,12 +2757,7 @@ class AdminController extends Controller {
             $storedVOPosition = $groupRow['vo_position'] ? (int)$groupRow['vo_position'] : null;
 
             // Fetch current group data from VereinOnline to detect changes
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $backend = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password']
-            );
+            $backend = $this->createBackend();
 
             $allVOGroups = $backend->fetchAllGroups();
             if (!$allVOGroups) {
