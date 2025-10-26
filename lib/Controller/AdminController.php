@@ -14,6 +14,7 @@ use OCA\UserVO\Service\ApiClient;
 use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use OCA\UserVO\Service\GroupSyncService;
+use OCA\UserVO\Service\UserProvisioningService;
 use Psr\Log\LoggerInterface;
 
 class AdminController extends Controller {
@@ -26,6 +27,7 @@ class AdminController extends Controller {
     private $groupNameHarmonizer;
     private $groupSyncService;
     private $apiClient;
+    private $userProvisioningService;
 
     public function __construct(
         $appName,
@@ -37,7 +39,8 @@ class AdminController extends Controller {
         ConfigService $configService,
         GroupNameHarmonizer $groupNameHarmonizer,
         GroupSyncService $groupSyncService,
-        ApiClient $apiClient
+        ApiClient $apiClient,
+        UserProvisioningService $userProvisioningService
     ) {
         parent::__construct($appName, $request);
         $this->connection = $connection;
@@ -48,6 +51,7 @@ class AdminController extends Controller {
         $this->groupNameHarmonizer = $groupNameHarmonizer;
         $this->groupSyncService = $groupSyncService;
         $this->apiClient = $apiClient;
+        $this->userProvisioningService = $userProvisioningService;
     }
 
     /**
@@ -1490,107 +1494,21 @@ class AdminController extends Controller {
             $searchTerm = $this->request->getParam('search_term', '');
             $this->logger->info('[searchVOUsers] Starting search', ['app' => 'user_vo', 'search_term' => $searchTerm]);
 
-            // Get UserVOAuth instance to access API methods
+            // Delegate to service
             $backend = $this->createBackend();
+            $result = $this->userProvisioningService->searchVOUsers($searchTerm, $backend);
 
-            // Fetch all VO members
-            $allMembers = $backend->fetchAllMembers();
-
-            if (!$allMembers) {
+            if (!$result['success']) {
                 return new JSONResponse([
                     'success' => false,
-                    'error' => 'Failed to fetch members from VereinOnline'
+                    'error' => $result['error']
                 ], 500);
-            }
-
-            $results = [];
-            $searchLower = mb_strtolower(trim($searchTerm), 'UTF-8');
-            $userManager = \OC::$server->getUserManager();
-
-            // If search term contains dots, also prepare a space-separated version
-            // This allows searching for usernames like "john.doe" to match "John Doe"
-            $searchAlternative = str_contains($searchLower, '.') ? str_replace('.', ' ', $searchLower) : null;
-
-            // Filter and check each member
-            foreach ($allMembers as $member) {
-                $memberId = $member['id'];
-
-                // Apply search filter if provided
-                // GetMembers returns 'name' field like "Lastname, Firstname"
-                // Support flexible search: "Firstname Lastname" should match "Lastname, Firstname"
-                if (!empty($searchTerm)) {
-                    if (empty($member['name'])) {
-                        continue; // Skip if no name
-                    }
-
-                    $nameLower = mb_strtolower($member['name'], 'UTF-8');
-
-                    // Try matching with original search term
-                    $searchParts = preg_split('/\s+/', $searchLower, -1, PREG_SPLIT_NO_EMPTY);
-                    $allPartsMatch = true;
-
-                    foreach ($searchParts as $part) {
-                        if (mb_strpos($nameLower, $part) === false) {
-                            $allPartsMatch = false;
-                            break;
-                        }
-                    }
-
-                    // If original didn't match and we have an alternative (dots replaced with spaces), try that
-                    if (!$allPartsMatch && $searchAlternative !== null) {
-                        $searchParts = preg_split('/\s+/', $searchAlternative, -1, PREG_SPLIT_NO_EMPTY);
-                        $allPartsMatch = true;
-
-                        foreach ($searchParts as $part) {
-                            if (mb_strpos($nameLower, $part) === false) {
-                                $allPartsMatch = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (!$allPartsMatch) {
-                        continue; // Skip non-matching
-                    }
-                }
-
-                // Fetch full member details to check userlogin and deleted status
-                $memberData = $backend->fetchUserDataFromVO($memberId);
-
-                if (!$memberData) {
-                    continue; // Skip if can't fetch details
-                }
-
-                // Filter: Must have username and not be deleted
-                // Note: fetchUserDataFromVO() returns normalized field 'username', not 'userlogin'
-                if (empty($memberData['username'])) {
-                    continue; // Skip passive members without login
-                }
-
-                if (!empty($memberData['_deleted']) && $memberData['_deleted'] !== false) {
-                    continue; // Skip deleted users
-                }
-
-                // Check if NC account exists
-                $voUsername = $memberData['username'];
-                $ncUsername = strtolower($voUsername); // NC usernames are lowercase
-                $ncUser = $userManager->get($ncUsername);
-
-                $results[] = [
-                    'vo_user_id' => $memberId,
-                    'vo_username' => $voUsername,
-                    'vo_name' => $member['name'] ?? '', // Name from GetMembers (e.g., "Lastname, Firstname")
-                    'display_name' => trim($memberData['firstname'] . ' ' . $memberData['lastname']), // Normalized fields
-                    'email' => $memberData['email'] ?? '', // Normalized field
-                    'nc_account_exists' => ($ncUser !== null),
-                    'nc_username' => $ncUser ? $ncUser->getUID() : null,
-                ];
             }
 
             return new JSONResponse([
                 'success' => true,
-                'users' => $results,
-                'count' => count($results),
+                'users' => $result['users'],
+                'count' => $result['total'],
                 'search_term' => $searchTerm,
                 'is_all_users' => empty($searchTerm)
             ]);
@@ -1627,63 +1545,32 @@ class AdminController extends Controller {
                 ], 400);
             }
 
-            // Get UserVOAuth instance to access API methods
+            // Delegate to service
             $backend = $this->createBackend();
+            $result = $this->userProvisioningService->createAccountFromVO($voUserId, $backend);
 
-            // Fetch user data from VO
-            $memberData = $backend->fetchUserDataFromVO($voUserId);
+            if (!$result['success']) {
+                // Determine HTTP status code based on error message
+                $statusCode = 500;
+                if (isset($result['error'])) {
+                    if (str_contains($result['error'], 'already exists')) {
+                        $statusCode = 409;
+                    } elseif (str_contains($result['error'], 'does not have login') ||
+                              str_contains($result['error'], 'marked as deleted')) {
+                        $statusCode = 400;
+                    }
+                }
 
-            if (!$memberData) {
                 return new JSONResponse([
                     'success' => false,
-                    'error' => 'Failed to fetch user data from VereinOnline'
-                ], 500);
+                    'error' => $result['error']
+                ], $statusCode);
             }
-
-            // Validate user has login credentials (normalized field name)
-            if (empty($memberData['username'])) {
-                return new JSONResponse([
-                    'success' => false,
-                    'error' => 'User does not have login credentials in VereinOnline'
-                ], 400);
-            }
-
-            // Check if deleted (normalized field name)
-            if (!empty($memberData['_deleted']) && $memberData['_deleted'] === true) {
-                return new JSONResponse([
-                    'success' => false,
-                    'error' => 'User is marked as deleted in VereinOnline'
-                ], 400);
-            }
-
-            $voUsername = $memberData['username'];  // Normalized field
-            $ncUsername = strtolower($voUsername);
-
-            // Check if account already exists
-            $userManager = \OC::$server->getUserManager();
-            if ($userManager->get($ncUsername)) {
-                return new JSONResponse([
-                    'success' => false,
-                    'error' => "Account '$ncUsername' already exists"
-                ], 409);
-            }
-
-            // Create account using existing storeUser logic
-            $backend->storeUser($ncUsername);
-
-            // Sync user data (already normalized from fetchUserDataFromVO)
-            $backend->syncUserData($ncUsername, $memberData);
-
-            $this->logger->info("Pre-provisioned NC account for VO user", [
-                'app' => 'user_vo',
-                'nc_username' => $ncUsername,
-                'vo_user_id' => $voUserId
-            ]);
 
             return new JSONResponse([
                 'success' => true,
-                'nc_username' => $ncUsername,
-                'message' => "Account '$ncUsername' created successfully"
+                'nc_username' => $result['username'],
+                'message' => $result['message']
             ]);
 
         } catch (\Exception $e) {
@@ -1716,34 +1603,9 @@ class AdminController extends Controller {
                 ], 400);
             }
 
-            $results = [
-                'created' => [],
-                'skipped' => [],
-                'errors' => []
-            ];
-
-            foreach ($voUserIds as $voUserId) {
-                // Call createAccountFromVO directly with the voUserId parameter
-                $response = $this->createAccountFromVO($voUserId);
-                $data = $response->getData();
-
-                if ($data['success']) {
-                    $results['created'][] = [
-                        'vo_user_id' => $voUserId,
-                        'nc_username' => $data['nc_username']
-                    ];
-                } elseif ($response->getStatus() === 409) {
-                    $results['skipped'][] = [
-                        'vo_user_id' => $voUserId,
-                        'reason' => 'Already exists'
-                    ];
-                } else {
-                    $results['errors'][] = [
-                        'vo_user_id' => $voUserId,
-                        'error' => $data['error'] ?? 'Unknown error'
-                    ];
-                }
-            }
+            // Delegate to service
+            $backend = $this->createBackend();
+            $results = $this->userProvisioningService->bulkCreateAccounts($voUserIds, $backend);
 
             return new JSONResponse([
                 'success' => true,
