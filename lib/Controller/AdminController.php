@@ -16,6 +16,7 @@ use OCA\UserVO\Service\GroupNameHarmonizer;
 use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\Service\UserProvisioningService;
 use OCA\UserVO\Service\UserAccountService;
+use OCA\UserVO\Service\GroupManagementService;
 use Psr\Log\LoggerInterface;
 
 class AdminController extends Controller {
@@ -30,6 +31,7 @@ class AdminController extends Controller {
     private $apiClient;
     private $userProvisioningService;
     private $userAccountService;
+    private $groupManagementService;
 
     public function __construct(
         $appName,
@@ -43,7 +45,8 @@ class AdminController extends Controller {
         GroupSyncService $groupSyncService,
         ApiClient $apiClient,
         UserProvisioningService $userProvisioningService,
-        UserAccountService $userAccountService
+        UserAccountService $userAccountService,
+        GroupManagementService $groupManagementService
     ) {
         parent::__construct($appName, $request);
         $this->connection = $connection;
@@ -56,6 +59,7 @@ class AdminController extends Controller {
         $this->apiClient = $apiClient;
         $this->userProvisioningService = $userProvisioningService;
         $this->userAccountService = $userAccountService;
+        $this->groupManagementService = $groupManagementService;
     }
 
     /**
@@ -1724,116 +1728,18 @@ class AdminController extends Controller {
                 ], 400);
             }
 
-            // Check if group is already managed
-            $qb = $this->connection->getQueryBuilder();
-            $qb->select('vo_group_id')
-                ->from('user_vo_groups')
-                ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
-            $result = $qb->executeQuery();
-            $existing = $result->fetch();
-            $result->closeCursor();
-
-            if ($existing) {
-                return new JSONResponse([
-                    'success' => false,
-                    'error' => 'Group is already managed'
-                ], 409);
-            }
-
-            // Get UserVOAuth instance to access API methods
             $backend = $this->createBackend();
+            $result = $this->groupManagementService->createGroup($voGroupId, $backend);
 
-            // Fetch all groups from VO to find this specific group
-            $allGroups = $backend->fetchAllGroups();
-
-            if (!$allGroups) {
+            if (!$result['success']) {
+                $statusCode = $result['status_code'] ?? 500;
                 return new JSONResponse([
                     'success' => false,
-                    'error' => 'Failed to fetch groups from VereinOnline'
-                ], 500);
+                    'error' => $result['error']
+                ], $statusCode);
             }
 
-            // Find the specific group
-            $groupData = null;
-            foreach ($allGroups as $group) {
-                if ($group['id'] === $voGroupId) {
-                    $groupData = $group;
-                    break;
-                }
-            }
-
-            if (!$groupData) {
-                return new JSONResponse([
-                    'success' => false,
-                    'error' => 'Group not found in VereinOnline'
-                ], 404);
-            }
-
-            $voGroupName = $groupData['name'] ?? '';
-            $voParentId = $groupData['parentid'] ?? null;
-            $voPosition = isset($groupData['pos']) ? (int)$groupData['pos'] : null;
-
-            // Use uservo_ prefix for NC group ID (clear ownership, no collisions)
-            $ncGroupId = "uservo_" . $voGroupId;
-            $ncDisplayName = $this->groupNameHarmonizer->harmonize($voGroupName);
-
-            // Check if NC group already exists
-            if ($this->groupManager->groupExists($ncGroupId)) {
-                // Group exists in NC but not in our database - we can still proceed to track it
-                $this->logger->info("NC group already exists, adding to management", [
-                    'app' => 'user_vo',
-                    'nc_group_id' => $ncGroupId,
-                    'vo_group_id' => $voGroupId
-                ]);
-            } else {
-                // Create the NC group
-                $ncGroup = $this->groupManager->createGroup($ncGroupId);
-                if (!$ncGroup) {
-                    return new JSONResponse([
-                        'success' => false,
-                        'error' => 'Failed to create Nextcloud group'
-                    ], 500);
-                }
-
-                // Set the display name (harmonized from VO name)
-                $ncGroup->setDisplayName($ncDisplayName);
-
-                $this->logger->info("Created NC group", [
-                    'app' => 'user_vo',
-                    'nc_group_id' => $ncGroupId,
-                    'nc_display_name' => $ncDisplayName,
-                    'vo_group_id' => $voGroupId
-                ]);
-            }
-
-            // Calculate position index using the full VO groups data
-            $positionIndex = $this->calculatePositionIndex($voParentId, $voPosition, $allGroups);
-
-            // Insert record into database
-            $insertQb = $this->connection->getQueryBuilder();
-            $insertQb->insert('user_vo_groups')
-                ->values([
-                    'vo_group_id' => $insertQb->createNamedParameter($voGroupId),
-                    'vo_group_name' => $insertQb->createNamedParameter($voGroupName),
-                    'nc_group_id' => $insertQb->createNamedParameter($ncGroupId),
-                    'nc_display_name' => $insertQb->createNamedParameter($ncDisplayName),
-                    'vo_parent_id' => $insertQb->createNamedParameter($voParentId),
-                    'vo_position' => $insertQb->createNamedParameter($voPosition, \PDO::PARAM_INT),
-                    'vo_position_index' => $insertQb->createNamedParameter($positionIndex),
-                    'deleted_in_vo' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
-                    'member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
-                    'vo_member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
-                    'non_vo_member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
-                ]);
-            $insertQb->executeStatement();
-
-            return new JSONResponse([
-                'success' => true,
-                'message' => "Group created successfully",
-                'nc_group_id' => $ncGroupId,
-                'vo_group_id' => $voGroupId,
-                'vo_group_name' => $voGroupName
-            ]);
+            return new JSONResponse($result);
 
         } catch (\Exception $e) {
             $this->logger->error('Failed to create group', [
@@ -1951,52 +1857,17 @@ class AdminController extends Controller {
                 ], 400);
             }
 
-            // Get group info from database
-            $qb = $this->connection->getQueryBuilder();
-            $qb->select('nc_group_id', 'vo_group_name')
-                ->from('user_vo_groups')
-                ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
-            $result = $qb->executeQuery();
-            $groupRow = $result->fetch();
-            $result->closeCursor();
+            $result = $this->groupManagementService->deleteGroup($voGroupId);
 
-            if (!$groupRow) {
+            if (!$result['success']) {
+                $statusCode = $result['status_code'] ?? 500;
                 return new JSONResponse([
                     'success' => false,
-                    'error' => 'Group is not managed'
-                ], 404);
+                    'error' => $result['error']
+                ], $statusCode);
             }
 
-            $ncGroupId = $groupRow['nc_group_id'];
-            $voGroupName = $groupRow['vo_group_name'];
-
-            // Delete the NC group (if it exists)
-            if ($this->groupManager->groupExists($ncGroupId)) {
-                $ncGroup = $this->groupManager->get($ncGroupId);
-                if ($ncGroup) {
-                    $ncGroup->delete();
-                    $this->logger->info("Deleted NC group", [
-                        'app' => 'user_vo',
-                        'nc_group_id' => $ncGroupId,
-                        'vo_group_id' => $voGroupId
-                    ]);
-                }
-            }
-
-            // Remove from tracking table (GroupDeletedListener will handle this,
-            // but we do it explicitly here in case the event doesn't fire)
-            $deleteQb = $this->connection->getQueryBuilder();
-            $deleteQb->delete('user_vo_groups')
-                ->where($deleteQb->expr()->eq('vo_group_id', $deleteQb->createNamedParameter($voGroupId)));
-            $deleteQb->executeStatement();
-
-            return new JSONResponse([
-                'success' => true,
-                'message' => "Group deleted successfully",
-                'nc_group_id' => $ncGroupId,
-                'vo_group_id' => $voGroupId,
-                'vo_group_name' => $voGroupName
-            ]);
+            return new JSONResponse($result);
 
         } catch (\Exception $e) {
             $this->logger->error('Failed to delete group', [
