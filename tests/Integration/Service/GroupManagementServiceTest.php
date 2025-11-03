@@ -194,21 +194,260 @@ class GroupManagementServiceTest extends TestCase {
 	}
 
 	/**
+	 * Test fetchAllVOGroups returns groups and updates deleted flags
+	 */
+	public function testFetchAllVOGroupsReturnsGroupsAndUpdatesDeletedFlags(): void {
+		// Create a managed group
+		$this->createTestGroup('test_existing', 'Existing Group', '1');
+
+		// Mock backend to return groups (test_existing still exists, but not test_deleted)
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+
+		$backend->method('fetchAllGroups')->willReturn([
+			[
+				'id' => 'test_existing',
+				'name' => 'Existing Group',
+				'parentid' => null,
+				'pos' => 1
+			],
+			[
+				'id' => 'test_new',
+				'name' => 'New Group',
+				'parentid' => null,
+				'pos' => 2
+			]
+		]);
+
+		// Fetch all groups
+		$result = $this->service->fetchAllVOGroups($backend);
+
+		// Verify success
+		$this->assertTrue($result['success']);
+		$this->assertCount(2, $result['groups']);
+
+		// Verify test_existing is marked as managed
+		$existingGroup = array_values(array_filter($result['groups'], fn($g) => $g['vo_group_id'] === 'test_existing'))[0];
+		$this->assertTrue($existingGroup['is_managed']);
+
+		// Verify test_new is not managed
+		$newGroup = array_values(array_filter($result['groups'], fn($g) => $g['vo_group_id'] === 'test_new'))[0];
+		$this->assertFalse($newGroup['is_managed']);
+	}
+
+	/**
+	 * Test fetchManagedGroups returns managed groups with VO data
+	 */
+	public function testFetchManagedGroupsReturnsManagedGroups(): void {
+		// Create two managed groups
+		$this->createTestGroup('test_managed1', 'Managed Group 1', '1');
+		$this->createTestGroup('test_managed2', 'Managed Group 2', '2');
+
+		// Mock backend to return VO data
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+
+		$backend->method('fetchAllGroups')->willReturn([
+			[
+				'id' => 'test_managed1',
+				'name' => 'Managed Group 1 (Updated)',
+				'parentid' => null,
+				'pos' => 1
+			],
+			[
+				'id' => 'test_managed2',
+				'name' => 'Managed Group 2 (Updated)',
+				'parentid' => null,
+				'pos' => 2
+			]
+		]);
+
+		// Fetch managed groups
+		$result = $this->service->fetchManagedGroups($backend);
+
+		// Verify success
+		$this->assertTrue($result['success'], 'fetchManagedGroups failed: ' . ($result['error'] ?? 'unknown error'));
+		$this->assertGreaterThanOrEqual(2, count($result['groups']), 'Should have at least 2 groups');
+
+		// Filter to just our test groups
+		$testGroups = array_filter($result['groups'], fn($g) =>
+			$g['vo_group_id'] === 'test_managed1' || $g['vo_group_id'] === 'test_managed2'
+		);
+		$this->assertCount(2, $testGroups, 'Should find our 2 test groups');
+
+		// Verify groups have both DB and VO data
+		foreach ($testGroups as $group) {
+			$this->assertArrayHasKey('vo_group_id', $group);
+			$this->assertArrayHasKey('nc_group_id', $group);
+			$this->assertArrayHasKey('vo_group_name', $group);
+			$this->assertStringContainsString('test_managed', $group['vo_group_id']);
+		}
+	}
+
+	/**
+	 * Test bulkCreateGroups creates multiple groups efficiently
+	 */
+	public function testBulkCreateGroupsCreatesMultipleGroups(): void {
+		// Mock backend to return multiple groups
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+
+		$backend->method('fetchAllGroups')->willReturn([
+			[
+				'id' => 'test_bulk1',
+				'name' => 'Bulk Group 1',
+				'parentid' => null,
+				'pos' => 1
+			],
+			[
+				'id' => 'test_bulk2',
+				'name' => 'Bulk Group 2',
+				'parentid' => null,
+				'pos' => 2
+			],
+			[
+				'id' => 'test_bulk3',
+				'name' => 'Bulk Group 3',
+				'parentid' => null,
+				'pos' => 3
+			]
+		]);
+
+		// Bulk create 3 groups
+		$result = $this->service->bulkCreateGroups(['test_bulk1', 'test_bulk2', 'test_bulk3'], $backend);
+
+		// Verify all created
+		$this->assertCount(3, $result['created']);
+		$this->assertCount(0, $result['skipped']);
+		$this->assertCount(0, $result['errors']);
+
+		// Verify all in database
+		$qb = $this->connection->getQueryBuilder();
+		$query = $qb->select('vo_group_id')
+			->from('user_vo_groups')
+			->where($qb->expr()->like('vo_group_id', $qb->createNamedParameter('test_bulk%')));
+
+		$rows = $query->executeQuery()->fetchAll();
+		$this->assertCount(3, $rows);
+
+		// Verify all NC groups created
+		$this->assertTrue($this->groupManager->groupExists('uservo_test_bulk1'));
+		$this->assertTrue($this->groupManager->groupExists('uservo_test_bulk2'));
+		$this->assertTrue($this->groupManager->groupExists('uservo_test_bulk3'));
+	}
+
+	/**
+	 * Test bulkCreateGroups skips already managed groups
+	 */
+	public function testBulkCreateGroupsSkipsExisting(): void {
+		// Pre-create one group
+		$this->createTestGroup('test_existing_bulk', 'Existing Bulk Group', '1');
+
+		// Mock backend
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+
+		$backend->method('fetchAllGroups')->willReturn([
+			[
+				'id' => 'test_existing_bulk',
+				'name' => 'Existing Bulk Group',
+				'parentid' => null,
+				'pos' => 1
+			],
+			[
+				'id' => 'test_new_bulk',
+				'name' => 'New Bulk Group',
+				'parentid' => null,
+				'pos' => 2
+			]
+		]);
+
+		// Try to create both
+		$result = $this->service->bulkCreateGroups(['test_existing_bulk', 'test_new_bulk'], $backend);
+
+		// Verify one created, one skipped
+		$this->assertCount(1, $result['created']);
+		$this->assertCount(1, $result['skipped']);
+		$this->assertCount(0, $result['errors']);
+
+		// Verify skipped group ID
+		$this->assertEquals('test_existing_bulk', $result['skipped'][0]['vo_group_id']);
+	}
+
+	/**
+	 * Test bulkDeleteGroups deletes multiple groups
+	 */
+	public function testBulkDeleteGroupsDeletesMultipleGroups(): void {
+		// Create multiple groups
+		$this->createTestGroup('test_delete1', 'Delete Group 1', '1');
+		$this->createTestGroup('test_delete2', 'Delete Group 2', '2');
+		$this->createTestGroup('test_delete3', 'Delete Group 3', '3');
+
+		// Bulk delete
+		$result = $this->service->bulkDeleteGroups(['test_delete1', 'test_delete2', 'test_delete3']);
+
+		// Verify all deleted
+		$this->assertCount(3, $result['deleted']);
+		$this->assertCount(0, $result['errors']);
+
+		// Verify removed from database
+		$qb = $this->connection->getQueryBuilder();
+		$query = $qb->select('vo_group_id')
+			->from('user_vo_groups')
+			->where($qb->expr()->like('vo_group_id', $qb->createNamedParameter('test_delete%')));
+
+		$rows = $query->executeQuery()->fetchAll();
+		$this->assertCount(0, $rows);
+
+		// Verify NC groups deleted
+		$this->assertFalse($this->groupManager->groupExists('uservo_test_delete1'));
+		$this->assertFalse($this->groupManager->groupExists('uservo_test_delete2'));
+		$this->assertFalse($this->groupManager->groupExists('uservo_test_delete3'));
+	}
+
+	/**
+	 * Test bulkDeleteGroups handles non-existent groups gracefully
+	 */
+	public function testBulkDeleteGroupsHandlesNonExistent(): void {
+		// Create one group
+		$this->createTestGroup('test_delete_real', 'Real Group', '1');
+
+		// Try to delete one real, one fake
+		$result = $this->service->bulkDeleteGroups(['test_delete_real', 'test_delete_fake']);
+
+		// Verify one deleted, one error
+		$this->assertCount(1, $result['deleted']);
+		$this->assertCount(1, $result['errors']);
+
+		// Verify error group ID
+		$this->assertEquals('test_delete_fake', $result['errors'][0]['vo_group_id']);
+	}
+
+	/**
 	 * Helper method to create test group in database
 	 */
 	private function createTestGroup(string $voGroupId, string $name, string $positionIndex): void {
 		$ncGroupId = 'uservo_' . $voGroupId;
 
-		// Insert into database
+		// Insert into database with all required fields
 		$qb = $this->connection->getQueryBuilder();
 		$qb->insert('user_vo_groups')
 			->values([
 				'vo_group_id' => $qb->createNamedParameter($voGroupId),
 				'vo_group_name' => $qb->createNamedParameter($name),
 				'nc_group_id' => $qb->createNamedParameter($ncGroupId),
+				'nc_display_name' => $qb->createNamedParameter($name),
 				'vo_position_index' => $qb->createNamedParameter($positionIndex),
 				'vo_parent_id' => $qb->createNamedParameter(null),
-				'vo_position' => $qb->createNamedParameter((int)$positionIndex)
+				'vo_position' => $qb->createNamedParameter((int)$positionIndex),
+				'deleted_in_vo' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+				'member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+				'vo_member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+				'non_vo_member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
 			])
 			->executeStatement();
 

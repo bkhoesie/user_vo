@@ -21,13 +21,15 @@ return [
         ['name' => 'admin#createAccountFromVO', 'url' => '/admin/create-account-from-vo', 'verb' => 'POST'],
         ['name' => 'admin#bulkCreateAccountsFromVO', 'url' => '/admin/bulk-create-accounts-from-vo', 'verb' => 'POST'],
 
-        // Group management
-        ['name' => 'admin#fetchAllVOGroups', 'url' => '/admin/fetch-all-vo-groups', 'verb' => 'GET'],
-        ['name' => 'admin#fetchManagedGroups', 'url' => '/admin/fetch-managed-groups', 'verb' => 'GET'],
-        ['name' => 'admin#createGroup', 'url' => '/admin/create-group', 'verb' => 'POST'],
-        ['name' => 'admin#deleteGroup', 'url' => '/admin/delete-group', 'verb' => 'POST'],
-        ['name' => 'admin#bulkCreateGroups', 'url' => '/admin/bulk-create-groups', 'verb' => 'POST'],
-        ['name' => 'admin#bulkDeleteGroups', 'url' => '/admin/bulk-delete-groups', 'verb' => 'POST'],
+        // Group Management (GroupController)
+        ['name' => 'group#fetchAllVOGroups', 'url' => '/admin/fetch-all-vo-groups', 'verb' => 'GET'],
+        ['name' => 'group#fetchManagedGroups', 'url' => '/admin/fetch-managed-groups', 'verb' => 'GET'],
+        ['name' => 'group#createGroup', 'url' => '/admin/create-group', 'verb' => 'POST'],
+        ['name' => 'group#deleteGroup', 'url' => '/admin/delete-group', 'verb' => 'POST'],
+        ['name' => 'group#bulkCreateGroups', 'url' => '/admin/bulk-create-groups', 'verb' => 'POST'],
+        ['name' => 'group#bulkDeleteGroups', 'url' => '/admin/bulk-delete-groups', 'verb' => 'POST'],
+
+        // Group Sync (GroupSyncController - TODO)
         ['name' => 'admin#syncGroup', 'url' => '/admin/sync-group', 'verb' => 'POST'],
         ['name' => 'admin#syncAllGroups', 'url' => '/admin/sync-all-groups', 'verb' => 'POST'],
         ['name' => 'admin#syncSelectedGroups', 'url' => '/admin/sync-selected-groups', 'verb' => 'POST'],
