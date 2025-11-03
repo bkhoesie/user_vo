@@ -117,9 +117,27 @@ class UserProvisioningService {
                 }
 
                 // Check if NC account exists
+                // For legacy users (pre-v0.2.0), the NC username may have mixed case
+                // while vo_username is lowercase. Check user_vo table for existing accounts.
                 $voUsername = $memberData['username'];
-                $ncUsername = strtolower($voUsername); // NC usernames are lowercase
-                $ncUser = $userManager->get($ncUsername);
+
+                // Query user_vo table to find canonical NC username for this VO user (case-insensitive)
+                // Exclude !duplicate markers to only show canonical users
+                $qb = $this->connection->getQueryBuilder();
+                $qb->select('uid')
+                    ->from('user_vo')
+                    ->where($qb->expr()->eq(
+                        $qb->func()->lower('vo_username'),
+                        $qb->createNamedParameter(strtolower($voUsername))
+                    ))
+                    ->andWhere($qb->expr()->notLike('uid', $qb->createNamedParameter('%!duplicate')))
+                    ->setMaxResults(1);
+                $result = $qb->executeQuery();
+                $row = $result->fetch();
+                $result->closeCursor();
+
+                $ncUsername = $row ? $row['uid'] : null;
+                $ncUser = $ncUsername ? $userManager->get($ncUsername) : null;
 
                 $results[] = [
                     'vo_user_id' => $memberId,

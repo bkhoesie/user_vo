@@ -17,9 +17,11 @@ return [
         ['name' => 'admin#previewVOUsers', 'url' => '/admin/preview-vo-users', 'verb' => 'GET'],
         ['name' => 'admin#syncFromVO', 'url' => '/admin/sync-from-vo', 'verb' => 'POST'],
         ['name' => 'admin#syncSelectedUsers', 'url' => '/admin/sync-selected-users', 'verb' => 'POST'],
-        ['name' => 'admin#searchVOUsers', 'url' => '/admin/search-vo-users', 'verb' => 'GET'],
-        ['name' => 'admin#createAccountFromVO', 'url' => '/admin/create-account-from-vo', 'verb' => 'POST'],
-        ['name' => 'admin#bulkCreateAccountsFromVO', 'url' => '/admin/bulk-create-accounts-from-vo', 'verb' => 'POST'],
+
+        // User Provisioning (UserProvisioningController)
+        ['name' => 'user_provisioning#searchVOUsers', 'url' => '/admin/search-vo-users', 'verb' => 'GET'],
+        ['name' => 'user_provisioning#createAccountFromVO', 'url' => '/admin/create-account-from-vo', 'verb' => 'POST'],
+        ['name' => 'user_provisioning#bulkCreateAccountsFromVO', 'url' => '/admin/bulk-create-accounts-from-vo', 'verb' => 'POST'],
 
         // Group Management (GroupController)
         ['name' => 'group#fetchAllVOGroups', 'url' => '/admin/fetch-all-vo-groups', 'verb' => 'GET'],
