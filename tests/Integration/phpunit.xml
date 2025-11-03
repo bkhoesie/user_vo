@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  SPDX-FileCopyrightText: 2025 Nextcloud GmbH and Nextcloud contributors
+  SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<phpunit bootstrap="bootstrap.php"
+		 verbose="true"
+		 timeoutForSmallTests="900"
+		 timeoutForMediumTests="900"
+		 timeoutForLargeTests="900"
+		 beStrictAboutOutputDuringTests="false"
+		 beStrictAboutTodoAnnotatedTests="false"
+		>
+	<testsuite name='User VO - Integration Tests'>
+		<directory suffix='Test.php'>.</directory>
+	</testsuite>
+
+	<!-- Filters for code coverage -->
+	<filter>
+		<whitelist>
+			<directory suffix=".php">../../lib</directory>
+			<exclude>
+				<directory suffix=".php">../../tests</directory>
+			</exclude>
+		</whitelist>
+	</filter>
+
+	<!-- Coverage report -->
+	<logging>
+		<log type="coverage-clover" target="./clover.xml"/>
+	</logging>
+</phpunit>

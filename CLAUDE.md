@@ -194,7 +194,34 @@ The plugin includes a multi-layer testing strategy:
 - Ensure logic correctness before integration
 - Document expected behavior
 
-See `tests/README.md` for detailed testing documentation.
+**Layer 3: Integration Tests (PHPUnit + Nextcloud)**
+```bash
+# Run all integration tests
+./tests/run-integration-tests.sh
+
+# Run specific test
+./tests/run-integration-tests.sh Service/GroupManagementServiceTest.php
+```
+
+**Current coverage:**
+- `GroupManagementService` (5 tests): Database operations, group creation/deletion, position indexing
+- **Total: 5 tests, 18 assertions**
+
+**What gets tested:**
+- Real database operations (not mocked)
+- Nextcloud services integration (IGroupManager, etc.)
+- End-to-end service workflows
+- External APIs still mocked (VereinOnline)
+
+**Use cases:**
+- Verify database schema works correctly
+- Test service integration with Nextcloud
+- Catch SQL errors and type mismatches
+- Comprehensive workflow testing (~100ms per test)
+
+**Important:** Integration tests require `@group DB` annotation to access the database.
+
+See `tests/README.md` for detailed testing documentation and examples.
 
 ### Creating a Release
 

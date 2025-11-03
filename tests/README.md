@@ -97,14 +97,71 @@ class MyServiceTest extends TestCase {
 
 ### Layer 3: Integration Tests (PHPUnit + Nextcloud)
 
-**Status:** Not yet implemented
+Tests components with real Nextcloud environment (database, group manager, etc.).
 
-Will test components with real Nextcloud environment (database, group manager, etc.).
+**Run tests:**
+```bash
+./tests/run-integration-tests.sh                                    # All integration tests
+./tests/run-integration-tests.sh Service/GroupManagementServiceTest.php  # Specific test
+```
 
-**Planned coverage:**
-- Controller integration tests
-- Service integration tests with real database
-- End-to-end API tests
+**Current coverage:**
+- `GroupManagementService` (5 tests): Database operations, NC group creation/deletion, position indexing
+
+**Test structure:**
+```
+tests/Integration/
+├── bootstrap.php                              # Nextcloud test harness
+├── phpunit.xml                                # PHPUnit configuration
+├── Service/
+│   └── GroupManagementServiceTest.php
+└── Controller/
+    └── (future controller tests)
+```
+
+**Important:** Integration tests must use `@group DB` annotation to access the database.
+
+**Writing integration tests:**
+
+```php
+<?php
+namespace OCA\UserVO\Tests\Integration\Service;
+
+use OCP\AppFramework\App;
+use Test\TestCase;
+
+/**
+ * @group DB
+ */
+class MyServiceTest extends TestCase {
+    private $service;
+    private $connection;
+
+    protected function setUp(): void {
+        parent::setUp();
+
+        // Get real services from DI container
+        $app = new App('user_vo');
+        $container = $app->getContainer();
+        $this->service = $container->get(MyService::class);
+        $this->connection = \OC::$server->getDatabaseConnection();
+    }
+
+    protected function tearDown(): void {
+        // Clean up test data
+        $qb = $this->connection->getQueryBuilder();
+        $qb->delete('user_vo_groups')
+           ->where($qb->expr()->like('vo_group_id', $qb->createNamedParameter('test_%')))
+           ->executeStatement();
+
+        parent::tearDown();
+    }
+
+    public function testSomething(): void {
+        // Test with real database
+    }
+}
+```
 
 ---
 
