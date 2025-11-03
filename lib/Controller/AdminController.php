@@ -1144,50 +1144,6 @@ class AdminController extends Controller {
     }
 
     /**
-     * Scan for duplicates and return comprehensive user analysis
-     */
-    public function scanDuplicates() {
-        try {
-            // Delegate to service
-            $result = $this->userAccountService->scanDuplicates();
-            return new JSONResponse($result);
-        } catch (\Exception $e) {
-            $this->logger->error('Error in scanDuplicates: ' . $e->getMessage(), ['app' => 'user_vo']);
-            return new JSONResponse(['success' => false, 'error' => $e->getMessage()]);
-        }
-    }
-
-    /**
-     * Expose a user: add to user_vo with !duplicate marker
-     */
-    public function exposeUser() {
-        $data = $this->request->getParams();
-        $uid = $data['uid'] ?? null;
-        if (!$uid) {
-            return new JSONResponse(['success' => false, 'error' => 'No uid provided']);
-        }
-
-        // Delegate to service
-        $result = $this->userAccountService->exposeUser($uid);
-        return new JSONResponse($result);
-    }
-
-    /**
-     * Hide a user: remove from user_vo (unless canonical)
-     */
-    public function hideUser() {
-        $data = $this->request->getParams();
-        $uid = $data['uid'] ?? null;
-        if (!$uid) {
-            return new JSONResponse(['success' => false, 'error' => 'No uid provided']);
-        }
-
-        // Delegate to service
-        $result = $this->userAccountService->hideUser($uid);
-        return new JSONResponse($result);
-    }
-
-    /**
      * Search for VO users who could log in and check their NC account status
      *
      * @param string $searchTerm Partial name to search (empty = all users, with warning)
