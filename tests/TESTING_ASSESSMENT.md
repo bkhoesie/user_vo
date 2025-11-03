@@ -179,54 +179,50 @@ Analysis of testability for each controller area before Phase 3 refactoring.
 
 | Controller Area | Endpoints | Service | Unit Tests (Service) | Unit Tests (Controller) | Integration Tests |
 |----------------|-----------|---------|---------------------|------------------------|-------------------|
-| ConfigController | 5 | ✅ ConfigService | ✅ Done (8 tests) | ⚠️ Skip (too coupled) | ✅ Recommended |
-| UserAccountController | 3 | ✅ UserAccountService | ✅ Write | ✅ Write | ✅ Write |
-| UserProvisioningController | 3 | ✅ UserProvisioningService | ✅ Write | ✅ Write | ✅ Write |
+| ConfigController | 5 | ✅ ConfigService | ✅ Done (8 tests) | ⚠️ Skip (too coupled) | ⏳ Recommended |
+| UserAccountController | 3 | ✅ UserAccountService | ⚠️ Skip (DB-heavy) | ⚠️ Skip (thin delegation) | ✅ Done (7 tests) |
+| UserProvisioningController | 3 | ✅ UserProvisioningService | ⏳ Future | ⏳ Future | ⏳ Planned |
 | UserSyncController | 7 | ❌ None | ❌ Skip | ❌ Skip | ✅ Critical |
-| GroupController | 6 | ✅ GroupManagementService | ✅ Write | ✅ Write | ✅ Expand existing |
-| GroupSyncController | 4 | ✅ GroupSyncService | ✅ Write | ✅ Write | ✅ Write |
+| GroupController | 6 | ✅ GroupManagementService | ⏳ Future | ⏳ Future | ✅ Expand (5 tests) |
+| GroupSyncController | 4 | ✅ GroupSyncService | ⏳ Future | ⏳ Future | ⏳ Planned |
 
 ---
 
-## Testing Plan
+## Testing Plan (Revised Based on Phase 3 Experience)
 
-### Phase 1: Service Layer Unit Tests (High Value)
-**Priority: HIGH** - Services have clean dependency injection
-
-1. ✅ **ConfigService** - Already done
-2. ✅ **GroupNameHarmonizer** - Already done
-3. ⏳ **UserAccountService** - Write tests for:
-   - `scanForDuplicates()` - Mock QueryBuilder
-   - Duplicate detection logic
-4. ⏳ **UserProvisioningService** - Write tests for:
-   - `searchVOUsers()` - Mock backend
-   - Search/matching logic
-5. ⏳ **GroupManagementService** - Write tests for:
-   - Position calculation logic (pure functions)
-   - Validation logic
-6. ⏳ **GroupSyncService** - Write tests for:
-   - Sync logic - Mock backend and GroupManager
-   - Member assignment logic
-
-### Phase 2: Controller Unit Tests (Medium Value)
-**Priority: MEDIUM** - Limited value due to coupling
-
-1. ✅ **ConfigController** - Done (mostly skipped)
-2. ⏳ **UserAccountController** - Test delegation only
-3. ⏳ **UserProvisioningController** - Test delegation only
-4. ❌ **UserSyncController** - Skip (no service layer)
-5. ⏳ **GroupController** - Test delegation only
-6. ⏳ **GroupSyncController** - Test delegation only
-
-### Phase 3: Integration Tests (Critical Value)
+### Phase 1: Integration Tests (Highest Value) ✅ **CURRENT FOCUS**
 **Priority: CRITICAL** - Regression safety during refactoring
 
 1. ⏳ **ConfigController** - Test config save/clear/test
-2. ⏳ **UserAccountController** - Test duplicate scan, expose/hide
+2. ✅ **UserAccountController** - Done (7 tests, 19 assertions)
+   - Tests: scanDuplicates, exposeUser, hideUser
+   - Covers edge cases: missing uid, canonical user, duplicates
 3. ⏳ **UserProvisioningController** - Test user creation
 4. ⏳ **UserSyncController** - Test sync operations (most critical!)
-5. ✅ **GroupManagementService** - Expand existing (5 tests)
+5. ✅ **GroupManagementService** - Existing (5 tests, 18 assertions)
 6. ⏳ **GroupSyncController** - Test group sync
+
+### Phase 2: Service Layer Unit Tests (Deferred)
+**Priority: LOW** - Most services are DB-heavy, unit tests provide limited value
+
+1. ✅ **ConfigService** - Already done (8 tests)
+2. ✅ **GroupNameHarmonizer** - Already done (11 tests)
+3. ⚠️ **UserAccountService** - Skipped (DB-heavy, integration tests sufficient)
+4. ⏳ **UserProvisioningService** - Future (if complex logic emerges)
+5. ⏳ **GroupManagementService** - Future (position calc logic could be unit tested)
+6. ⏳ **GroupSyncService** - Future (if sync logic becomes more complex)
+
+**Rationale:** After implementing UserAccountController, we found that:
+- Controllers are thin delegation layers (no logic to unit test)
+- Services are DB-heavy (mocking QueryBuilder provides low value)
+- Integration tests are fast (~100ms for 7 tests) and provide better coverage
+- Unit tests can be added later if complex business logic emerges
+
+### Phase 3: Controller Unit Tests (Deferred)
+**Priority: VERY LOW** - Controllers just delegate, no logic
+
+1. ✅ **ConfigController** - Done (2 pass, 3 skipped as documented)
+2. ⚠️ **Remaining controllers** - Skip until business logic warrants it
 
 ---
 
