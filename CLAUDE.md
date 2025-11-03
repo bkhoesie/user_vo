@@ -134,6 +134,40 @@ CREATE TABLE oc_user_vo (
 
 ## Development
 
+### Testing
+
+The plugin includes a multi-layer testing strategy:
+
+**Layer 1: Smoke Tests (Bash)**
+```bash
+# Run all smoke tests (~10 seconds)
+./tests/smoke/test_api.sh
+
+# Run with verbose output
+./tests/smoke/test_api.sh --verbose
+
+# Test single endpoint
+./tests/smoke/test_api.sh --endpoint /admin/config-status
+```
+
+**What gets tested:**
+- 9 critical read-only endpoints (33% coverage)
+- Config endpoints: status, test connection
+- User sync: preview local/VO users, nightly sync status
+- User account: scan duplicates
+- Group endpoints: fetch all/managed groups
+
+**What's skipped:**
+- Destructive operations (save/clear config, create/delete users/groups)
+- Sync operations (would modify data)
+- Slow endpoints (search takes ~8s - available as commented example)
+
+**Use cases:**
+- Quick regression check before/after refactoring
+- Verify API endpoints are accessible
+- Validate basic response structure
+- Pre-commit sanity check
+
 ### Creating a Release
 
 Follow these steps to create a new release (see `readme-dev.md` for details):
