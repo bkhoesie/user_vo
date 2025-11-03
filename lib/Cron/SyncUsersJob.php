@@ -16,6 +16,7 @@ use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IConfig;
 use function OCP\Log\logger;
 use OCA\UserVO\Controller\AdminController;
+use OCA\UserVO\Controller\GroupSyncController;
 
 /**
  * Coordinated nightly sync job for users and groups
@@ -24,15 +25,25 @@ use OCA\UserVO\Controller\AdminController;
  * Each can be enabled/disabled independently via config.
  *
  * Backward compatible: Existing 'enable_nightly_sync' config enables user sync.
+ *
+ * TODO Phase 4: Refactor to inject GroupSyncService directly instead of GroupSyncController
+ * for cleaner separation (cron job shouldn't depend on HTTP controllers).
  */
 class SyncUsersJob extends TimedJob {
     private IConfig $config;
     private AdminController $adminController;
+    private GroupSyncController $groupSyncController;
 
-    public function __construct(ITimeFactory $time, IConfig $config, AdminController $adminController) {
+    public function __construct(
+        ITimeFactory $time,
+        IConfig $config,
+        AdminController $adminController,
+        GroupSyncController $groupSyncController
+    ) {
         parent::__construct($time);
         $this->config = $config;
         $this->adminController = $adminController;
+        $this->groupSyncController = $groupSyncController;
 
         // Run once per day (24 hours)
         $this->setInterval(24 * 60 * 60);
@@ -96,7 +107,7 @@ class SyncUsersJob extends TimedJob {
         if ($groupSyncEnabled) {
             try {
                 logger('user_vo')->info('Starting group sync');
-                $response = $this->adminController->syncAllGroups();
+                $response = $this->groupSyncController->syncAllGroups();
                 $data = $response->getData();
 
                 if (!$data['success']) {

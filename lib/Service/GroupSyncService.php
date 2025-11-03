@@ -43,143 +43,6 @@ class GroupSyncService {
         $this->groupNameHarmonizer = $groupNameHarmonizer;
     }
 
-    /**
-     * Sync a single group's membership from VO data
-     *
-     * @param string $ncGroupId NC group ID
-     * @param array $voGroupData VO group data (must include 'member_ids')
-     * @return array Result with 'success', 'added', 'removed'
-     */
-    public function syncGroupMembership(string $ncGroupId, array $voGroupData): array {
-        try {
-            $group = $this->groupManager->get($ncGroupId);
-            if (!$group) {
-                return [
-                    'success' => false,
-                    'error' => 'Group not found in Nextcloud',
-                    'added' => 0,
-                    'removed' => 0
-                ];
-            }
-
-            // Get VO member IDs
-            $voMemberIds = !empty($voGroupData['member_ids'])
-                ? explode(',', $voGroupData['member_ids'])
-                : [];
-
-            // Map VO user IDs to NC usernames
-            $voUserIdToUid = $this->mapVOUserIdsToNCUsernames($voMemberIds);
-
-            // Get current NC group members
-            $currentMembers = $group->getUsers();
-            $currentMemberUids = array_map(function($user) {
-                return $user->getUID();
-            }, $currentMembers);
-
-            // Determine who should be members (based on VO data)
-            $shouldBeMembers = array_values($voUserIdToUid);
-
-            // Add missing members
-            $addedCount = 0;
-            foreach ($shouldBeMembers as $uid) {
-                if (!in_array($uid, $currentMemberUids)) {
-                    $user = $this->userManager->get($uid);
-                    if ($user) {
-                        $group->addUser($user);
-                        $addedCount++;
-                        logger('user_vo')->debug("Added user to group", [
-                            'uid' => $uid,
-                            'group' => $ncGroupId
-                        ]);
-                    }
-                }
-            }
-
-            // Remove users who shouldn't be members
-            // Only remove user_vo users (check if they have vo_user_id in user_vo table)
-            $removedCount = 0;
-            foreach ($currentMemberUids as $uid) {
-                if (!in_array($uid, $shouldBeMembers)) {
-                    // Check if this is a user_vo managed user
-                    if ($this->isVOUser($uid)) {
-                        $user = $this->userManager->get($uid);
-                        if ($user) {
-                            $group->removeUser($user);
-                            $removedCount++;
-                            logger('user_vo')->debug("Removed user from group", [
-                                'uid' => $uid,
-                                'group' => $ncGroupId
-                            ]);
-                        }
-                    }
-                }
-            }
-
-            return [
-                'success' => true,
-                'added' => $addedCount,
-                'removed' => $removedCount
-            ];
-
-        } catch (\Exception $e) {
-            logger('user_vo')->error("Failed to sync group membership", [
-                'nc_group_id' => $ncGroupId,
-                'error' => $e->getMessage()
-            ]);
-            return [
-                'success' => false,
-                'error' => $e->getMessage(),
-                'added' => 0,
-                'removed' => 0
-            ];
-        }
-    }
-
-    /**
-     * Map VO user IDs to NC usernames
-     *
-     * @param array $voUserIds Array of VO user IDs
-     * @return array Map of vo_user_id => nc_username
-     */
-    private function mapVOUserIdsToNCUsernames(array $voUserIds): array {
-        if (empty($voUserIds)) {
-            return [];
-        }
-
-        $qb = $this->connection->getQueryBuilder();
-        $qb->select('uid', 'vo_user_id')
-            ->from('user_vo')
-            ->where($qb->expr()->in('vo_user_id', $qb->createNamedParameter($voUserIds, \Doctrine\DBAL\Connection::PARAM_STR_ARRAY)));
-
-        $result = $qb->executeQuery();
-        $userRows = $result->fetchAll();
-        $result->closeCursor();
-
-        $voUserIdToUid = [];
-        foreach ($userRows as $row) {
-            $voUserIdToUid[$row['vo_user_id']] = $row['uid'];
-        }
-
-        return $voUserIdToUid;
-    }
-
-    /**
-     * Check if a user is managed by user_vo backend
-     *
-     * @param string $uid NC username
-     * @return bool True if user is managed by user_vo
-     */
-    private function isVOUser(string $uid): bool {
-        $qb = $this->connection->getQueryBuilder();
-        $qb->select('vo_user_id')
-            ->from('user_vo')
-            ->where($qb->expr()->eq('uid', $qb->createNamedParameter($uid)));
-        $result = $qb->executeQuery();
-        $isVOUser = $result->fetchOne() !== false;
-        $result->closeCursor();
-
-        return $isVOUser;
-    }
 
     /**
      * Sync specific groups by VO group IDs with full metadata updates
@@ -310,6 +173,229 @@ class GroupSyncService {
     }
 
     /**
+     * Sync a single group by VO group ID with full metadata and detailed response
+     *
+     * This is the main entry point for UI-triggered single group sync.
+     * Returns detailed results suitable for JSON API response.
+     *
+     * @param string $voGroupId VO group ID to sync
+     * @param UserVOAuth $backend Backend instance for API access
+     * @return array Result with success, message, detailed sync info, or error
+     */
+    public function syncSingleGroupById(string $voGroupId, UserVOAuth $backend): array {
+        try {
+            if (empty($voGroupId)) {
+                return [
+                    'success' => false,
+                    'error' => 'VO group ID is required',
+                    'status_code' => 400
+                ];
+            }
+
+            // Check if group is managed
+            $qb = $this->connection->getQueryBuilder();
+            $qb->select('nc_group_id', 'vo_group_name', 'vo_parent_id', 'vo_position')
+                ->from('user_vo_groups')
+                ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
+            $result = $qb->executeQuery();
+            $groupRow = $result->fetch();
+            $result->closeCursor();
+
+            if (!$groupRow) {
+                return [
+                    'success' => false,
+                    'error' => 'Group is not managed',
+                    'status_code' => 404
+                ];
+            }
+
+            $ncGroupId = $groupRow['nc_group_id'];
+            $storedVOName = $groupRow['vo_group_name'];
+
+            // Fetch all VO groups (needed for metadata sync)
+            $allVOGroups = $backend->fetchAllGroups();
+            if (!$allVOGroups) {
+                return [
+                    'success' => false,
+                    'error' => 'Failed to fetch groups from VereinOnline',
+                    'status_code' => 500
+                ];
+            }
+
+            // Build map for quick lookup
+            $voGroupMap = [];
+            foreach ($allVOGroups as $group) {
+                if (isset($group['id'])) {
+                    $voGroupMap[$group['id']] = $group;
+                }
+            }
+
+            // Perform sync using unified helper
+            $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $storedVOName, $voGroupMap);
+
+            // Get current VO name for response
+            $currentVOGroup = $voGroupMap[$voGroupId] ?? null;
+            $currentVOName = $currentVOGroup ? ($currentVOGroup['name'] ?? $storedVOName) : $storedVOName;
+
+            return [
+                'success' => true,
+                'message' => 'Group synced successfully',
+                'vo_group_id' => $voGroupId,
+                'nc_group_id' => $ncGroupId,
+                'vo_group_name' => $currentVOName,
+                'added' => $syncResult['added'],
+                'removed' => $syncResult['removed'],
+                'skipped' => $syncResult['skipped'],
+                'member_count' => $syncResult['member_count'],
+                'vo_member_count' => $syncResult['vo_member_count'],
+                'non_vo_member_count' => $syncResult['non_vo_member_count'],
+                'summary' => [
+                    'added' => count($syncResult['added']),
+                    'removed' => count($syncResult['removed']),
+                    'skipped' => count($syncResult['skipped']),
+                    'total_members' => $syncResult['member_count'],
+                    'vo_members' => $syncResult['vo_member_count'],
+                    'non_vo_members' => $syncResult['non_vo_member_count']
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            logger('user_vo')->error('Failed to sync group', [
+                'vo_group_id' => $voGroupId ?? 'unknown',
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'status_code' => 500
+            ];
+        }
+    }
+
+    /**
+     * Sync all managed groups with full metadata updates
+     *
+     * This is used by both UI bulk sync and nightly cron job.
+     * Returns summary suitable for JSON API response.
+     *
+     * @param UserVOAuth $backend Backend instance for API access
+     * @return array Result with success, message, summary, results
+     */
+    public function syncAllManagedGroups(UserVOAuth $backend): array {
+        try {
+            // Get all managed groups from database
+            $qb = $this->connection->getQueryBuilder();
+            $qb->select('vo_group_id', 'vo_group_name', 'nc_group_id')
+                ->from('user_vo_groups')
+                ->orderBy('vo_position_index', 'ASC');
+            $result = $qb->executeQuery();
+            $managedGroups = $result->fetchAll();
+            $result->closeCursor();
+
+            if (empty($managedGroups)) {
+                return [
+                    'success' => true,
+                    'message' => 'No managed groups to sync',
+                    'summary' => [
+                        'total' => 0,
+                        'succeeded' => 0,
+                        'failed' => 0
+                    ],
+                    'results' => []
+                ];
+            }
+
+            // Fetch VO groups once to avoid repeated API calls
+            $allVOGroups = $backend->fetchAllGroups();
+
+            if (!$allVOGroups) {
+                return [
+                    'success' => false,
+                    'error' => 'Failed to fetch groups from VereinOnline',
+                    'status_code' => 500
+                ];
+            }
+
+            // Build map of VO group data for quick lookup
+            $voGroupMap = [];
+            foreach ($allVOGroups as $group) {
+                if (isset($group['id'])) {
+                    $voGroupMap[$group['id']] = $group;
+                }
+            }
+
+            // Sync each group and collect results
+            $results = [];
+            $successCount = 0;
+            $failureCount = 0;
+
+            foreach ($managedGroups as $groupRow) {
+                $voGroupId = $groupRow['vo_group_id'];
+                $voGroupName = $groupRow['vo_group_name'];
+                $ncGroupId = $groupRow['nc_group_id'];
+
+                try {
+                    // Perform sync using unified helper
+                    $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $voGroupName, $voGroupMap);
+
+                    $results[] = [
+                        'vo_group_id' => $voGroupId,
+                        'vo_group_name' => $voGroupName,
+                        'nc_group_id' => $ncGroupId,
+                        'status' => 'success',
+                        'added' => $syncResult['added'],
+                        'removed' => $syncResult['removed'],
+                        'skipped' => $syncResult['skipped'],
+                        'member_count' => $syncResult['member_count'],
+                        'vo_member_count' => $syncResult['vo_member_count'],
+                        'non_vo_member_count' => $syncResult['non_vo_member_count']
+                    ];
+
+                    $successCount++;
+                } catch (\Exception $e) {
+                    logger('user_vo')->error('Failed to sync group during bulk sync', [
+                        'vo_group_id' => $voGroupId,
+                        'error' => $e->getMessage()
+                    ]);
+
+                    $results[] = [
+                        'vo_group_id' => $voGroupId,
+                        'vo_group_name' => $voGroupName,
+                        'nc_group_id' => $ncGroupId,
+                        'status' => 'error',
+                        'error' => $e->getMessage()
+                    ];
+
+                    $failureCount++;
+                }
+            }
+
+            return [
+                'success' => true,
+                'message' => 'Bulk sync completed',
+                'summary' => [
+                    'total' => count($managedGroups),
+                    'succeeded' => $successCount,
+                    'failed' => $failureCount
+                ],
+                'results' => $results
+            ];
+
+        } catch (\Exception $e) {
+            logger('user_vo')->error('Failed to sync all groups', [
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'status_code' => 500
+            ];
+        }
+    }
+
+    /**
      * Helper method to sync a single group with full metadata updates
      * This is extracted from AdminController for reusability
      */
@@ -398,6 +484,7 @@ class GroupSyncService {
         // Sync: add missing users, remove departed users
         $added = [];
         $removed = [];
+        $skipped = [];
 
         // Add users who should be in the group but aren't
         foreach ($expectedVOUsernames as $username) {
@@ -406,6 +493,11 @@ class GroupSyncService {
                 if ($user) {
                     $ncGroup->addUser($user);
                     $added[] = $username;
+                } else {
+                    $skipped[] = [
+                        'username' => $username,
+                        'reason' => 'User not found in NC'
+                    ];
                 }
             }
         }
@@ -464,6 +556,7 @@ class GroupSyncService {
         return [
             'added' => $added,
             'removed' => $removed,
+            'skipped' => $skipped,
             'member_count' => $totalCount,
             'vo_member_count' => $voCount,
             'non_vo_member_count' => $nonVoCount

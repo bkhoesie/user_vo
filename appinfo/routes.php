@@ -31,9 +31,9 @@ return [
         ['name' => 'group#bulkCreateGroups', 'url' => '/admin/bulk-create-groups', 'verb' => 'POST'],
         ['name' => 'group#bulkDeleteGroups', 'url' => '/admin/bulk-delete-groups', 'verb' => 'POST'],
 
-        // Group Sync (GroupSyncController - TODO)
-        ['name' => 'admin#syncGroup', 'url' => '/admin/sync-group', 'verb' => 'POST'],
-        ['name' => 'admin#syncAllGroups', 'url' => '/admin/sync-all-groups', 'verb' => 'POST'],
-        ['name' => 'admin#syncSelectedGroups', 'url' => '/admin/sync-selected-groups', 'verb' => 'POST'],
+        // Group Sync (GroupSyncController)
+        ['name' => 'group_sync#syncGroup', 'url' => '/admin/sync-group', 'verb' => 'POST'],
+        ['name' => 'group_sync#syncAllGroups', 'url' => '/admin/sync-all-groups', 'verb' => 'POST'],
+        ['name' => 'group_sync#syncSelectedGroups', 'url' => '/admin/sync-selected-groups', 'verb' => 'POST'],
     ]
 ]; 
