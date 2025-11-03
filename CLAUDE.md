@@ -168,6 +168,34 @@ The plugin includes a multi-layer testing strategy:
 - Validate basic response structure
 - Pre-commit sanity check
 
+**Layer 2: Unit Tests (PHPUnit)**
+```bash
+# Run all unit tests
+./tests/run-unit-tests.sh
+
+# Run specific test
+./tests/run-unit-tests.sh Service/ConfigServiceTest.php
+```
+
+**Current coverage:**
+- `ConfigService` (8 tests): Configuration loading precedence, password masking
+- `GroupNameHarmonizer` (11 tests): Name truncation, Unicode handling, fallbacks
+- **Total: 19 tests, 46 assertions**
+
+**What gets tested:**
+- Service layer business logic with mocked dependencies
+- Pure functions and data transformations
+- Edge cases and error conditions
+- No external dependencies (database, filesystem, network)
+
+**Use cases:**
+- Fast feedback during development (~60ms for all tests)
+- Test-driven development workflow
+- Ensure logic correctness before integration
+- Document expected behavior
+
+See `tests/README.md` for detailed testing documentation.
+
 ### Creating a Release
 
 Follow these steps to create a new release (see `readme-dev.md` for details):
