@@ -1,12 +1,31 @@
 # Testing Assessment - Controller & Service Areas
 
-Analysis of testability for each controller area before Phase 3 refactoring.
+Analysis of testability for each controller area during Phase 3 refactoring.
+
+**Updated:** 2025-11-03 (after UserAccountController implementation)
 
 **Legend:**
 - ✅ **Unit testable** - Can write meaningful unit tests with mocks
 - ⚠️ **Limited unit testing** - Can test some aspects, but many tests would be skipped
 - ❌ **Not unit testable** - Too coupled, integration tests only
 - 🔧 **Service exists** - Has corresponding service layer
+
+---
+
+## Testing Strategy Overview
+
+**3-Layer Approach:**
+1. **Smoke Tests** (`tests/smoke/test_api.sh`) - Quick regression checks (~10s, 9 endpoints)
+2. **Unit Tests** (`tests/Unit/`) - Fast isolated tests (24 tests, 52 assertions)
+3. **Integration Tests** (`tests/Integration/`) - Comprehensive tests with real DB (12 tests, 37 assertions)
+
+**Key Principle (Learned from Phase 3):**
+> Integration tests provide the best value for this codebase. Controllers are thin delegation layers, and services are DB-heavy. Fast integration tests (~100ms) give better coverage than mocking QueryBuilder.
+
+**When to Update This Document:**
+- ✅ After completing each controller split
+- ✅ When discovering new testability insights
+- ❌ Not for every small change
 
 ---
 
