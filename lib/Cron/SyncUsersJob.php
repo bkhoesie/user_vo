@@ -15,8 +15,10 @@ use OCP\BackgroundJob\TimedJob;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IConfig;
 use function OCP\Log\logger;
-use OCA\UserVO\Controller\AdminController;
+use OCA\UserVO\Service\UserSyncService;
+use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\Controller\GroupSyncController;
+use OCA\UserVO\UserVOAuth;
 
 /**
  * Coordinated nightly sync job for users and groups
@@ -31,18 +33,21 @@ use OCA\UserVO\Controller\GroupSyncController;
  */
 class SyncUsersJob extends TimedJob {
     private IConfig $config;
-    private AdminController $adminController;
+    private UserSyncService $userSyncService;
+    private ConfigService $configService;
     private GroupSyncController $groupSyncController;
 
     public function __construct(
         ITimeFactory $time,
         IConfig $config,
-        AdminController $adminController,
+        UserSyncService $userSyncService,
+        ConfigService $configService,
         GroupSyncController $groupSyncController
     ) {
         parent::__construct($time);
         $this->config = $config;
-        $this->adminController = $adminController;
+        $this->userSyncService = $userSyncService;
+        $this->configService = $configService;
         $this->groupSyncController = $groupSyncController;
 
         // Run once per day (24 hours)
@@ -76,19 +81,28 @@ class SyncUsersJob extends TimedJob {
         if ($userSyncEnabled) {
             try {
                 logger('user_vo')->info('Starting user sync');
-                $response = $this->adminController->syncFromVO();
-                $data = $response->getData();
 
-                if (!$data['success']) {
-                    throw new \Exception($data['error'] ?? 'User sync failed');
+                // Create backend instance
+                $configuration = $this->configService->loadConfiguration(maskPassword: false);
+                $backend = new UserVOAuth(
+                    $configuration['api_url'],
+                    $configuration['api_username'],
+                    $configuration['api_password']
+                );
+
+                // Call service directly (not via controller)
+                $result = $this->userSyncService->syncAllUsers($backend);
+
+                if (!$result['success']) {
+                    throw new \Exception($result['error'] ?? 'User sync failed');
                 }
 
                 // Convert 'success' key to 'synced' for consistency
                 $userSummary = [
-                    'total' => $data['summary']['total'],
-                    'synced' => $data['summary']['success'],
-                    'failed' => $data['summary']['failed'],
-                    'skipped' => $data['summary']['skipped']
+                    'total' => $result['summary']['total'],
+                    'synced' => $result['summary']['success'],
+                    'failed' => $result['summary']['failed'],
+                    'skipped' => $result['summary']['skipped']
                 ];
 
                 logger('user_vo')->info('User sync completed', $userSummary);

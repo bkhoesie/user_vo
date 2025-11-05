@@ -25,6 +25,9 @@ class ConfigControllerTest extends NextcloudTestCase {
 	private LoggerInterface $logger;
 	private IRequest $request;
 
+	// Store original config values for restoration
+	private array $originalConfig = [];
+
 	protected function setUp(): void {
 		parent::setUp();
 
@@ -32,6 +35,22 @@ class ConfigControllerTest extends NextcloudTestCase {
 		$this->config = \OC::$server->get(IConfig::class);
 		$this->logger = \OC::$server->get(LoggerInterface::class);
 		$this->request = $this->createMock(IRequest::class);
+
+		// Save original configuration
+		$this->originalConfig = [
+			'api_url' => $this->config->getAppValue('user_vo', 'api_url', ''),
+			'api_username' => $this->config->getAppValue('user_vo', 'api_username', ''),
+			'api_password' => $this->config->getAppValue('user_vo', 'api_password', ''),
+			'sync_email' => $this->config->getAppValue('user_vo', 'sync_email', ''),
+			'sync_photo' => $this->config->getAppValue('user_vo', 'sync_photo', ''),
+			'enable_nightly_user_sync' => $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', ''),
+			'enable_nightly_group_sync' => $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', ''),
+			'enable_nightly_sync' => $this->config->getAppValue('user_vo', 'enable_nightly_sync', ''),
+			'nightly_sync_last_run' => $this->config->getAppValue('user_vo', 'nightly_sync_last_run', ''),
+			'nightly_sync_last_status' => $this->config->getAppValue('user_vo', 'nightly_sync_last_status', ''),
+			'nightly_sync_last_error' => $this->config->getAppValue('user_vo', 'nightly_sync_last_error', ''),
+			'nightly_sync_last_summary' => $this->config->getAppValue('user_vo', 'nightly_sync_last_summary', ''),
+		];
 
 		// Create real ConfigService and ApiClient
 		$this->configService = new ConfigService($this->config);
@@ -49,24 +68,26 @@ class ConfigControllerTest extends NextcloudTestCase {
 	}
 
 	protected function tearDown(): void {
-		// Clean up test configuration
-		$this->config->deleteAppValue('user_vo', 'api_url');
-		$this->config->deleteAppValue('user_vo', 'api_username');
-		$this->config->deleteAppValue('user_vo', 'api_password');
-		$this->config->deleteAppValue('user_vo', 'sync_email');
-		$this->config->deleteAppValue('user_vo', 'sync_photo');
-		$this->config->deleteAppValue('user_vo', 'enable_nightly_user_sync');
-		$this->config->deleteAppValue('user_vo', 'enable_nightly_group_sync');
-		$this->config->deleteAppValue('user_vo', 'enable_nightly_sync');
-		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_run');
-		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_status');
-		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_error');
-		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_summary');
+		// Restore original configuration
+		foreach ($this->originalConfig as $key => $value) {
+			if ($value === '') {
+				// If original value was empty, delete the key
+				$this->config->deleteAppValue('user_vo', $key);
+			} else {
+				// Otherwise restore the original value
+				$this->config->setAppValue('user_vo', $key, $value);
+			}
+		}
 
 		parent::tearDown();
 	}
 
 	public function testGetConfigurationStatusReturnsEmptyWhenNotConfigured() {
+		// Clear config for this test
+		$this->config->deleteAppValue('user_vo', 'api_url');
+		$this->config->deleteAppValue('user_vo', 'api_username');
+		$this->config->deleteAppValue('user_vo', 'api_password');
+
 		$response = $this->controller->getConfigurationStatus();
 		$this->assertInstanceOf(JSONResponse::class, $response);
 
@@ -229,6 +250,15 @@ class ConfigControllerTest extends NextcloudTestCase {
 	}
 
 	public function testGetNightlySyncStatusWithNoHistory() {
+		// Clear sync history for this test
+		$this->config->deleteAppValue('user_vo', 'enable_nightly_user_sync');
+		$this->config->deleteAppValue('user_vo', 'enable_nightly_group_sync');
+		$this->config->deleteAppValue('user_vo', 'enable_nightly_sync');
+		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_run');
+		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_status');
+		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_error');
+		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_summary');
+
 		$response = $this->controller->getNightlySyncStatus();
 		$this->assertInstanceOf(JSONResponse::class, $response);
 		$this->assertEquals(200, $response->getStatus());

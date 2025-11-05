@@ -16,10 +16,11 @@ return [
         ['name' => 'config#saveNightlySyncSetting', 'url' => '/admin/save-nightly-sync', 'verb' => 'POST'],
         ['name' => 'config#getNightlySyncStatus', 'url' => '/admin/nightly-sync-status', 'verb' => 'GET'],
 
-        ['name' => 'admin#previewLocalUsers', 'url' => '/admin/preview-local-users', 'verb' => 'GET'],
-        ['name' => 'admin#previewVOUsers', 'url' => '/admin/preview-vo-users', 'verb' => 'GET'],
-        ['name' => 'admin#syncFromVO', 'url' => '/admin/sync-from-vo', 'verb' => 'POST'],
-        ['name' => 'admin#syncSelectedUsers', 'url' => '/admin/sync-selected-users', 'verb' => 'POST'],
+        // User Sync (UserSyncController)
+        ['name' => 'user_sync#previewLocalUsers', 'url' => '/admin/preview-local-users', 'verb' => 'GET'],
+        ['name' => 'user_sync#previewVOUsers', 'url' => '/admin/preview-vo-users', 'verb' => 'GET'],
+        ['name' => 'user_sync#syncFromVO', 'url' => '/admin/sync-from-vo', 'verb' => 'POST'],
+        ['name' => 'user_sync#syncSelectedUsers', 'url' => '/admin/sync-selected-users', 'verb' => 'POST'],
 
         // User Provisioning (UserProvisioningController)
         ['name' => 'user_provisioning#searchVOUsers', 'url' => '/admin/search-vo-users', 'verb' => 'GET'],
