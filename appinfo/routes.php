@@ -6,13 +6,16 @@ return [
         ['name' => 'user_account#scanDuplicates', 'url' => '/admin/scan-duplicates', 'verb' => 'GET'],
         ['name' => 'user_account#exposeUser', 'url' => '/admin/expose-user', 'verb' => 'POST'],
         ['name' => 'user_account#hideUser', 'url' => '/admin/hide-user', 'verb' => 'POST'],
-        ['name' => 'admin#getConfigurationStatus', 'url' => '/admin/config-status', 'verb' => 'GET'],
-        ['name' => 'admin#saveConfiguration', 'url' => '/admin/save-config', 'verb' => 'POST'],
-        ['name' => 'admin#testConfiguration', 'url' => '/admin/test-config', 'verb' => 'POST'],
-        ['name' => 'admin#clearConfiguration', 'url' => '/admin/clear-config', 'verb' => 'POST'],
-        ['name' => 'admin#saveUserSyncSettings', 'url' => '/admin/save-user-sync-settings', 'verb' => 'POST'],
-        ['name' => 'admin#saveNightlySyncSetting', 'url' => '/admin/save-nightly-sync', 'verb' => 'POST'],
-        ['name' => 'admin#getNightlySyncStatus', 'url' => '/admin/nightly-sync-status', 'verb' => 'GET'],
+
+        // Configuration (ConfigController)
+        ['name' => 'config#getConfigurationStatus', 'url' => '/admin/config-status', 'verb' => 'GET'],
+        ['name' => 'config#saveConfiguration', 'url' => '/admin/save-config', 'verb' => 'POST'],
+        ['name' => 'config#testConfiguration', 'url' => '/admin/test-config', 'verb' => 'POST'],
+        ['name' => 'config#clearConfiguration', 'url' => '/admin/clear-config', 'verb' => 'POST'],
+        ['name' => 'config#saveUserSyncSettings', 'url' => '/admin/save-user-sync-settings', 'verb' => 'POST'],
+        ['name' => 'config#saveNightlySyncSetting', 'url' => '/admin/save-nightly-sync', 'verb' => 'POST'],
+        ['name' => 'config#getNightlySyncStatus', 'url' => '/admin/nightly-sync-status', 'verb' => 'GET'],
+
         ['name' => 'admin#previewLocalUsers', 'url' => '/admin/preview-local-users', 'verb' => 'GET'],
         ['name' => 'admin#previewVOUsers', 'url' => '/admin/preview-vo-users', 'verb' => 'GET'],
         ['name' => 'admin#syncFromVO', 'url' => '/admin/sync-from-vo', 'verb' => 'POST'],

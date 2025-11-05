@@ -1,0 +1,272 @@
+<?php
+
+namespace OCA\UserVO\Tests\Integration\Controller;
+
+use OCA\UserVO\Controller\ConfigController;
+use OCA\UserVO\Service\ApiClient;
+use OCA\UserVO\Service\ConfigService;
+use OCP\AppFramework\Http\JSONResponse;
+use OCP\IConfig;
+use OCP\IRequest;
+use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+use Test\TestCase as NextcloudTestCase;
+
+/**
+ * Integration tests for ConfigController
+ *
+ * @group DB
+ */
+class ConfigControllerTest extends NextcloudTestCase {
+	private ConfigController $controller;
+	private IConfig $config;
+	private ConfigService $configService;
+	private ApiClient $apiClient;
+	private LoggerInterface $logger;
+	private IRequest $request;
+
+	protected function setUp(): void {
+		parent::setUp();
+
+		// Get real Nextcloud services
+		$this->config = \OC::$server->get(IConfig::class);
+		$this->logger = \OC::$server->get(LoggerInterface::class);
+		$this->request = $this->createMock(IRequest::class);
+
+		// Create real ConfigService and ApiClient
+		$this->configService = new ConfigService($this->config);
+		$this->apiClient = new ApiClient($this->logger);
+
+		// Create controller
+		$this->controller = new ConfigController(
+			'user_vo',
+			$this->request,
+			$this->configService,
+			$this->apiClient,
+			$this->config,
+			$this->logger
+		);
+	}
+
+	protected function tearDown(): void {
+		// Clean up test configuration
+		$this->config->deleteAppValue('user_vo', 'api_url');
+		$this->config->deleteAppValue('user_vo', 'api_username');
+		$this->config->deleteAppValue('user_vo', 'api_password');
+		$this->config->deleteAppValue('user_vo', 'sync_email');
+		$this->config->deleteAppValue('user_vo', 'sync_photo');
+		$this->config->deleteAppValue('user_vo', 'enable_nightly_user_sync');
+		$this->config->deleteAppValue('user_vo', 'enable_nightly_group_sync');
+		$this->config->deleteAppValue('user_vo', 'enable_nightly_sync');
+		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_run');
+		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_status');
+		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_error');
+		$this->config->deleteAppValue('user_vo', 'nightly_sync_last_summary');
+
+		parent::tearDown();
+	}
+
+	public function testGetConfigurationStatusReturnsEmptyWhenNotConfigured() {
+		$response = $this->controller->getConfigurationStatus();
+		$this->assertInstanceOf(JSONResponse::class, $response);
+
+		$data = $response->getData();
+		$this->assertIsArray($data);
+		$this->assertFalse($data['is_configured']);
+		$this->assertEquals('incomplete', $data['source']);
+		$this->assertIsArray($data['current_config']);
+		$this->assertEquals('', $data['current_config']['api_url']);
+		$this->assertEquals('', $data['current_config']['api_username']);
+	}
+
+	public function testSaveConfigurationFailsWithInvalidURL() {
+		$this->request->method('getParam')
+			->willReturnCallback(function($key, $default) {
+				$params = [
+					'api_url' => 'not-a-valid-url',
+					'api_username' => 'test_user',
+					'api_password' => 'test_pass'
+				];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $this->controller->saveConfiguration();
+		$this->assertInstanceOf(JSONResponse::class, $response);
+		$this->assertEquals(400, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertFalse($data['success']);
+		$this->assertStringContainsString('Invalid API URL', $data['message']);
+	}
+
+	public function testSaveConfigurationFailsWithMissingFields() {
+		$this->request->method('getParam')
+			->willReturnCallback(function($key, $default) {
+				$params = [
+					'api_url' => 'https://example.com',
+					'api_username' => '',
+					'api_password' => ''
+				];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $this->controller->saveConfiguration();
+		$this->assertInstanceOf(JSONResponse::class, $response);
+		$this->assertEquals(400, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertFalse($data['success']);
+		$this->assertStringContainsString('required', $data['message']);
+	}
+
+	public function testSaveConfigurationSucceedsWithValidInput() {
+		$this->request->method('getParam')
+			->willReturnCallback(function($key, $default) {
+				$params = [
+					'api_url' => 'https://example.com/api',
+					'api_username' => 'test_user',
+					'api_password' => 'test_pass'
+				];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $this->controller->saveConfiguration();
+		$this->assertInstanceOf(JSONResponse::class, $response);
+		$this->assertEquals(200, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertTrue($data['success']);
+		$this->assertStringContainsString('saved successfully', $data['message']);
+
+		// Verify configuration was saved
+		$this->assertEquals('https://example.com/api', $this->config->getAppValue('user_vo', 'api_url', ''));
+		$this->assertEquals('test_user', $this->config->getAppValue('user_vo', 'api_username', ''));
+		$this->assertNotEmpty($this->config->getAppValue('user_vo', 'api_password', ''));
+	}
+
+	public function testClearConfigurationSucceeds() {
+		// Set some configuration first
+		$this->config->setAppValue('user_vo', 'api_url', 'https://example.com');
+		$this->config->setAppValue('user_vo', 'api_username', 'test');
+		$this->config->setAppValue('user_vo', 'api_password', 'pass');
+
+		$response = $this->controller->clearConfiguration();
+		$this->assertInstanceOf(JSONResponse::class, $response);
+		$this->assertEquals(200, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertTrue($data['success']);
+
+		// Verify configuration was cleared
+		$this->assertEquals('', $this->config->getAppValue('user_vo', 'api_url', ''));
+		$this->assertEquals('', $this->config->getAppValue('user_vo', 'api_username', ''));
+		$this->assertEquals('', $this->config->getAppValue('user_vo', 'api_password', ''));
+	}
+
+	public function testSaveUserSyncSettingsSucceeds() {
+		$this->request->method('getParam')
+			->willReturnCallback(function($key, $default) {
+				$params = [
+					'sync_email' => 'true',
+					'sync_photo' => 'false'
+				];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $this->controller->saveUserSyncSettings();
+		$this->assertInstanceOf(JSONResponse::class, $response);
+		$this->assertEquals(200, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertTrue($data['success']);
+
+		// Verify settings were saved
+		$this->assertEquals('true', $this->config->getAppValue('user_vo', 'sync_email', ''));
+		$this->assertEquals('false', $this->config->getAppValue('user_vo', 'sync_photo', ''));
+	}
+
+	public function testSaveNightlySyncSettingForUserSync() {
+		$this->request->method('getParam')
+			->willReturnCallback(function($key, $default) {
+				$params = [
+					'enabled' => true,
+					'sync_type' => 'user'
+				];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $this->controller->saveNightlySyncSetting();
+		$this->assertInstanceOf(JSONResponse::class, $response);
+		$this->assertEquals(200, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertTrue($data['success']);
+
+		// Verify settings were saved (both new and legacy keys)
+		$this->assertEquals('true', $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', ''));
+		$this->assertEquals('true', $this->config->getAppValue('user_vo', 'enable_nightly_sync', ''));
+	}
+
+	public function testSaveNightlySyncSettingForGroupSync() {
+		$this->request->method('getParam')
+			->willReturnCallback(function($key, $default) {
+				$params = [
+					'enabled' => true,
+					'sync_type' => 'group'
+				];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $this->controller->saveNightlySyncSetting();
+		$this->assertInstanceOf(JSONResponse::class, $response);
+		$this->assertEquals(200, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertTrue($data['success']);
+
+		// Verify group sync setting was saved
+		$this->assertEquals('true', $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', ''));
+	}
+
+	public function testGetNightlySyncStatusWithNoHistory() {
+		$response = $this->controller->getNightlySyncStatus();
+		$this->assertInstanceOf(JSONResponse::class, $response);
+		$this->assertEquals(200, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertTrue($data['success']);
+		$this->assertFalse($data['user_sync_enabled']);
+		$this->assertFalse($data['group_sync_enabled']);
+		$this->assertNull($data['last_run']);
+		$this->assertEquals('never', $data['last_status']);
+	}
+
+	public function testGetNightlySyncStatusWithHistory() {
+		// Set up sync history
+		$timestamp = time();
+		$this->config->setAppValue('user_vo', 'enable_nightly_user_sync', 'true');
+		$this->config->setAppValue('user_vo', 'enable_nightly_group_sync', 'true');
+		$this->config->setAppValue('user_vo', 'nightly_sync_last_run', (string)$timestamp);
+		$this->config->setAppValue('user_vo', 'nightly_sync_last_status', 'success');
+		$this->config->setAppValue('user_vo', 'nightly_sync_last_error', '');
+		$this->config->setAppValue('user_vo', 'nightly_sync_last_summary', json_encode([
+			'users_synced' => 5,
+			'groups_synced' => 3
+		]));
+
+		$response = $this->controller->getNightlySyncStatus();
+		$this->assertInstanceOf(JSONResponse::class, $response);
+		$this->assertEquals(200, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertTrue($data['success']);
+		$this->assertTrue($data['user_sync_enabled']);
+		$this->assertTrue($data['group_sync_enabled']);
+		$this->assertEquals($timestamp, $data['last_run']);
+		$this->assertEquals('success', $data['last_status']);
+		$this->assertEquals('', $data['last_error']);
+		$this->assertIsArray($data['last_summary']);
+		$this->assertEquals(5, $data['last_summary']['users_synced']);
+		$this->assertEquals(3, $data['last_summary']['groups_synced']);
+	}
+}

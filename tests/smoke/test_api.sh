@@ -149,8 +149,8 @@ echo ""
 # Config Controller Endpoints
 echo -e "${BLUE}Config Endpoints:${NC}"
 test_endpoint "GET" "/admin" "200" "" "Admin settings page"
-test_endpoint "GET" "/admin/config-status" "200" ".is_configured" "Check configuration status"
-test_endpoint "POST" "/admin/test-config" "200" ".success" "Test VO API connection" "{}"
+test_endpoint "GET" "/admin/config-status" "200" ".is_configured != null" "Check configuration status"
+test_endpoint "POST" "/admin/test-config" "400" ".success == false" "Test VO API connection (no config)" "{}"
 # Note: Not testing save-config or clear-config to avoid modifying test environment
 
 # User Sync Controller Endpoints
