@@ -7,6 +7,28 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+/**
+ * Format a datetime value for display using moment.js for locale-aware formatting
+ * Nextcloud provides moment.js globally and sets the locale based on user preferences
+ *
+ * @param {string|number|null} value - Date value (ISO string, Unix timestamp, or null)
+ * @param {string} format - Moment.js format string (default: 'L LTS' for date + time with seconds)
+ * @return {string} Formatted date string or dash for null values
+ */
+function formatDateTime(value, format = 'L LTS') {
+    if (!value || value === '-') {
+        return '-';
+    }
+
+    // Handle Unix timestamps (numbers)
+    if (typeof value === 'number') {
+        return moment(value * 1000).format(format);
+    }
+
+    // Handle ISO strings from database (YYYY-MM-DD HH:MM:SS)
+    return moment(value).format(format);
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Configuration form handling
     const configForm = document.getElementById('user-vo-config-form');
@@ -371,7 +393,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!creationDate) {
             return '<span class="no-date">—</span>';
         }
-        return '<span class="creation-date">' + escapeHtml(creationDate) + '</span>';
+        return '<span class="creation-date">' + escapeHtml(formatDateTime(creationDate)) + '</span>';
     }
 
     function exposeUser(uid) {
@@ -618,8 +640,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Update last run time
         if (data.last_run) {
-            const date = new Date(data.last_run * 1000);
-            lastRunElement.textContent = date.toLocaleString();
+            lastRunElement.textContent = formatDateTime(data.last_run);
         } else {
             lastRunElement.textContent = t('user_vo', 'Never');
         }
@@ -793,7 +814,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <td>${escapeHtml(result.photo_status || '-')}</td>
                             <td>${voGroupIdsDisplay}</td>
                             <td>${managedGroupsDisplay}</td>
-                            <td>${escapeHtml(result.last_synced || '-')}</td>
+                            <td>${escapeHtml(formatDateTime(result.last_synced))}</td>
                             <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
                         `;
                         userSyncList.appendChild(row);
@@ -886,7 +907,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <td>${escapeHtml(result.photo_status || '-')}</td>
                             <td>${voGroupIdsDisplay}</td>
                             <td>${managedGroupsDisplay}</td>
-                            <td>${escapeHtml(result.last_synced || '-')}</td>
+                            <td>${escapeHtml(formatDateTime(result.last_synced))}</td>
                             <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
                         `;
                         userSyncList.appendChild(row);
@@ -979,7 +1000,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <td>${photoDisplay}</td>
                             <td>${voGroupIdsDisplay}</td>
                             <td>${managedGroupsDisplay}</td>
-                            <td>${escapeHtml(result.last_synced || '-')}</td>
+                            <td>${escapeHtml(formatDateTime(result.last_synced))}</td>
                             <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
                         `;
                         userSyncList.appendChild(row);
@@ -1313,7 +1334,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <td>${photoDisplay}</td>
                                     <td>${voGroupIdsDisplay}</td>
                                     <td>${managedGroupsDisplay}</td>
-                                    <td>${escapeHtml(result.last_synced || '-')}</td>
+                                    <td>${escapeHtml(formatDateTime(result.last_synced))}</td>
                                     <td><span class="status-${result.status}">${statusIcon} ${escapeHtml(result.message)}</span></td>
                                 `;
                             }
@@ -1771,7 +1792,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td>${renderGroupStatusBadge(group)}</td>
                     <td>${escapeHtml(voMemberCountDisplay)}</td>
                     <td>${escapeHtml(nonVoMemberCountDisplay)}</td>
-                    <td>${escapeHtml(group.last_synced || '-')}</td>
+                    <td>${escapeHtml(formatDateTime(group.last_synced))}</td>
                     <td>${renderGroupActions(group)}</td>
                 `;
             }
