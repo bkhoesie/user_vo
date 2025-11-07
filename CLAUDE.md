@@ -21,20 +21,38 @@ This plugin enables Nextcloud to authenticate users using their VereinOnline cre
 ```
 lib/
 ├── AppInfo/Application.php      # App bootstrap, backend registration
-├── UserVOAuth.php               # Main authentication & user sync logic
+├── UserVOAuth.php               # Main authentication backend
 ├── Base.php                     # Base class for user backend
-├── Controller/
-│   └── AdminController.php      # Admin settings API endpoints
+├── Controller/                  # HTTP/API layer
+│   ├── AdminController.php      # Admin UI entry point
+│   ├── ConfigController.php     # Configuration management
+│   ├── UserSyncController.php   # User synchronization
+│   ├── UserAccountController.php   # Duplicate management
+│   ├── UserProvisioningController.php # Pre-provisioning
+│   ├── GroupController.php      # Group CRUD operations
+│   └── GroupSyncController.php  # Group synchronization
+├── Service/                     # Business logic layer
+│   ├── ApiClient.php            # VO API communication
+│   ├── ConfigService.php        # Configuration management
+│   ├── UserSyncService.php      # User sync logic
+│   ├── UserAccountService.php   # User account operations
+│   ├── UserProvisioningService.php  # Pre-provisioning logic
+│   ├── GroupManagementService.php   # Group CRUD operations
+│   ├── GroupSyncService.php     # Group sync logic
+│   └── GroupNameHarmonizer.php  # Group name normalization
 ├── Settings/
 │   ├── UserVOAdminSettings.php  # Admin UI template
 │   └── UserVOAdminSection.php   # Admin section registration
-├── Service/
-│   └── ConfigService.php        # Configuration management
 ├── Cron/
 │   └── SyncUsersJob.php         # Background job for nightly sync
 └── Migration/
     └── Version100XDate...php    # Database schema migrations
 ```
+
+**Architecture Pattern:** Backend → Service ← Controller
+- **Controllers:** Thin HTTP/routing layer, delegate to services
+- **Services:** All business logic, injected dependencies
+- **Backend:** Authentication, login hooks, delegates to services
 
 ### Authentication & Sync Flow
 
@@ -178,9 +196,10 @@ The plugin includes a multi-layer testing strategy:
 ```
 
 **Current coverage:**
-- `ConfigService` (8 tests): Configuration loading precedence, password masking
-- `GroupNameHarmonizer` (11 tests): Name truncation, Unicode handling, fallbacks
-- **Total: 19 tests, 46 assertions**
+- `ConfigService`: Configuration loading precedence, password masking
+- `GroupNameHarmonizer`: Name truncation, Unicode handling, fallbacks
+- `UserSyncService`: Validation logic, input sanitization
+- Additional service unit tests as needed
 
 **What gets tested:**
 - Service layer business logic with mocked dependencies
@@ -204,8 +223,13 @@ The plugin includes a multi-layer testing strategy:
 ```
 
 **Current coverage:**
-- `GroupManagementService` (5 tests): Database operations, group creation/deletion, position indexing
-- **Total: 5 tests, 18 assertions**
+- `ConfigController`: Configuration save/clear/test
+- `UserAccountController`: Duplicate scanning, expose/hide users
+- `UserProvisioningController`: Account creation, bulk provisioning
+- `GroupController`: Group CRUD operations
+- `GroupSyncController`: Group member synchronization
+- `UserSyncController`: User data synchronization
+- All controllers have comprehensive integration test coverage
 
 **What gets tested:**
 - Real database operations (not mocked)
@@ -308,16 +332,27 @@ This is **critical for PHP files** that might contain credentials (config files,
   - Prioritizes likely candidates and checks them first
   - Stops early once all target users are found
 
-**AdminController.php:**
-- `syncFromVO()` performs the actual sync logic (manual sync endpoint)
-- Includes auto-populate logic for missing vo_user_ids
-- Returns JSON response with results and summary
-- Shared by both manual sync UI and nightly cron job
+**Service Layer Architecture:**
+- `ApiClient`: Centralized VO API communication
+- `UserSyncService`: User data synchronization logic
+- `GroupSyncService`: Group member synchronization logic
+- `UserAccountService`: User account operations (duplicates, metadata)
+- `UserProvisioningService`: Pre-provisioning logic (search, create accounts)
+- `GroupManagementService`: Group CRUD operations
+- `ConfigService`: Configuration management with precedence handling
+- `GroupNameHarmonizer`: Group name normalization and special character handling
+
+**Controller Architecture:**
+- Multiple focused controllers organized by feature area
+- AdminController serves as UI entry point
+- Each controller delegates to corresponding service (thin HTTP wrappers)
+- Clean separation: HTTP concerns in controllers, business logic in services
 
 **SyncUsersJob.php:**
-- Calls `AdminController::syncFromVO()` to reuse sync logic
-- Converts response format for consistency
-- Stores execution metadata in app config
+- Background job for nightly user and group synchronization
+- Injects `UserSyncService` and `GroupSyncService` directly
+- Proper separation: cron job → service (no HTTP layer)
+- Stores execution metadata in app config for admin UI display
 
 **Case Sensitivity Fix (v0.2.0):**
 - Usernames now normalized to lowercase on creation
