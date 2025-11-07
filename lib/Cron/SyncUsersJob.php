@@ -17,7 +17,7 @@ use OCP\IConfig;
 use function OCP\Log\logger;
 use OCA\UserVO\Service\UserSyncService;
 use OCA\UserVO\Service\ConfigService;
-use OCA\UserVO\Controller\GroupSyncController;
+use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\UserVOAuth;
 
 /**
@@ -27,28 +27,25 @@ use OCA\UserVO\UserVOAuth;
  * Each can be enabled/disabled independently via config.
  *
  * Backward compatible: Existing 'enable_nightly_sync' config enables user sync.
- *
- * TODO Phase 4: Refactor to inject GroupSyncService directly instead of GroupSyncController
- * for cleaner separation (cron job shouldn't depend on HTTP controllers).
  */
 class SyncUsersJob extends TimedJob {
     private IConfig $config;
     private UserSyncService $userSyncService;
     private ConfigService $configService;
-    private GroupSyncController $groupSyncController;
+    private GroupSyncService $groupSyncService;
 
     public function __construct(
         ITimeFactory $time,
         IConfig $config,
         UserSyncService $userSyncService,
         ConfigService $configService,
-        GroupSyncController $groupSyncController
+        GroupSyncService $groupSyncService
     ) {
         parent::__construct($time);
         $this->config = $config;
         $this->userSyncService = $userSyncService;
         $this->configService = $configService;
-        $this->groupSyncController = $groupSyncController;
+        $this->groupSyncService = $groupSyncService;
 
         // Run once per day (24 hours)
         $this->setInterval(24 * 60 * 60);
@@ -121,17 +118,28 @@ class SyncUsersJob extends TimedJob {
         if ($groupSyncEnabled) {
             try {
                 logger('user_vo')->info('Starting group sync');
-                $response = $this->groupSyncController->syncAllGroups();
-                $data = $response->getData();
 
-                if (!$data['success']) {
-                    throw new \Exception($data['error'] ?? 'Group sync failed');
+                // Reuse backend instance from user sync if available, or create new one
+                if (!isset($backend)) {
+                    $configuration = $this->configService->loadConfiguration(maskPassword: false);
+                    $backend = new UserVOAuth(
+                        $configuration['api_url'],
+                        $configuration['api_username'],
+                        $configuration['api_password']
+                    );
+                }
+
+                // Call service directly (not via controller)
+                $result = $this->groupSyncService->syncAllManagedGroups($backend);
+
+                if (!$result['success']) {
+                    throw new \Exception($result['error'] ?? 'Group sync failed');
                 }
 
                 $groupSummary = [
-                    'total' => $data['summary']['total'],
-                    'succeeded' => $data['summary']['succeeded'],
-                    'failed' => $data['summary']['failed']
+                    'total' => $result['summary']['total'],
+                    'succeeded' => $result['summary']['succeeded'],
+                    'failed' => $result['summary']['failed']
                 ];
 
                 logger('user_vo')->info('Group sync completed', $groupSummary);
