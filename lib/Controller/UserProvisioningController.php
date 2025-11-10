@@ -138,7 +138,10 @@ class UserProvisioningController extends Controller {
 			return new JSONResponse([
 				'success' => true,
 				'nc_username' => $result['username'],
-				'message' => $result['message']
+				'message' => $result['message'],
+				'groups_synced' => $result['groups_synced'] ?? 0,
+				'groups_failed' => $result['groups_failed'] ?? 0,
+				'group_sync_error' => $result['group_sync_error'] ?? null
 			]);
 
 		} catch (\Exception $e) {

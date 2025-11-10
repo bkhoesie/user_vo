@@ -218,6 +218,49 @@ class UserProvisioningService {
             // Sync user data (already normalized from fetchUserDataFromVO)
             $backend->syncUserData($ncUsername, $memberData);
 
+            // Sync group memberships (same as login-time sync)
+            $groupsSynced = 0;
+            $groupsFailed = 0;
+            $groupSyncError = null;
+
+            try {
+                $voGroupIds = !empty($memberData['group_ids'])
+                    ? array_map('trim', explode(',', $memberData['group_ids']))
+                    : [];
+
+                if (!empty($voGroupIds)) {
+                    $groupSyncService = \OC::$server->get(\OCA\UserVO\Service\GroupSyncService::class);
+                    $result = $groupSyncService->syncGroupsByIds($voGroupIds);
+
+                    if ($result['success']) {
+                        $groupsSynced = $result['synced'] ?? 0;
+                        $groupsFailed = $result['failed'] ?? 0;
+
+                        $this->logger->info('Synced groups during pre-provisioning', [
+                            'app' => 'user_vo',
+                            'nc_username' => $ncUsername,
+                            'synced' => $groupsSynced,
+                            'failed' => $groupsFailed
+                        ]);
+                    } else {
+                        $groupSyncError = $result['error'] ?? 'Unknown error';
+                        $this->logger->warning('Group sync failed during pre-provisioning', [
+                            'app' => 'user_vo',
+                            'nc_username' => $ncUsername,
+                            'error' => $groupSyncError
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                $groupSyncError = $e->getMessage();
+                $this->logger->warning('Exception during group sync in pre-provisioning', [
+                    'app' => 'user_vo',
+                    'nc_username' => $ncUsername,
+                    'error' => $groupSyncError
+                ]);
+                // Don't fail provisioning - continue
+            }
+
             $this->logger->info('Pre-provisioned NC account for VO user', [
                 'app' => 'user_vo',
                 'nc_username' => $ncUsername,
@@ -227,7 +270,10 @@ class UserProvisioningService {
             return [
                 'success' => true,
                 'username' => $ncUsername,
-                'message' => "Account '$ncUsername' created successfully"
+                'message' => "Account '$ncUsername' created successfully",
+                'groups_synced' => $groupsSynced,
+                'groups_failed' => $groupsFailed,
+                'group_sync_error' => $groupSyncError
             ];
 
         } catch (\Exception $e) {
