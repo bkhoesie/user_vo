@@ -19,17 +19,20 @@ class GroupManagementService {
     private IGroupManager $groupManager;
     private GroupNameHarmonizer $groupNameHarmonizer;
     private LoggerInterface $logger;
+    private GroupSyncService $groupSyncService;
 
     public function __construct(
         IDBConnection $connection,
         IGroupManager $groupManager,
         GroupNameHarmonizer $groupNameHarmonizer,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        GroupSyncService $groupSyncService
     ) {
         $this->connection = $connection;
         $this->groupManager = $groupManager;
         $this->groupNameHarmonizer = $groupNameHarmonizer;
         $this->logger = $logger;
+        $this->groupSyncService = $groupSyncService;
     }
 
     /**
@@ -550,7 +553,53 @@ class GroupManagementService {
         if (!$result['success']) {
             $result['status_code'] = 500;
         } else {
-            $result['message'] = "Group created successfully";
+            // Auto-sync group members after successful creation
+            try {
+                $this->logger->info('Auto-syncing group members after creation', [
+                    'app' => 'user_vo',
+                    'vo_group_id' => $voGroupId,
+                    'nc_group_id' => $result['nc_group_id']
+                ]);
+
+                $syncResult = $this->groupSyncService->syncSingleGroupById($voGroupId, $backend);
+
+                if ($syncResult['success']) {
+                    // Merge sync results into response
+                    $result['synced'] = true;
+                    $result['sync_summary'] = $syncResult['summary'];
+                    $result['message'] = "Group created and synced successfully";
+
+                    $this->logger->info('Group auto-sync successful', [
+                        'app' => 'user_vo',
+                        'vo_group_id' => $voGroupId,
+                        'added' => count($syncResult['added']),
+                        'removed' => count($syncResult['removed']),
+                        'total_members' => $syncResult['summary']['succeeded']
+                    ]);
+                } else {
+                    // Sync failed but group still created - log warning
+                    $this->logger->warning('Group created but auto-sync failed', [
+                        'app' => 'user_vo',
+                        'vo_group_id' => $voGroupId,
+                        'sync_error' => $syncResult['error'] ?? 'Unknown error'
+                    ]);
+
+                    $result['synced'] = false;
+                    $result['sync_error'] = $syncResult['error'] ?? 'Unknown sync error';
+                    $result['message'] = "Group created successfully, but member sync failed";
+                }
+            } catch (\Exception $e) {
+                // Sync failed but group still created - log error but don't fail request
+                $this->logger->error('Exception during group auto-sync', [
+                    'app' => 'user_vo',
+                    'vo_group_id' => $voGroupId,
+                    'error' => $e->getMessage()
+                ]);
+
+                $result['synced'] = false;
+                $result['sync_error'] = $e->getMessage();
+                $result['message'] = "Group created successfully, but member sync encountered an error";
+            }
         }
 
         return $result;
