@@ -311,6 +311,19 @@ This is **critical for PHP files** that might contain credentials (config files,
 - `config_*.php` - Configuration files with passwords
 - `temp_*.php` - Temporary files that might contain sensitive data
 
+### Commit Message Guidelines
+
+**Before committing:**
+- Always run automated tests (unit, integration, smoke)
+- Always test changes manually in the UI
+- Verify all functionality works as expected
+
+**Commit message style:**
+- Keep messages concise - describe what changed, not how you got there
+- Use neutral, factual tone
+- Avoid references to local paths, file locations, or irrelevant background info
+- Focus on the actual change and its purpose
+
 ### Key Files for Development
 
 - `appinfo/info.xml` - App metadata, version, dependencies
