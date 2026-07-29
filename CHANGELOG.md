@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Fatal error on Nextcloud 33: `QueryBuilder::execute()` was removed upstream; replaced all
+  calls with `executeQuery()`/`executeStatement()` in `Base.php` (the user backend - affects
+  every login and user lookup) and in legacy duplicate-management code in `AdminController.php`.
+
+### Changed
+- Raised supported Nextcloud version ceiling to 34 (`max-version`) after verifying
+  compatibility against Nextcloud 33.0.7 and 34.0.2.
+
 ## [0.3.2] - 2025-10-12
 
 ### Added

@@ -1049,7 +1049,7 @@ class AdminController extends Controller {
             $accountsQuery->select('uid')
                 ->from('accounts')
                 ->orderBy('uid');
-            $accountsResult = $accountsQuery->execute();
+            $accountsResult = $accountsQuery->executeQuery();
             $allAccountUsers = $accountsResult->fetchAll();
             $accountsResult->closeCursor();
 
@@ -1058,7 +1058,7 @@ class AdminController extends Controller {
             $userVoQuery->select('uid', 'displayname')
                 ->from('user_vo')
                 ->where($userVoQuery->expr()->eq('backend', $userVoQuery->createNamedParameter('user_vo')));
-            $userVoResult = $userVoQuery->execute();
+            $userVoResult = $userVoQuery->executeQuery();
             $userVoEntries = $userVoResult->fetchAll();
             $userVoResult->closeCursor();
 
@@ -1190,7 +1190,7 @@ class AdminController extends Controller {
             ->from('user_vo')
             ->where($query->expr()->eq('uid', $query->createNamedParameter($markedUid)))
             ->andWhere($query->expr()->eq('backend', $query->createNamedParameter('user_vo')));
-        $result = $query->execute();
+        $result = $query->executeQuery();
         $row = $result->fetch();
         $result->closeCursor();
         if ($row) {
@@ -1204,7 +1204,7 @@ class AdminController extends Controller {
                 'backend' => $insert->createNamedParameter('user_vo'),
                 'displayname' => $insert->createNamedParameter($uid),
             ]);
-        $insert->execute();
+        $insert->executeStatement();
         return new JSONResponse(['success' => true]);
     }
 
@@ -1232,7 +1232,7 @@ class AdminController extends Controller {
         $delete->delete('user_vo')
             ->where($delete->expr()->eq('uid', $delete->createNamedParameter($markedUid)))
             ->andWhere($delete->expr()->eq('backend', $delete->createNamedParameter('user_vo')));
-        $delete->execute();
+        $delete->executeStatement();
 
         return new JSONResponse(['success' => true]);
     }
@@ -1253,7 +1253,7 @@ class AdminController extends Controller {
                 $query->createNamedParameter($normalizedUid)
             ))
             ->setMaxResults(1);
-        $result = $query->execute();
+        $result = $query->executeQuery();
         $row = $result->fetch();
         $result->closeCursor();
         return $row ? $row['uid'] : null;

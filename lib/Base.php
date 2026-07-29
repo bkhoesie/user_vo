@@ -54,7 +54,7 @@ abstract class Base extends \OC\User\Backend {
 				$query->expr()->eq('uid', $query->createNamedParameter($uid . '!duplicate'))
 			))
 			->andWhere($query->expr()->eq('backend', $query->createNamedParameter($this->backend)));
-		$query->execute();
+		$query->executeStatement();
 		
 		return true;
 	}
@@ -122,7 +122,7 @@ abstract class Base extends \OC\User\Backend {
 				$query->createNamedParameter($normalizedUid)
 			))
 			->setMaxResults(1);
-		$result = $query->execute();
+		$result = $query->executeQuery();
 		$row = $result->fetch();
 		$result->closeCursor();
 		return $row ? $row['uid'] : null;
@@ -150,7 +150,7 @@ abstract class Base extends \OC\User\Backend {
 				$query->expr()->eq('uid', $query->createNamedParameter($uid . '!duplicate'))
 			))
 			->andWhere($query->expr()->eq('backend', $query->createNamedParameter($this->backend)));
-		$result = $query->execute();
+		$result = $query->executeQuery();
 		$row = $result->fetch();
 		$result->closeCursor();
 		
@@ -184,7 +184,7 @@ abstract class Base extends \OC\User\Backend {
 		if ($offset) {
 			$query->setFirstResult($offset);
 		}
-		$result = $query->execute();
+		$result = $query->executeQuery();
 
 		$displayNames = [];
 		while ($row = $result->fetch()) {
@@ -213,7 +213,7 @@ abstract class Base extends \OC\User\Backend {
 		if ($offset) {
 			$query->setFirstResult($offset);
 		}
-		$result = $query->execute();
+		$result = $query->executeQuery();
 
 		$users = [];
 		while ($row = $result->fetch()) {
@@ -252,7 +252,7 @@ abstract class Base extends \OC\User\Backend {
 				$query->expr()->eq('uid', $query->createNamedParameter($uid . '!duplicate'))
 			))
 			->andWhere($query->expr()->eq('backend', $query->createNamedParameter($this->backend)));
-		$query->execute();
+		$query->executeStatement();
 		return true;
 	}
 
@@ -287,7 +287,7 @@ abstract class Base extends \OC\User\Backend {
 					'uid' => $query->createNamedParameter($uid),
 					'backend' => $query->createNamedParameter($this->backend),
 				]);
-			$query->execute();
+			$query->executeStatement();
 
 			if ($groups) {
 				$createduser = \OC::$server->getUserManager()->get($cleanUid);
@@ -313,7 +313,7 @@ abstract class Base extends \OC\User\Backend {
 				$query->expr()->eq('uid', $query->createNamedParameter($uid . '!duplicate'))
 			))
 			->andWhere($query->expr()->eq('backend', $query->createNamedParameter($this->backend)));
-		$result = $query->execute();
+		$result = $query->executeQuery();
 		$row = $result->fetch();
 		$result->closeCursor();
 		return $row !== false;
@@ -330,7 +330,7 @@ abstract class Base extends \OC\User\Backend {
 		$query->select($query->func()->count('*', 'num_users'))
 			->from('user_vo')
 			->where($query->expr()->eq('backend', $query->createNamedParameter($this->backend)));
-		$result = $query->execute();
+		$result = $query->executeQuery();
 		$users = $result->fetchColumn();
 		$result->closeCursor();
 
