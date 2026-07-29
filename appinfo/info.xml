@@ -10,7 +10,7 @@ The [documentation](https://github.com/bkhoesie/user_vo) describes how this plug
     ]]></description>
     <licence>AGPL</licence>
     <author>Nikolaus Demmel</author>
-    <version>0.3.2</version>
+    <version>0.3.3</version>
 	<namespace>UserVO</namespace>
 	<types>
 		<prelogin/>
