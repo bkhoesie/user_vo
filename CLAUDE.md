@@ -12,7 +12,7 @@ This plugin enables Nextcloud to authenticate users using their VereinOnline cre
 - Configurable nightly background sync
 - Admin interface for configuration, user management, and sync control
 - Support for both `config.php` and admin UI configuration
-- Compatible with Nextcloud 24-34
+- See `appinfo/info.xml` for the supported Nextcloud version range
 
 ## Architecture
 
@@ -144,11 +144,12 @@ Follow these steps to create a new release (see `readme-dev.md` for details):
 4. **Build appstore package**: `make appstore`
 5. **Verify archive contents**: `tar -tzf build/artifacts/appstore/user_vo.tar.gz`
    - Check for accidental temp/config files that shouldn't be included
-6. **Test the package locally**:
+6. **Test the package locally** (`<version>` = whichever nextcloud-docker-dev container you
+   currently test against, e.g. `stable33`):
    - Comment out apps-extra volume mount in `docker-compose.yml`
-   - Recreate container: `docker compose up -d --force-recreate stable33`
+   - Recreate container: `docker compose up -d --force-recreate <version>`
    - Copy and extract: `cp build/artifacts/appstore/user_vo.tar.gz data/shared/`
-   - Install: `docker compose exec stable33 tar -xzf /shared/user_vo.tar.gz -C /var/www/html/apps/ && docker compose exec stable33 occ app:enable user_vo`
+   - Install: `docker compose exec <version> tar -xzf /shared/user_vo.tar.gz -C /var/www/html/apps/ && docker compose exec <version> occ app:enable user_vo`
    - Test functionality, then clean up and restore volume mount
 7. **Push to remote**: `git push origin main`
 8. **Authenticate with GitHub** (if needed): `gh auth login`
@@ -366,14 +367,6 @@ Common log messages:
 ## Version History
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
-
-**Current (`main`, released):** Version 0.3.3 (2026-07-30)
-- Fixed a fatal error on Nextcloud 33+ (removed `QueryBuilder::execute()`); raised `max-version` to 34
-
-**In progress (`wip/group-management-locking` branch, not yet merged/released):**
-- Full group management feature (Phase 3 controller/service refactor, `GroupManagementService`,
-  `GroupSyncService`) and Step 18 per-group locking - substantial, unreleased. Needs rebasing onto
-  `main` before resuming; see `user-vo-current-tasks.md` in the documentation repo for status.
 
 ## License
 
