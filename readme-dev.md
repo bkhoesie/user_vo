@@ -13,11 +13,11 @@
    Look for any files that shouldn't be included (temp_config.php, test files, credentials, etc.)
 6. Test the built appstore archive locally:
    - Temporarily comment out the apps-extra volume mount in `docker-compose.yml` for a test container.
-   - Recreate the container: `docker compose up -d --force-recreate stable31`
+   - Recreate the container: `docker compose up -d --force-recreate stable33`
    - Copy package to shared directory: `cp build/artifacts/appstore/user_vo.tar.gz data/shared/`
-   - Extract and install: `docker compose exec stable31 tar -xzf /shared/user_vo.tar.gz -C /var/www/html/apps/ && docker compose exec stable31 occ app:enable user_vo`
-   - Verify functionality, then clean up: `docker compose exec stable31 occ app:disable user_vo && docker compose exec stable31 rm -rf /var/www/html/apps/user_vo`
-   - Restore volume mount in `docker-compose.yml` and recreate container: `docker compose up -d --force-recreate stable31`
+   - Extract and install: `docker compose exec stable33 tar -xzf /shared/user_vo.tar.gz -C /var/www/html/apps/ && docker compose exec stable33 occ app:enable user_vo`
+   - Verify functionality, then clean up: `docker compose exec stable33 occ app:disable user_vo && docker compose exec stable33 rm -rf /var/www/html/apps/user_vo`
+   - Restore volume mount in `docker-compose.yml` and recreate container: `docker compose up -d --force-recreate stable33`
 7. Push changes to remote:
    `git push origin main`
 8. (If not already authenticated) `gh auth login`
