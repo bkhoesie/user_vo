@@ -354,11 +354,36 @@ class GroupManagementService {
                 $createResult = $this->createGroupFromData($voGroupId, $groupData, $allGroups);
 
                 if ($createResult['success']) {
-                    $results['created'][] = [
+                    $createdEntry = [
                         'vo_group_id' => $voGroupId,
                         'nc_group_id' => $createResult['nc_group_id'],
                         'vo_group_name' => $createResult['vo_group_name']
                     ];
+
+                    // Auto-sync group members after creation, matching single createGroup()
+                    try {
+                        $syncResult = $this->groupSyncService->syncSingleGroupById($voGroupId, $backend);
+                        $createdEntry['synced'] = $syncResult['success'];
+                        if (!$syncResult['success']) {
+                            $createdEntry['sync_error'] = $syncResult['error'] ?? 'Unknown sync error';
+                            $this->logger->warning('Group created but auto-sync failed (bulk)', [
+                                'app' => 'user_vo',
+                                'vo_group_id' => $voGroupId,
+                                'sync_error' => $createdEntry['sync_error']
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        // Sync failed but group still created - log error but don't fail the batch
+                        $createdEntry['synced'] = false;
+                        $createdEntry['sync_error'] = $e->getMessage();
+                        $this->logger->error('Exception during group auto-sync (bulk)', [
+                            'app' => 'user_vo',
+                            'vo_group_id' => $voGroupId,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+
+                    $results['created'][] = $createdEntry;
                 } else {
                     $results['errors'][] = [
                         'vo_group_id' => $voGroupId,
