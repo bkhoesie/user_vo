@@ -253,6 +253,19 @@ The plugin includes a multi-layer testing strategy:
 
 See `tests/README.md` for detailed testing documentation and examples.
 
+**Layer 4: Static Analysis (Psalm)**
+```bash
+composer install
+vendor/bin/psalm --no-cache
+```
+
+Config: `psalm.xml` (errorLevel 3, targets PHP 8.0 - this app's min supported PHP). Uses the
+official `nextcloud/ocp` stub package for `OCP\*` types. Pre-existing findings that are stub-
+package gaps rather than real bugs (`\OC`, `Doctrine\DBAL\*`, the legacy `\OC_User_Backend` base
+class - none of these are covered by the OCP-only stub package) are recorded in
+`tests/psalm-baseline.xml`. Runs once against a single `nextcloud/ocp` version in CI, not a full
+NC-version matrix - a deliberate simplicity/cost tradeoff for this app's size, not an oversight.
+
 ### Creating a Release
 
 Follow these steps to create a new release (see `readme-dev.md` for details):
