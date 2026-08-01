@@ -22,7 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       php-version: ${{ steps.versions.outputs.php-available-list }}
-      server-max: ${{ steps.versions.outputs.branches-max-list }}
+      # Test both the min and max Nextcloud version declared in appinfo/info.xml, not just the
+      # max - catches both "upstream removed something we use" (max end) and "we accidentally
+      # require something too new" (min end) regressions.
+      server-versions: ${{ steps.combine.outputs.list }}
     steps:
       - name: Checkout app
         uses: actions/checkout@v5
@@ -30,6 +33,12 @@ jobs:
       - name: Get version matrix
         id: versions
         uses: icewind1991/nextcloud-version-matrix@v1
+
+      - name: Combine min+max server versions
+        id: combine
+        run: |
+          echo -n "list=" >> "$GITHUB_OUTPUT"
+          jq -c -n --argjson a '${{ steps.versions.outputs.branches-min-list }}' --argjson b '${{ steps.versions.outputs.branches-max-list }}' '($a + $b) | unique' >> "$GITHUB_OUTPUT"
 
   phpunit:
     runs-on: ubuntu-latest
@@ -39,7 +48,7 @@ jobs:
       fail-fast: false
       matrix:
         php-versions: ${{ fromJson(needs.matrix.outputs.php-version) }}
-        server-versions: ${{ fromJson(needs.matrix.outputs.server-max) }}
+        server-versions: ${{ fromJson(needs.matrix.outputs.server-versions) }}
 
     name: PHP ${{ matrix.php-versions }} / Nextcloud ${{ matrix.server-versions }}
 
