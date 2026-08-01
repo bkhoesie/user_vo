@@ -46,6 +46,6 @@ class Application extends App implements IBootstrap {
         // Always register the backend to ensure existing users remain accessible
         // The backend will handle incomplete configuration gracefully
         $userBackend = new UserVOAuth(null, null, null, $config);
-        $context->getServerContainer()->getUserManager()->registerBackend($userBackend);
+        $context->getServerContainer()->get(\OCP\IUserManager::class)->registerBackend($userBackend);
     }
 }
