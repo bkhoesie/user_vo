@@ -340,6 +340,49 @@ class GroupManagementServiceTest extends TestCase {
 	}
 
 	/**
+	 * Regression test: bulkCreateGroups() must auto-sync members after creation,
+	 * matching the single createGroup() path. Previously bulkCreateGroups() never
+	 * called the sync service at all, leaving newly bulk-created groups at 0
+	 * members until an explicit sync - found via manual testing against the real
+	 * VereinOnline API on 2026-08-01.
+	 */
+	public function testBulkCreateGroupsAutoSyncsMembers(): void {
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+
+		$backend->method('fetchAllGroups')->willReturn([
+			[
+				'id' => 'test_bulk_sync1',
+				'name' => 'Bulk Sync Group 1',
+				'parentid' => null,
+				'pos' => 1
+			],
+			[
+				'id' => 'test_bulk_sync2',
+				'name' => 'Bulk Sync Group 2',
+				'parentid' => null,
+				'pos' => 2
+			]
+		]);
+
+		$result = $this->service->bulkCreateGroups(['test_bulk_sync1', 'test_bulk_sync2'], $backend);
+
+		$this->assertCount(2, $result['created']);
+		foreach ($result['created'] as $created) {
+			$this->assertArrayHasKey(
+				'synced',
+				$created,
+				'bulkCreateGroups() must attempt to sync each newly created group, like createGroup() does'
+			);
+			$this->assertTrue(
+				$created['synced'],
+				"Auto-sync should succeed for group {$created['vo_group_id']}: " . ($created['sync_error'] ?? '')
+			);
+		}
+	}
+
+	/**
 	 * Test bulkCreateGroups skips already managed groups
 	 */
 	public function testBulkCreateGroupsSkipsExisting(): void {
