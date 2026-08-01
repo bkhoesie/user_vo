@@ -7,26 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- `\OC\Server::getAvatarManager()` was removed upstream on Nextcloud 33+; use
-  `\OC::$server->get(\OCP\IAvatarManager::class)` instead.
-- Nextcloud 34 removed nearly all of `\OC\Server`'s remaining legacy getters
-  (`getUserManager`, `getGroupManager`, `getDatabaseConnection`, `getConfig`); replaced with
-  `\OC::$server->get(Interface::class)` throughout.
-- `bulkCreateGroups()` never auto-synced group members after creation, unlike the single
-  `createGroup()` path (which does) - newly bulk-created groups sat at 0 members until an
-  explicit sync.
-- `fetchAllVOGroups` returned HTTP 500 instead of 200 with `success: false` when VereinOnline
-  isn't configured/reachable yet, inconsistent with every sibling endpoint's handling of the
-  same "not configured yet" state.
-
-### Changed
-- Lowered supported Nextcloud version floor from 24 to 28 (`min-version`). Nextcloud 24-27's own
-  bundled PHPUnit test tooling is incompatible with the PHPUnit version this plugin's test suite
-  now requires, and this plugin's code already relies on PHP 8.0+ syntax (named arguments) that
-  doesn't parse under the older PHP versions some of those Nextcloud releases still support.
-  Discovered via CI testing across the full declared version range.
-
 ## [0.3.3] - 2026-07-30
 
 ### Fixed
