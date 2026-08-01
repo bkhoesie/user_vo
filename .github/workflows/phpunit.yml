@@ -86,6 +86,19 @@ jobs:
         working-directory: apps/${{ env.APP_NAME }}
         run: phpunit -c tests/Integration/phpunit.xml
 
+      - name: Run Nextcloud (for smoke tests)
+        run: php -S localhost:8080 &
+
+      - name: Smoke tests
+        working-directory: apps/${{ env.APP_NAME }}
+        env:
+          BASE_URL: http://localhost:8080/index.php/apps/user_vo
+          USERNAME: admin
+          PASSWORD: admin
+        run: |
+          sleep 2
+          ./tests/smoke/test_api.sh
+
       - name: Print Nextcloud log
         if: failure()
         run: cat data/nextcloud.log
