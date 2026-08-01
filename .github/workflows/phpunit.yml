@@ -65,7 +65,10 @@ jobs:
           php-version: ${{ matrix.php-versions }}
           # https://docs.nextcloud.com/server/stable/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
           extensions: bz2, ctype, curl, dom, fileinfo, gd, iconv, intl, json, libxml, mbstring, openssl, pcntl, posix, session, simplexml, xmlreader, xmlwriter, zip, zlib, sqlite, pdo_sqlite
-          tools: phpunit:11
+          # No pinned version: PHPUnit 11 (what we use locally) requires PHP >= 8.2, which
+          # older matrix legs (e.g. Nextcloud 24 on PHP 8.1) don't have. Let setup-php pick a
+          # PHPUnit version compatible with whichever PHP this leg is running.
+          tools: phpunit
           coverage: none
           ini-values: disable_functions=
 
