@@ -12,10 +12,12 @@
 #   ./tests/smoke/test_api.sh --endpoint /admin/config-status
 #
 
-set -e
+# Note: deliberately no `set -e` - test_endpoint() returns 1 on a failed check by
+# design, so the summary/exit-code logic at the bottom can report ALL failures
+# instead of the script silently aborting after the first one.
 
 # Configuration
-BASE_URL="${BASE_URL:-http://stable31.local/index.php/apps/user_vo}"
+BASE_URL="${BASE_URL:-http://stable33.local/index.php/apps/user_vo}"
 USERNAME="${USERNAME:-admin}"
 PASSWORD="${PASSWORD:-admin}"
 
