@@ -547,7 +547,7 @@ class UserVOAuth extends Base {
                 return ['success' => false, 'message' => 'User not found'];
             }
 
-            $avatar = \OC::$server->getAvatarManager()->getAvatar($uid);
+            $avatar = \OC::$server->get(\OCP\IAvatarManager::class)->getAvatar($uid);
 
             // Create temp file for the image
             $tmpFile = tmpfile();

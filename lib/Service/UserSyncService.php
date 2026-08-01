@@ -209,7 +209,7 @@ class UserSyncService {
                 // Check if user has a custom photo (not generated/default)
                 $photoStatus = '-';
                 if ($user) {
-                    $avatarManager = \OC::$server->getAvatarManager();
+                    $avatarManager = \OC::$server->get(\OCP\IAvatarManager::class);
                     try {
                         $avatar = $avatarManager->getAvatar($uid);
                         // Check if avatar is user-uploaded (not generated)
