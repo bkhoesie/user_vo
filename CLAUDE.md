@@ -266,6 +266,22 @@ class - none of these are covered by the OCP-only stub package) are recorded in
 `tests/psalm-baseline.xml`. Runs once against a single `nextcloud/ocp` version in CI, not a full
 NC-version matrix - a deliberate simplicity/cost tradeoff for this app's size, not an oversight.
 
+**Layer 5: JS Tests (Jest)**
+```bash
+cd js
+npm install
+npm test
+```
+
+Covers the functions in `js/admin.js` that don't depend on closure-captured DOM state:
+`renderExposeCheckbox`, `renderGroups`, `renderCreationDate`, `generateSyncSummaryHTML`,
+`generatePhotoErrorsHTML`, `renderGroupStatusBadge`, `renderGroupActions`,
+`addPlaceholdersForMissingParents`, `sortGroupsHierarchically`, plus `escapeHtml`/
+`formatDateTime`. Most of `admin.js` is still nested inside a single `DOMContentLoaded` closure
+and isn't reachable for unit testing - only functions with no closure-captured state get hoisted
+to module scope for this. `js/tests/setup.js` stubs the Nextcloud-provided `t()` and `moment`
+globals these functions rely on.
+
 ### Creating a Release
 
 Follow these steps to create a new release (see `readme-dev.md` for details):
