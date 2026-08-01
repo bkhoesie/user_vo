@@ -143,6 +143,7 @@ appstore:
 	--exclude="../$(app_name)/js/test" \
 	--exclude="../$(app_name)/js/*.log" \
 	--exclude="../$(app_name)/js/package.json" \
+	--exclude="../$(app_name)/js/package-lock.json" \
 	--exclude="../$(app_name)/js/bower.json" \
 	--exclude="../$(app_name)/js/karma.*" \
 	--exclude="../$(app_name)/js/protractor.*" \

@@ -1,6 +1,8 @@
 /build
 /vendor/
 composer.lock
+/js/node_modules/
+/js/package-lock.json
 
 # Development/testing files - DO NOT COMMIT
 test_vo_api.php

@@ -29,6 +29,321 @@ function formatDateTime(value, format = 'L LTS') {
     return moment(value).format(format);
 }
 
+function renderExposeCheckbox(variant) {
+    if (variant.is_canonical) {
+        return '<input type="checkbox" checked disabled title="' + t('user_vo', 'Canonical user always exposed') + '">';
+    }
+    return '<input type="checkbox" class="expose-checkbox" data-uid="' + escapeHtml(variant.uid) + '"' + (variant.is_exposed ? ' checked' : '') + '>';
+}
+
+function renderGroups(groups) {
+    if (!groups || groups.length === 0) {
+        return '<span class="no-groups">—</span>';
+    }
+
+    // Extract display names for tooltip
+    const displayNames = groups.map(g => g.display_name).join(', ');
+    const count = groups.length;
+
+    return '<span class="groups-list" title="All groups: ' + escapeHtml(displayNames) + '">' + count + '</span>';
+}
+
+function renderCreationDate(creationDate) {
+    if (!creationDate) {
+        return '<span class="no-date">—</span>';
+    }
+    return '<span class="creation-date">' + escapeHtml(formatDateTime(creationDate)) + '</span>';
+}
+
+// Helper function to generate sync summary HTML
+function generateSyncSummaryHTML(summary, isSelectiveSync = false) {
+    let totalText = summary.total.toString();
+    if (isSelectiveSync && summary.total_in_table) {
+        totalText = `${summary.total} (out of ${summary.total_in_table})`;
+    }
+
+    return `
+        <p><strong>${t('user_vo', 'Sync completed:')}</strong></p>
+        <ul>
+            <li>${t('user_vo', 'Total users:')} ${totalText}</li>
+            <li class="success">${t('user_vo', 'Successfully synced:')} ${summary.success || summary.synced || 0}</li>
+            <li class="error">${t('user_vo', 'Failed:')} ${summary.failed || 0}</li>
+            <li>${t('user_vo', 'Skipped:')} ${summary.skipped || 0}</li>
+        </ul>
+    `;
+}
+
+// Helper function to generate photo errors HTML
+function generatePhotoErrorsHTML(results) {
+    const photoErrors = results.filter(r => r.photo_error);
+    if (photoErrors.length === 0) {
+        return '';
+    }
+
+    const errorListHTML = photoErrors.map(r =>
+        `<li>${escapeHtml(r.uid)}: ${escapeHtml(r.photo_error)}</li>`
+    ).join('');
+
+    return `
+        <p><strong>⚠ ${t('user_vo', 'Photo Sync Issues')} (${photoErrors.length} ${photoErrors.length === 1 ? 'user' : 'users'}):</strong></p>
+        <ul class="photo-errors">
+            ${errorListHTML}
+        </ul>
+    `;
+}
+
+// Helper function to render group status badge
+function renderGroupStatusBadge(group) {
+    if (group.deleted_in_vo) {
+        const tooltipText = 'Group ID ' + group.vo_group_id + ' (' + group.vo_group_name + ') was not found in VereinOnline';
+        return '<span class="vo-badge vo-badge-error" title="' + escapeHtml(tooltipText) + '">⚠ ' + escapeHtml(t('user_vo', 'Deleted in VO')) + '</span>';
+    }
+
+    if (group.is_managed && group.display_name_mismatch) {
+        const currentName = String(group.nc_display_name || '(empty)');
+        const expectedName = String(group.expected_display_name || '(empty)');
+        return '<span class="vo-badge vo-badge-info" title="Current: &quot;' + escapeHtml(currentName) + '&quot;, Expected: &quot;' + escapeHtml(expectedName) + '&quot; (will be fixed on next sync)">ℹ ' + escapeHtml(t('user_vo', 'Display Name Mismatch')) + '</span>';
+    }
+
+    if (group.is_managed) {
+        return '<span class="vo-badge vo-badge-success">✓ ' + escapeHtml(t('user_vo', 'Created')) + '</span>';
+    }
+
+    return '<span class="vo-badge vo-badge-warning">' + escapeHtml(t('user_vo', 'Not created')) + '</span>';
+}
+
+// Helper function to render group actions
+function renderGroupActions(group) {
+    if (group.deleted_in_vo) {
+        // Deleted groups - show Sync (to update member counts) and Delete buttons
+        return `
+            <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
+                ${escapeHtml(t('user_vo', 'Sync'))}
+            </button>
+            <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}" data-vo-group-name="${escapeHtml(group.vo_group_name)}">
+                ${escapeHtml(t('user_vo', 'Delete'))}
+            </button>
+        `;
+    }
+
+    if (group.is_managed) {
+        // Managed groups - show Sync and Delete buttons
+        return `
+            <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
+                ${escapeHtml(t('user_vo', 'Sync'))}
+            </button>
+            <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}" data-vo-group-name="${escapeHtml(group.vo_group_name)}">
+                ${escapeHtml(t('user_vo', 'Delete'))}
+            </button>
+        `;
+    } else {
+        // Not created groups - show Create button
+        return `
+            <button class="button create-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
+                ${escapeHtml(t('user_vo', 'Create'))}
+            </button>
+        `;
+    }
+}
+
+// Helper function to create placeholder rows for missing parents in "managed" view
+function addPlaceholdersForMissingParents(groups) {
+    const placeholders = [];
+    // Map of position index -> group (to check if a parent at that index exists)
+    const groupsByIndex = new Map();
+    groups.forEach(g => {
+        if (g.vo_position_index) {
+            groupsByIndex.set(g.vo_position_index, g);
+        }
+    });
+
+    // Track which placeholder indices we've already created
+    const placeholderIndices = new Set();
+
+    groups.forEach(group => {
+        const posIndex = group.vo_position_index || '';
+        const parts = posIndex.split('.');
+
+        // For groups with hierarchical indices (e.g., "13.2.3"), check if parents exist
+        if (parts.length > 1) {
+            // Build each parent level
+            for (let i = 1; i < parts.length; i++) {
+                const parentIndexParts = parts.slice(0, i);
+                const parentIndex = parentIndexParts.join('.');
+
+                // Skip if a real group exists at this index
+                if (groupsByIndex.has(parentIndex)) {
+                    continue;
+                }
+
+                // Skip if we already created a placeholder for this index
+                if (placeholderIndices.has(parentIndex)) {
+                    continue;
+                }
+
+                // Determine this placeholder's parent
+                const grandparentIndexParts = parentIndexParts.slice(0, -1);
+                const grandparentIndex = grandparentIndexParts.join('.');
+
+                // Check if grandparent exists (real or placeholder)
+                let grandparentId;
+                if (grandparentIndexParts.length === 0) {
+                    grandparentId = '0'; // Root
+                } else if (groupsByIndex.has(grandparentIndex)) {
+                    grandparentId = groupsByIndex.get(grandparentIndex).vo_group_id;
+                } else {
+                    grandparentId = 'placeholder_' + grandparentIndex.replace(/\./g, '_');
+                }
+
+                const parentId = 'placeholder_' + parentIndex.replace(/\./g, '_');
+
+                placeholders.push({
+                    vo_group_id: parentId,
+                    vo_group_name: '',
+                    vo_parent_id: grandparentId,
+                    vo_position: parseInt(parentIndexParts[parentIndexParts.length - 1]) || 0,
+                    vo_position_index: parentIndex,
+                    nc_group_id: '',
+                    is_managed: false,
+                    _is_placeholder: true
+                });
+
+                placeholderIndices.add(parentIndex);
+            }
+        }
+    });
+
+    return placeholders;
+}
+
+/**
+ * Sort groups hierarchically by VO position and calculate depth.
+ *
+ * @param {Array} groups - Flat list of groups from the API
+ * @param {string|null} viewType - 'all' or 'managed'; in 'managed' view, placeholder rows are
+ *   synthesized for missing parent groups so the hierarchy stays navigable
+ */
+function sortGroupsHierarchically(groups, viewType) {
+    // In "managed" view, add placeholders for missing parents
+    let workingGroups = [...groups];
+    if (viewType === 'managed') {
+        const placeholders = addPlaceholdersForMissingParents(groups);
+
+        // Update real groups to point to their immediate parent (placeholder or real)
+        // Build index map first (including placeholders)
+        const indexToId = new Map();
+        groups.forEach(g => {
+            if (g.vo_position_index) {
+                indexToId.set(g.vo_position_index, g.vo_group_id);
+            }
+        });
+        placeholders.forEach(p => {
+            indexToId.set(p.vo_position_index, p.vo_group_id);
+        });
+
+        // Update parent_id for groups whose parent is a placeholder
+        workingGroups.forEach(group => {
+            const posIndex = group.vo_position_index || '';
+            const parts = posIndex.split('.');
+
+            if (parts.length > 1) {
+                // Calculate parent index
+                const parentIndexParts = parts.slice(0, -1);
+                const parentIndex = parentIndexParts.join('.');
+
+                // If parent exists (real or placeholder), update parent_id
+                if (indexToId.has(parentIndex)) {
+                    group.vo_parent_id = indexToId.get(parentIndex);
+                }
+            }
+        });
+
+        workingGroups = [...workingGroups, ...placeholders];
+    }
+
+    // Build a map of groups by parent_id for efficient lookup
+    const groupsByParent = {};
+    const groupMap = {};
+
+    workingGroups.forEach(group => {
+        groupMap[group.vo_group_id] = group;
+        const parentId = group.vo_parent_id || '0';
+        if (!groupsByParent[parentId]) {
+            groupsByParent[parentId] = [];
+        }
+        groupsByParent[parentId].push(group);
+    });
+
+    // Mark groups that have children
+    const hasChildren = {};
+    Object.keys(groupsByParent).forEach(parentId => {
+        if (parentId !== '0' && groupsByParent[parentId].length > 0) {
+            hasChildren[parentId] = true;
+        }
+    });
+
+    // Sort siblings within each parent by position, then by name
+    Object.keys(groupsByParent).forEach(parentId => {
+        groupsByParent[parentId].sort((a, b) => {
+            const posA = a.vo_position || 0;
+            const posB = b.vo_position || 0;
+            if (posA !== posB) {
+                return posA - posB;
+            }
+            // Secondary sort by name when positions are equal
+            return a.vo_group_name.localeCompare(b.vo_group_name);
+        });
+    });
+
+    // Recursively build the sorted flat list with depth and position index
+    const result = [];
+    function addGroupsRecursively(parentId, depth = 0, parentPositionIndex = '') {
+        const children = groupsByParent[parentId] || [];
+        children.forEach((group, index) => {
+            // Build position index (e.g., "1", "2", "5.1", "5.2")
+            const position = group.vo_position || 0;
+            const positionIndex = parentPositionIndex
+                ? `${parentPositionIndex}.${position}`
+                : position.toString();
+
+            // Add depth, isLast, hasChildren, and position index for display
+            const isLast = index === children.length - 1;
+            result.push({
+                ...group,
+                _depth: depth,
+                _isLast: isLast,
+                _positionIndex: positionIndex,
+                _hasChildren: hasChildren[group.vo_group_id] || false,
+                _expanded: false // Start collapsed by default
+            });
+            // Add this group's children recursively
+            addGroupsRecursively(group.vo_group_id, depth + 1, positionIndex);
+        });
+    }
+
+    // Start with root groups (parent_id = '0' or null)
+    addGroupsRecursively('0');
+
+    return result;
+}
+
+// Exposed for Jest (Node's `module` global is undefined in the browser, so this is a no-op there)
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        escapeHtml,
+        formatDateTime,
+        renderExposeCheckbox,
+        renderGroups,
+        renderCreationDate,
+        generateSyncSummaryHTML,
+        generatePhotoErrorsHTML,
+        renderGroupStatusBadge,
+        renderGroupActions,
+        addPlaceholdersForMissingParents,
+        sortGroupsHierarchically,
+    };
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Configuration form handling
     const configForm = document.getElementById('user-vo-config-form');
@@ -370,32 +685,6 @@ document.addEventListener('DOMContentLoaded', function() {
         allUsersList.innerHTML = html;
     }
 
-    function renderExposeCheckbox(variant) {
-        if (variant.is_canonical) {
-            return '<input type="checkbox" checked disabled title="' + t('user_vo', 'Canonical user always exposed') + '">';
-        }
-        return '<input type="checkbox" class="expose-checkbox" data-uid="' + escapeHtml(variant.uid) + '"' + (variant.is_exposed ? ' checked' : '') + '>';
-    }
-
-    function renderGroups(groups) {
-        if (!groups || groups.length === 0) {
-            return '<span class="no-groups">—</span>';
-        }
-
-        // Extract display names for tooltip
-        const displayNames = groups.map(g => g.display_name).join(', ');
-        const count = groups.length;
-
-        return '<span class="groups-list" title="All groups: ' + escapeHtml(displayNames) + '">' + count + '</span>';
-    }
-
-    function renderCreationDate(creationDate) {
-        if (!creationDate) {
-            return '<span class="no-date">—</span>';
-        }
-        return '<span class="creation-date">' + escapeHtml(formatDateTime(creationDate)) + '</span>';
-    }
-
     function exposeUser(uid) {
         fetch(OC.generateUrl('/apps/user_vo/admin/expose-user'), {
             method: 'POST',
@@ -496,13 +785,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const syncPhoto = this.checked;
             saveSyncSettings(syncEmail, syncPhoto);
         });
-    }
-
-    // Helper function to escape HTML
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
     }
 
     // Nightly sync checkbox handler
@@ -706,43 +988,6 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             errorContainer.style.display = 'none';
         }
-    }
-
-    // Helper function to generate sync summary HTML
-    function generateSyncSummaryHTML(summary, isSelectiveSync = false) {
-        let totalText = summary.total.toString();
-        if (isSelectiveSync && summary.total_in_table) {
-            totalText = `${summary.total} (out of ${summary.total_in_table})`;
-        }
-
-        return `
-            <p><strong>${t('user_vo', 'Sync completed:')}</strong></p>
-            <ul>
-                <li>${t('user_vo', 'Total users:')} ${totalText}</li>
-                <li class="success">${t('user_vo', 'Successfully synced:')} ${summary.success || summary.synced || 0}</li>
-                <li class="error">${t('user_vo', 'Failed:')} ${summary.failed || 0}</li>
-                <li>${t('user_vo', 'Skipped:')} ${summary.skipped || 0}</li>
-            </ul>
-        `;
-    }
-
-    // Helper function to generate photo errors HTML
-    function generatePhotoErrorsHTML(results) {
-        const photoErrors = results.filter(r => r.photo_error);
-        if (photoErrors.length === 0) {
-            return '';
-        }
-
-        const errorListHTML = photoErrors.map(r =>
-            `<li>${escapeHtml(r.uid)}: ${escapeHtml(r.photo_error)}</li>`
-        ).join('');
-
-        return `
-            <p><strong>⚠ ${t('user_vo', 'Photo Sync Issues')} (${photoErrors.length} ${photoErrors.length === 1 ? 'user' : 'users'}):</strong></p>
-            <ul class="photo-errors">
-                ${errorListHTML}
-            </ul>
-        `;
     }
 
     // View local data (fast, no API calls)
@@ -1378,235 +1623,6 @@ document.addEventListener('DOMContentLoaded', function() {
     let expandedGroupIndices = new Set();
     let currentViewType = null; // 'all' or 'managed'
 
-    // Helper function to render group status badge
-    function renderGroupStatusBadge(group) {
-        if (group.deleted_in_vo) {
-            const tooltipText = 'Group ID ' + group.vo_group_id + ' (' + group.vo_group_name + ') was not found in VereinOnline';
-            return '<span class="vo-badge vo-badge-error" title="' + escapeHtml(tooltipText) + '">⚠ ' + escapeHtml(t('user_vo', 'Deleted in VO')) + '</span>';
-        }
-
-        if (group.is_managed && group.display_name_mismatch) {
-            const currentName = String(group.nc_display_name || '(empty)');
-            const expectedName = String(group.expected_display_name || '(empty)');
-            return '<span class="vo-badge vo-badge-info" title="Current: &quot;' + escapeHtml(currentName) + '&quot;, Expected: &quot;' + escapeHtml(expectedName) + '&quot; (will be fixed on next sync)">ℹ ' + escapeHtml(t('user_vo', 'Display Name Mismatch')) + '</span>';
-        }
-
-        if (group.is_managed) {
-            return '<span class="vo-badge vo-badge-success">✓ ' + escapeHtml(t('user_vo', 'Created')) + '</span>';
-        }
-
-        return '<span class="vo-badge vo-badge-warning">' + escapeHtml(t('user_vo', 'Not created')) + '</span>';
-    }
-
-    // Helper function to render group actions
-    function renderGroupActions(group) {
-        if (group.deleted_in_vo) {
-            // Deleted groups - show Sync (to update member counts) and Delete buttons
-            return `
-                <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
-                    ${escapeHtml(t('user_vo', 'Sync'))}
-                </button>
-                <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}" data-vo-group-name="${escapeHtml(group.vo_group_name)}">
-                    ${escapeHtml(t('user_vo', 'Delete'))}
-                </button>
-            `;
-        }
-
-        if (group.is_managed) {
-            // Managed groups - show Sync and Delete buttons
-            return `
-                <button class="button sync-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
-                    ${escapeHtml(t('user_vo', 'Sync'))}
-                </button>
-                <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}" data-vo-group-name="${escapeHtml(group.vo_group_name)}">
-                    ${escapeHtml(t('user_vo', 'Delete'))}
-                </button>
-            `;
-        } else {
-            // Not created groups - show Create button
-            return `
-                <button class="button create-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
-                    ${escapeHtml(t('user_vo', 'Create'))}
-                </button>
-            `;
-        }
-    }
-
-    // Helper function to create placeholder rows for missing parents in "managed" view
-    function addPlaceholdersForMissingParents(groups) {
-        const placeholders = [];
-        // Map of position index -> group (to check if a parent at that index exists)
-        const groupsByIndex = new Map();
-        groups.forEach(g => {
-            if (g.vo_position_index) {
-                groupsByIndex.set(g.vo_position_index, g);
-            }
-        });
-
-        // Track which placeholder indices we've already created
-        const placeholderIndices = new Set();
-
-        groups.forEach(group => {
-            const posIndex = group.vo_position_index || '';
-            const parts = posIndex.split('.');
-
-            // For groups with hierarchical indices (e.g., "13.2.3"), check if parents exist
-            if (parts.length > 1) {
-                // Build each parent level
-                for (let i = 1; i < parts.length; i++) {
-                    const parentIndexParts = parts.slice(0, i);
-                    const parentIndex = parentIndexParts.join('.');
-
-                    // Skip if a real group exists at this index
-                    if (groupsByIndex.has(parentIndex)) {
-                        continue;
-                    }
-
-                    // Skip if we already created a placeholder for this index
-                    if (placeholderIndices.has(parentIndex)) {
-                        continue;
-                    }
-
-                    // Determine this placeholder's parent
-                    const grandparentIndexParts = parentIndexParts.slice(0, -1);
-                    const grandparentIndex = grandparentIndexParts.join('.');
-
-                    // Check if grandparent exists (real or placeholder)
-                    let grandparentId;
-                    if (grandparentIndexParts.length === 0) {
-                        grandparentId = '0'; // Root
-                    } else if (groupsByIndex.has(grandparentIndex)) {
-                        grandparentId = groupsByIndex.get(grandparentIndex).vo_group_id;
-                    } else {
-                        grandparentId = 'placeholder_' + grandparentIndex.replace(/\./g, '_');
-                    }
-
-                    const parentId = 'placeholder_' + parentIndex.replace(/\./g, '_');
-
-                    placeholders.push({
-                        vo_group_id: parentId,
-                        vo_group_name: '',
-                        vo_parent_id: grandparentId,
-                        vo_position: parseInt(parentIndexParts[parentIndexParts.length - 1]) || 0,
-                        vo_position_index: parentIndex,
-                        nc_group_id: '',
-                        is_managed: false,
-                        _is_placeholder: true
-                    });
-
-                    placeholderIndices.add(parentIndex);
-                }
-            }
-        });
-
-        return placeholders;
-    }
-
-    // Helper function to sort groups hierarchically by VO position and calculate depth
-    function sortGroupsHierarchically(groups) {
-        // In "managed" view, add placeholders for missing parents
-        let workingGroups = [...groups];
-        if (currentViewType === 'managed') {
-            const placeholders = addPlaceholdersForMissingParents(groups);
-
-            // Update real groups to point to their immediate parent (placeholder or real)
-            // Build index map first (including placeholders)
-            const indexToId = new Map();
-            groups.forEach(g => {
-                if (g.vo_position_index) {
-                    indexToId.set(g.vo_position_index, g.vo_group_id);
-                }
-            });
-            placeholders.forEach(p => {
-                indexToId.set(p.vo_position_index, p.vo_group_id);
-            });
-
-            // Update parent_id for groups whose parent is a placeholder
-            workingGroups.forEach(group => {
-                const posIndex = group.vo_position_index || '';
-                const parts = posIndex.split('.');
-
-                if (parts.length > 1) {
-                    // Calculate parent index
-                    const parentIndexParts = parts.slice(0, -1);
-                    const parentIndex = parentIndexParts.join('.');
-
-                    // If parent exists (real or placeholder), update parent_id
-                    if (indexToId.has(parentIndex)) {
-                        group.vo_parent_id = indexToId.get(parentIndex);
-                    }
-                }
-            });
-
-            workingGroups = [...workingGroups, ...placeholders];
-        }
-
-        // Build a map of groups by parent_id for efficient lookup
-        const groupsByParent = {};
-        const groupMap = {};
-
-        workingGroups.forEach(group => {
-            groupMap[group.vo_group_id] = group;
-            const parentId = group.vo_parent_id || '0';
-            if (!groupsByParent[parentId]) {
-                groupsByParent[parentId] = [];
-            }
-            groupsByParent[parentId].push(group);
-        });
-
-        // Mark groups that have children
-        const hasChildren = {};
-        Object.keys(groupsByParent).forEach(parentId => {
-            if (parentId !== '0' && groupsByParent[parentId].length > 0) {
-                hasChildren[parentId] = true;
-            }
-        });
-
-        // Sort siblings within each parent by position, then by name
-        Object.keys(groupsByParent).forEach(parentId => {
-            groupsByParent[parentId].sort((a, b) => {
-                const posA = a.vo_position || 0;
-                const posB = b.vo_position || 0;
-                if (posA !== posB) {
-                    return posA - posB;
-                }
-                // Secondary sort by name when positions are equal
-                return a.vo_group_name.localeCompare(b.vo_group_name);
-            });
-        });
-
-        // Recursively build the sorted flat list with depth and position index
-        const result = [];
-        function addGroupsRecursively(parentId, depth = 0, parentPositionIndex = '') {
-            const children = groupsByParent[parentId] || [];
-            children.forEach((group, index) => {
-                // Build position index (e.g., "1", "2", "5.1", "5.2")
-                const position = group.vo_position || 0;
-                const positionIndex = parentPositionIndex
-                    ? `${parentPositionIndex}.${position}`
-                    : position.toString();
-
-                // Add depth, isLast, hasChildren, and position index for display
-                const isLast = index === children.length - 1;
-                result.push({
-                    ...group,
-                    _depth: depth,
-                    _isLast: isLast,
-                    _positionIndex: positionIndex,
-                    _hasChildren: hasChildren[group.vo_group_id] || false,
-                    _expanded: false // Start collapsed by default
-                });
-                // Add this group's children recursively
-                addGroupsRecursively(group.vo_group_id, depth + 1, positionIndex);
-            });
-        }
-
-        // Start with root groups (parent_id = '0' or null)
-        addGroupsRecursively('0');
-
-        return result;
-    }
-
     // Display groups in the table
     function displayGroups(groups, viewType) {
         const managedCount = groups.filter(g => g.is_managed).length;
@@ -1631,7 +1647,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // Sort groups hierarchically using VO's defined sort order
-        const sortedGroups = sortGroupsHierarchically(groups);
+        const sortedGroups = sortGroupsHierarchically(groups, viewType);
 
         // In "managed" view, initialize all groups as expanded on first load only
         // (when expandedGroupIndices is empty, indicating first time showing this view)
