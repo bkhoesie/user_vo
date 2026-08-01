@@ -143,7 +143,7 @@ class UserProvisioningService {
                     'vo_user_id' => $memberId,
                     'vo_username' => $voUsername,
                     'vo_name' => $member['name'] ?? '', // Name from GetMembers (e.g., "Lastname, Firstname")
-                    'display_name' => trim($memberData['firstname'] . ' ' . $memberData['lastname']), // Normalized fields
+                    'display_name' => trim(($memberData['firstname'] ?? '') . ' ' . ($memberData['lastname'] ?? '')), // Normalized fields
                     'email' => $memberData['email'] ?? '', // Normalized field
                     'nc_account_exists' => ($ncUser !== null),
                     'nc_username' => $ncUser ? $ncUser->getUID() : null,
