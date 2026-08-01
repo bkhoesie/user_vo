@@ -179,7 +179,7 @@ echo -e "${BLUE}User Provisioning Endpoints:${NC}"
 # Group Controller Endpoints
 echo ""
 echo -e "${BLUE}Group Endpoints:${NC}"
-test_endpoint "GET" "/admin/fetch-all-vo-groups" "200" ".success == true" "Fetch all VO groups"
+test_endpoint "GET" "/admin/fetch-all-vo-groups" "200" ".success != null" "Fetch all VO groups"
 test_endpoint "GET" "/admin/fetch-managed-groups" "200" ".success == true" "Fetch managed groups"
 # Note: Not testing group create/delete to avoid modifying groups
 

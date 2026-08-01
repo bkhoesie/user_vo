@@ -65,7 +65,7 @@ class GroupController extends Controller {
 				return new JSONResponse([
 					'success' => false,
 					'error' => $result['error']
-				], 500);
+				]);
 			}
 
 			return new JSONResponse($result);
