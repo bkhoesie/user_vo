@@ -199,6 +199,9 @@ The plugin includes a multi-layer testing strategy:
 - `ConfigService`: Configuration loading precedence, password masking
 - `GroupNameHarmonizer`: Name truncation, Unicode handling, fallbacks
 - `UserSyncService`: Validation logic, input sanitization
+- `UserVOAuth`: `fetchUserDataFromVO()` parsing, `fetchMembersMapForUsers()` fuzzy matching
+- `ApiClient`: token creation, connection-failure handling
+- `SyncUsersJob`: enable/disable flag logic (incl. legacy `enable_nightly_sync`), sync ordering rules
 - Additional service unit tests as needed
 
 **What gets tested:**
@@ -230,6 +233,9 @@ The plugin includes a multi-layer testing strategy:
 - `GroupSyncController`: Group member synchronization
 - `UserSyncController`: User data synchronization
 - All controllers have comprehensive integration test coverage
+- `Base`/`UserVOAuth`: login flow (`checkCanonicalPassword()`), case-insensitive matching, duplicate-marker safety net
+- `UserProvisioningService`, `UserSyncService`, `UserAccountService`: real-DB coverage of search, sync, and duplicate-scan logic
+- `GroupDeletedListener`: managed-group cleanup on NC group deletion
 
 **What gets tested:**
 - Real database operations (not mocked)
