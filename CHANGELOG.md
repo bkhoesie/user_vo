@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Lowered supported Nextcloud version floor from 24 to 28 (`min-version`). Nextcloud 24-27's own
+  bundled PHPUnit test tooling is incompatible with the PHPUnit version this plugin's test suite
+  now requires, and this plugin's code already relies on PHP 8.0+ syntax (named arguments) that
+  doesn't parse under the older PHP versions some of those Nextcloud releases still support.
+  Discovered via CI testing across the full declared version range.
+
 ## [0.3.3] - 2026-07-30
 
 ### Fixed
