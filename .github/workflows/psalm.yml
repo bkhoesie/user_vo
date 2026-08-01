@@ -1,0 +1,39 @@
+name: Static analysis
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: psalm-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  psalm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout app
+        uses: actions/checkout@v5
+
+      - name: Set up php
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress
+
+      # psalm.xml's phpVersion="8.0" targets the plugin's actual min supported PHP
+      # (appinfo/info.xml min-version=28) regardless of the PHP running psalm itself.
+      # Single run against one nextcloud/ocp stub version (not a full NC-version matrix
+      # like phpunit.yml) - OCP interfaces are stable enough across supported versions
+      # that this catches real issues without the added CI complexity/cost.
+      - name: Run Psalm
+        run: vendor/bin/psalm --threads=1 --no-cache --monochrome --no-progress --output-format=github

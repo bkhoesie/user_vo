@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<files psalm-version="5.26.1@d747f6500b38ac4f7dfc5edbcae6e4b637d7add0">
+  <file src="lib/AppInfo/Application.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+  </file>
+  <file src="lib/Base.php">
+    <UndefinedClass>
+      <code><![CDATA[\OC\User\Backend]]></code>
+    </UndefinedClass>
+  </file>
+  <file src="lib/Controller/AdminController.php">
+    <InvalidArgument>
+      <code><![CDATA['admin']]></code>
+    </InvalidArgument>
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+  </file>
+  <file src="lib/Controller/ConfigController.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+    <RedundantCondition>
+      <code><![CDATA[is_array($response)]]></code>
+    </RedundantCondition>
+  </file>
+  <file src="lib/Controller/GroupController.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+  </file>
+  <file src="lib/Controller/GroupSyncController.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+  </file>
+  <file src="lib/Controller/UserProvisioningController.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+    <PossiblyUndefinedArrayOffset>
+      <code><![CDATA[$result['error']]]></code>
+    </PossiblyUndefinedArrayOffset>
+  </file>
+  <file src="lib/Controller/UserSyncController.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+  </file>
+  <file src="lib/Cron/SyncUsersJob.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+    <UndefinedFunction>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+    </UndefinedFunction>
+  </file>
+  <file src="lib/Listener/GroupDeletedListener.php">
+    <MissingTemplateParam>
+      <code><![CDATA[IEventListener]]></code>
+    </MissingTemplateParam>
+  </file>
+  <file src="lib/Migration/Version1000Date20230513235044.php">
+    <UndefinedDocblockClass>
+      <code><![CDATA[$schema->createTable('user_vo')]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+    </UndefinedDocblockClass>
+  </file>
+  <file src="lib/Migration/Version1001Date20251005000000.php">
+    <UndefinedDocblockClass>
+      <code><![CDATA[$schema->getTable('user_vo')]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+    </UndefinedDocblockClass>
+  </file>
+  <file src="lib/Migration/Version1002Date20251013000000.php">
+    <UndefinedDocblockClass>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+    </UndefinedDocblockClass>
+  </file>
+  <file src="lib/Service/ApiClient.php">
+    <PossiblyInvalidArgument>
+      <code><![CDATA[$response]]></code>
+    </PossiblyInvalidArgument>
+  </file>
+  <file src="lib/Service/ConfigService.php">
+    <PossiblyUndefinedArrayOffset>
+      <code><![CDATA[$adminValues[$key]]]></code>
+      <code><![CDATA[$configPhpValues[$key]]]></code>
+    </PossiblyUndefinedArrayOffset>
+    <UndefinedFunction>
+      <code><![CDATA[logger('user_vo')]]></code>
+    </UndefinedFunction>
+  </file>
+  <file src="lib/Service/GroupManagementService.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+  </file>
+  <file src="lib/Service/GroupSyncService.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+    <PossiblyNullArgument>
+      <code><![CDATA[$currentVOName]]></code>
+    </PossiblyNullArgument>
+    <PossiblyNullArrayAccess>
+      <code><![CDATA[$currentVOGroup['name']]]></code>
+      <code><![CDATA[$currentVOGroup['parentid']]]></code>
+      <code><![CDATA[$currentVOGroup['pos']]]></code>
+    </PossiblyNullArrayAccess>
+    <PossiblyNullArrayOffset>
+      <code><![CDATA[$childrenMap]]></code>
+      <code><![CDATA[$childrenMap]]></code>
+    </PossiblyNullArrayOffset>
+    <UndefinedClass>
+      <code><![CDATA[\Doctrine\DBAL\Connection]]></code>
+    </UndefinedClass>
+    <UndefinedFunction>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+    </UndefinedFunction>
+  </file>
+  <file src="lib/Service/UserAccountService.php">
+    <UndefinedClass>
+      <code><![CDATA[\OC]]></code>
+    </UndefinedClass>
+  </file>
+  <file src="lib/Service/UserProvisioningService.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+  </file>
+  <file src="lib/Service/UserSyncService.php">
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+    <UndefinedClass>
+      <code><![CDATA[\Doctrine\DBAL\Connection]]></code>
+      <code><![CDATA[\OC]]></code>
+    </UndefinedClass>
+  </file>
+  <file src="lib/UserVOAuth.php">
+    <MissingDependency>
+      <code><![CDATA[Base]]></code>
+    </MissingDependency>
+  </file>
+</files>

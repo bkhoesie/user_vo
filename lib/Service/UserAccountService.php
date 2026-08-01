@@ -341,6 +341,7 @@ class UserAccountService {
      */
     private function getBirthTime(string $path): ?int {
         $escapedPath = escapeshellarg($path);
+        /** @psalm-suppress ForbiddenCode $path is shell-escaped above; PHP has no native birth-time accessor */
         $output = shell_exec("stat -c %W $escapedPath 2>/dev/null");
 
         if ($output !== null) {
@@ -352,6 +353,7 @@ class UserAccountService {
         }
 
         // Try alternative method for systems that support it
+        /** @psalm-suppress ForbiddenCode $path is shell-escaped above; PHP has no native birth-time accessor */
         $output = shell_exec("stat -f %B $escapedPath 2>/dev/null");
         if ($output !== null) {
             $birthTime = (int)trim($output);

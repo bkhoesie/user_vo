@@ -65,7 +65,7 @@ class UserVOAdminSettings implements ISettings {
             'config_status' => $configStatus,
             'sync_settings' => $syncSettings,
             'nightly_sync' => $nightlySync
-        ], 'admin');
+        ], '');
     }
 
     public function getSection() {

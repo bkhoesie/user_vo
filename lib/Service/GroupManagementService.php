@@ -696,7 +696,8 @@ class GroupManagementService {
      */
     private function calculatePositionIndex(?string $voParentId, ?int $voPosition, array $allGroups = []): string {
         // If no parent (root group), position index is just the position number
-        if (empty($voParentId) || $voParentId === '0') {
+        // (PHP's empty() already treats '0' as empty, so that's covered here too)
+        if (empty($voParentId)) {
             return (string)($voPosition ?? 0);
         }
 
