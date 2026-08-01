@@ -200,7 +200,7 @@ class UserSyncService {
                 $voGroupIds = $userRow['vo_group_ids'] ?: '';
 
                 // Get user email
-                $user = \OC::$server->getUserManager()->get($uid);
+                $user = \OC::$server->get(\OCP\IUserManager::class)->get($uid);
                 $email = $user ? $user->getSystemEMailAddress() : '';
 
                 // Get managed groups for this user
@@ -503,7 +503,7 @@ class UserSyncService {
                 $userResult->closeCursor();
 
                 // Get user email
-                $user = \OC::$server->getUserManager()->get($uid);
+                $user = \OC::$server->get(\OCP\IUserManager::class)->get($uid);
                 $email = $user ? $user->getSystemEMailAddress() : '';
 
                 // Determine photo sync status based on actual result

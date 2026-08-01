@@ -44,7 +44,7 @@ abstract class Base extends \OC\User\Backend {
 	 * @return bool
 	 */
 	public function deleteUser($uid) {
-		$connection = \OC::$server->getDatabaseConnection();
+		$connection = \OC::$server->get(\OCP\IDBConnection::class);
 		$query = $connection->getQueryBuilder();
 		
 		// Delete user with exact uid or uid + !duplicate suffix
@@ -111,7 +111,7 @@ abstract class Base extends \OC\User\Backend {
 	 * Find the canonical user (first user without !duplicate marker) for a normalized uid
 	 */
 	private function findCanonicalUserForNormalizedUid($normalizedUid) {
-		$connection = \OC::$server->getDatabaseConnection();
+		$connection = \OC::$server->get(\OCP\IDBConnection::class);
 		$query = $connection->getQueryBuilder();
 		$query->select('uid')
 			->from('user_vo')
@@ -139,7 +139,7 @@ abstract class Base extends \OC\User\Backend {
 	 * Get display name of the user, strip !duplicate marker from returned uid.
 	 */
 	public function getDisplayName($uid) {
-		$connection = \OC::$server->getDatabaseConnection();
+		$connection = \OC::$server->get(\OCP\IDBConnection::class);
 		$query = $connection->getQueryBuilder();
 		
 		// Find user with exact uid or uid + !duplicate suffix
@@ -165,7 +165,7 @@ abstract class Base extends \OC\User\Backend {
 	 * Get a list of all display names and user ids (strip !duplicate marker from returned uids).
 	 */
 	public function getDisplayNames($search = '', $limit = null, $offset = null) {
-		$connection = \OC::$server->getDatabaseConnection();
+		$connection = \OC::$server->get(\OCP\IDBConnection::class);
 		$query = $connection->getQueryBuilder();
 		$query->select('uid', 'displayname')
 			->from('user_vo')
@@ -199,7 +199,7 @@ abstract class Base extends \OC\User\Backend {
 	 * Get a list of all users (strip !duplicate marker from returned uids)
 	 */
 	public function getUsers($search = '', $limit = null, $offset = null) {
-		$connection = \OC::$server->getDatabaseConnection();
+		$connection = \OC::$server->get(\OCP\IDBConnection::class);
 		$query = $connection->getQueryBuilder();
 		$query->select('uid')
 			->from('user_vo')
@@ -243,7 +243,7 @@ abstract class Base extends \OC\User\Backend {
 			$displayName = substr($displayName, 4);
 		}
 		
-		$connection = \OC::$server->getDatabaseConnection();
+		$connection = \OC::$server->get(\OCP\IDBConnection::class);
 		$query = $connection->getQueryBuilder();
 		$query->update('user_vo')
 			->set('displayname', $query->createNamedParameter($displayName))
@@ -281,7 +281,7 @@ abstract class Base extends \OC\User\Backend {
 			// uid is now clean and lowercase for new users
 			$cleanUid = $uid;
 			
-			$query = \OC::$server->getDatabaseConnection()->getQueryBuilder();
+			$query = \OC::$server->get(\OCP\IDBConnection::class)->getQueryBuilder();
 			$query->insert('user_vo')
 				->values([
 					'uid' => $query->createNamedParameter($uid),
@@ -290,9 +290,9 @@ abstract class Base extends \OC\User\Backend {
 			$query->executeStatement();
 
 			if ($groups) {
-				$createduser = \OC::$server->getUserManager()->get($cleanUid);
+				$createduser = \OC::$server->get(\OCP\IUserManager::class)->get($cleanUid);
 				foreach ($groups as $group) {
-					\OC::$server->getGroupManager()->createGroup($group)->addUser($createduser);
+					\OC::$server->get(\OCP\IGroupManager::class)->createGroup($group)->addUser($createduser);
 				}
 			}
 		}
@@ -304,7 +304,7 @@ abstract class Base extends \OC\User\Backend {
 	 */
 	public function userExists($uid) {
 		// Input should never have markers - it comes from Nextcloud core
-		$connection = \OC::$server->getDatabaseConnection();
+		$connection = \OC::$server->get(\OCP\IDBConnection::class);
 		$query = $connection->getQueryBuilder();
 		$query->select('uid')
 			->from('user_vo')
@@ -325,7 +325,7 @@ abstract class Base extends \OC\User\Backend {
 	 * @return int|bool The number of users on success false on failure
 	 */
 	public function countUsers() {
-		$connection = \OC::$server->getDatabaseConnection();
+		$connection = \OC::$server->get(\OCP\IDBConnection::class);
 		$query = $connection->getQueryBuilder();
 		$query->select($query->func()->count('*', 'num_users'))
 			->from('user_vo')

@@ -32,8 +32,8 @@ class GroupManagementServiceTest extends TestCase {
 		$container = $app->getContainer();
 
 		$this->service = $container->get(GroupManagementService::class);
-		$this->connection = \OC::$server->getDatabaseConnection();
-		$this->groupManager = \OC::$server->getGroupManager();
+		$this->connection = \OC::$server->get(\OCP\IDBConnection::class);
+		$this->groupManager = \OC::$server->get(\OCP\IGroupManager::class);
 	}
 
 	protected function tearDown(): void {

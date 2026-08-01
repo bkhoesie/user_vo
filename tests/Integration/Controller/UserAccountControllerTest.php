@@ -32,8 +32,8 @@ class UserAccountControllerTest extends TestCase {
 		$container = $app->getContainer();
 
 		$this->controller = $container->get(UserAccountController::class);
-		$this->connection = \OC::$server->getDatabaseConnection();
-		$this->userManager = \OC::$server->getUserManager();
+		$this->connection = \OC::$server->get(\OCP\IDBConnection::class);
+		$this->userManager = \OC::$server->get(\OCP\IUserManager::class);
 	}
 
 	protected function tearDown(): void {

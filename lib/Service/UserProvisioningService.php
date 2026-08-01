@@ -50,7 +50,7 @@ class UserProvisioningService {
 
             $results = [];
             $searchLower = mb_strtolower(trim($searchTerm), 'UTF-8');
-            $userManager = \OC::$server->getUserManager();
+            $userManager = \OC::$server->get(\OCP\IUserManager::class);
 
             // If search term contains dots, also prepare a space-separated version
             // This allows searching for usernames like "john.doe" to match "John Doe"
@@ -204,7 +204,7 @@ class UserProvisioningService {
             $ncUsername = strtolower($voUsername);
 
             // Check if account already exists
-            $userManager = \OC::$server->getUserManager();
+            $userManager = \OC::$server->get(\OCP\IUserManager::class);
             if ($userManager->get($ncUsername)) {
                 return [
                     'success' => false,

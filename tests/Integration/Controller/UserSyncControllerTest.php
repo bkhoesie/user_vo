@@ -39,7 +39,7 @@ class UserSyncControllerTest extends NextcloudTestCase {
         // Get real Nextcloud services
         $this->config = \OC::$server->get(IConfig::class);
         $this->logger = \OC::$server->get(LoggerInterface::class);
-        $connection = \OC::$server->getDatabaseConnection();
+        $connection = \OC::$server->get(\OCP\IDBConnection::class);
         $this->request = $this->createMock(IRequest::class);
 
         // Save original configuration

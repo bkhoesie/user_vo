@@ -27,7 +27,7 @@ class UserVOAuth extends Base {
 
     public function __construct($apiUrl = null, $username = null, $password = null, IConfig $config = null) {
         parent::__construct('user_vo');
-        $this->config = $config ?? \OC::$server->getConfig();
+        $this->config = $config ?? \OC::$server->get(\OCP\IConfig::class);
         $this->configService = new ConfigService($this->config);
         $this->apiClient = \OC::$server->get(ApiClient::class);
 
@@ -402,7 +402,7 @@ class UserVOAuth extends Base {
             }
 
             // Get NC user object
-            $userManager = \OC::$server->getUserManager();
+            $userManager = \OC::$server->get(\OCP\IUserManager::class);
             $user = $userManager->get($uid);
 
             if (!$user) {
@@ -542,7 +542,7 @@ class UserVOAuth extends Base {
             }
 
             // Get user and set avatar
-            $user = \OC::$server->getUserManager()->get($uid);
+            $user = \OC::$server->get(\OCP\IUserManager::class)->get($uid);
             if (!$user) {
                 return ['success' => false, 'message' => 'User not found'];
             }
@@ -635,7 +635,7 @@ class UserVOAuth extends Base {
      */
     protected function updateVOMetadata(string $uid, array $voUserData): void {
         try {
-            $db = \OC::$server->getDatabaseConnection();
+            $db = \OC::$server->get(\OCP\IDBConnection::class);
 
             // Check if record exists
             $qb = $db->getQueryBuilder();
@@ -707,14 +707,14 @@ class UserVOAuth extends Base {
                 : [];
 
             // Get user's OLD NC group memberships (before this login sync)
-            $connection = \OC::$server->getDatabaseConnection();
-            $user = \OC::$server->getUserManager()->get($uid);
+            $connection = \OC::$server->get(\OCP\IDBConnection::class);
+            $user = \OC::$server->get(\OCP\IUserManager::class)->get($uid);
             if (!$user) {
                 logger('user_vo')->warning("User not found during login-time group sync", ['uid' => $uid]);
                 return;
             }
 
-            $groupManager = \OC::$server->getGroupManager();
+            $groupManager = \OC::$server->get(\OCP\IGroupManager::class);
             $userGroups = $groupManager->getUserGroups($user);
             $oldNcGroupIds = array_map(fn($g) => $g->getGID(), $userGroups);
 

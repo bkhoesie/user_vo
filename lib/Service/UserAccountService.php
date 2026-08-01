@@ -275,7 +275,7 @@ class UserAccountService {
      * @return array Array of arrays with 'gid' and 'display_name'
      */
     public function getUserGroups(string $uid): array {
-        $user = \OC::$server->getUserManager()->get($uid);
+        $user = \OC::$server->get(\OCP\IUserManager::class)->get($uid);
         if (!$user) {
             return [];
         }
