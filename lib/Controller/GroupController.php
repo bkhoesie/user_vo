@@ -54,6 +54,7 @@ class GroupController extends Controller {
 	/**
 	 * Fetch all groups from VereinOnline
 	 *
+	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function fetchAllVOGroups(): JSONResponse {
@@ -86,6 +87,7 @@ class GroupController extends Controller {
 	/**
 	 * Fetch managed groups from database
 	 *
+	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function fetchManagedGroups(): JSONResponse {

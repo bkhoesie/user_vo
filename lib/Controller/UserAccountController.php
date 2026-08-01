@@ -37,6 +37,7 @@ class UserAccountController extends Controller {
 	 * Analyzes all plugin-managed users and groups them by normalized username
 	 * to identify duplicates (case-insensitive duplicates).
 	 *
+	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function scanDuplicates(): JSONResponse {

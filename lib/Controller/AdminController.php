@@ -81,6 +81,8 @@ class AdminController extends Controller {
 
     /**
      * Admin settings page
+     *
+     * @NoCSRFRequired
      */
     public function index() {
         // Get current configuration status from service
