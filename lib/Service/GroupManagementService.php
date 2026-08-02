@@ -599,7 +599,7 @@ class GroupManagementService {
                         'vo_group_id' => $voGroupId,
                         'added' => count($syncResult['added']),
                         'removed' => count($syncResult['removed']),
-                        'total_members' => $syncResult['summary']['succeeded']
+                        'total_members' => $syncResult['summary']['total_members']
                     ]);
                 } else {
                     // Sync failed but group still created - log warning

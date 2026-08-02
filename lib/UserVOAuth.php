@@ -392,11 +392,12 @@ class UserVOAuth extends Base {
     public function syncUserData(string $uid, array $voUserData): array {
         try {
             // Username mismatch warning - VO username might have different case (case-insensitive comparison)
-            if (strtolower($voUserData['username']) !== strtolower($uid)) {
+            $voUsername = $voUserData['username'] ?? '';
+            if (strtolower($voUsername) !== strtolower($uid)) {
                 logger('user_vo')->warning("Username mismatch during sync", [
                     'nc_uid' => $uid,
-                    'vo_username' => $voUserData['username'],
-                    'vo_user_id' => $voUserData['id']
+                    'vo_username' => $voUsername,
+                    'vo_user_id' => $voUserData['id'] ?? null
                 ]);
                 // Continue anyway - we use NC's canonical username
             }
@@ -411,7 +412,7 @@ class UserVOAuth extends Base {
             }
 
             // Update display name (always)
-            $displayName = trim($voUserData['firstname'] . ' ' . $voUserData['lastname']);
+            $displayName = trim(($voUserData['firstname'] ?? '') . ' ' . ($voUserData['lastname'] ?? ''));
             if (!empty($displayName) && $displayName !== ' ') {
                 $user->setDisplayName($displayName);
             }
@@ -646,28 +647,32 @@ class UserVOAuth extends Base {
             $exists = $result->fetchOne() !== false;
             $result->closeCursor();
 
+            $voUserId = $voUserData['id'] ?? null;
+            $voUsername = $voUserData['username'] ?? '';
+            $voGroupIds = $voUserData['group_ids'] ?? '';
+
             if ($exists) {
                 // Update existing record
                 $qb = $db->getQueryBuilder();
                 $qb->update('user_vo')
-                    ->set('vo_user_id', $qb->createNamedParameter($voUserData['id']))
-                    ->set('vo_username', $qb->createNamedParameter($voUserData['username']))
-                    ->set('vo_group_ids', $qb->createNamedParameter($voUserData['group_ids']))
+                    ->set('vo_user_id', $qb->createNamedParameter($voUserId))
+                    ->set('vo_username', $qb->createNamedParameter($voUsername))
+                    ->set('vo_group_ids', $qb->createNamedParameter($voGroupIds))
                     ->set('last_synced', $qb->createNamedParameter(new \DateTime(), 'datetime'))
                     ->where($qb->expr()->eq('uid', $qb->createNamedParameter($uid)));
                 $qb->executeStatement();
             } else {
                 // Insert new record (should not normally happen as storeUser creates the record)
-                $displayName = trim($voUserData['firstname'] . ' ' . $voUserData['lastname']);
+                $displayName = trim(($voUserData['firstname'] ?? '') . ' ' . ($voUserData['lastname'] ?? ''));
                 $qb = $db->getQueryBuilder();
                 $qb->insert('user_vo')
                     ->values([
                         'uid' => $qb->createNamedParameter($uid),
                         'displayname' => $qb->createNamedParameter($displayName),
                         'backend' => $qb->createNamedParameter($this->backend),
-                        'vo_user_id' => $qb->createNamedParameter($voUserData['id']),
-                        'vo_username' => $qb->createNamedParameter($voUserData['username']),
-                        'vo_group_ids' => $qb->createNamedParameter($voUserData['group_ids']),
+                        'vo_user_id' => $qb->createNamedParameter($voUserId),
+                        'vo_username' => $qb->createNamedParameter($voUsername),
+                        'vo_group_ids' => $qb->createNamedParameter($voGroupIds),
                         'last_synced' => $qb->createNamedParameter(new \DateTime(), 'datetime')
                     ]);
                 $qb->executeStatement();
@@ -675,8 +680,8 @@ class UserVOAuth extends Base {
 
             logger('user_vo')->debug("Updated VO metadata", [
                 'uid' => $uid,
-                'vo_user_id' => $voUserData['id'],
-                'group_count' => empty($voUserData['group_ids']) ? 0 : count(explode(',', $voUserData['group_ids']))
+                'vo_user_id' => $voUserId,
+                'group_count' => empty($voGroupIds) ? 0 : count(explode(',', $voGroupIds))
             ]);
 
         } catch (\Exception $e) {

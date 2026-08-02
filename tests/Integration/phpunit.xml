@@ -10,23 +10,9 @@
 		 timeoutForLargeTests="900"
 		 beStrictAboutOutputDuringTests="false"
 		 beStrictAboutTodoAnnotatedTests="false"
+		 failOnWarning="true"
 		>
 	<testsuite name='User VO - Integration Tests'>
 		<directory suffix='Test.php'>.</directory>
 	</testsuite>
-
-	<!-- Filters for code coverage -->
-	<filter>
-		<whitelist>
-			<directory suffix=".php">../../lib</directory>
-			<exclude>
-				<directory suffix=".php">../../tests</directory>
-			</exclude>
-		</whitelist>
-	</filter>
-
-	<!-- Coverage report -->
-	<logging>
-		<log type="coverage-clover" target="./clover.xml"/>
-	</logging>
 </phpunit>
