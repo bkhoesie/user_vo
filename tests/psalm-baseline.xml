@@ -141,11 +141,6 @@
       <code><![CDATA[$table]]></code>
     </UndefinedDocblockClass>
   </file>
-  <file src="lib/Service/ApiClient.php">
-    <PossiblyInvalidArgument>
-      <code><![CDATA[$response]]></code>
-    </PossiblyInvalidArgument>
-  </file>
   <file src="lib/Service/ConfigService.php">
     <DeprecatedMethod>
       <code><![CDATA[deleteAppValue]]></code>

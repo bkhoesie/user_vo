@@ -2,134 +2,144 @@
 namespace OCA\UserVO\Tests\Unit\Service;
 
 use OCA\UserVO\Service\ApiClient;
+use OCP\Http\Client\IClient;
+use OCP\Http\Client\IClientService;
+use OCP\Http\Client\IResponse;
 use Psr\Log\LoggerInterface;
 use Test\TestCase;
 
 /**
- * Unit tests for ApiClient.
- *
- * ApiClient uses raw curl_* calls directly rather than Nextcloud's injectable
- * IClientService, so most HTTP-response-handling branches (401/403, other
- * non-200) aren't mockable without either a bigger refactor or a real local
- * HTTP fixture server - out of scope here. What's covered: createToken()
- * (pure logic), the connection-failure branch via a guaranteed-refused local
- * address (127.0.0.1 on a port nothing listens on), and the non-array-JSON
- * response guard via a minimal PHP built-in server fixture (cheap enough to
- * justify for this one specific regression: a non-array 200-OK JSON body
- * used to throw an uncaught TypeError on makeRequest()'s ?array return type,
- * fatal on the login path).
+ * Unit tests for ApiClient. Now that it goes through Nextcloud's injectable
+ * IClientService (previously raw curl_*), every response branch is mockable
+ * - no more real network dependency needed to cover 401/403/other-status/
+ * malformed-body handling.
  */
 class ApiClientTest extends TestCase {
-	private ApiClient $apiClient;
+    private LoggerInterface $logger;
+    private IClient $client;
+    private ApiClient $apiClient;
 
-	/** @var resource|null */
-	private $fixtureServerProcess = null;
-	private ?string $fixtureServerDocroot = null;
-	private int $fixtureServerPort = 18923;
+    protected function setUp(): void {
+        parent::setUp();
+        $this->logger = $this->createMock(LoggerInterface::class);
+        $this->client = $this->createMock(IClient::class);
+        $clientService = $this->createMock(IClientService::class);
+        $clientService->method('newClient')->willReturn($this->client);
+        $this->apiClient = new ApiClient($this->logger, $clientService);
+    }
 
-	protected function setUp(): void {
-		parent::setUp();
-		$logger = $this->createMock(LoggerInterface::class);
-		$this->apiClient = new ApiClient($logger);
-	}
+    private function mockResponse(int $statusCode, $body): IResponse {
+        $response = $this->createMock(IResponse::class);
+        $response->method('getStatusCode')->willReturn($statusCode);
+        $response->method('getBody')->willReturn($body);
+        return $response;
+    }
 
-	protected function tearDown(): void {
-		if ($this->fixtureServerProcess !== null) {
-			proc_terminate($this->fixtureServerProcess);
-			proc_close($this->fixtureServerProcess);
-			$this->fixtureServerProcess = null;
-		}
-		if ($this->fixtureServerDocroot !== null) {
-			@unlink($this->fixtureServerDocroot . '/index.php');
-			@rmdir($this->fixtureServerDocroot);
-			$this->fixtureServerDocroot = null;
-		}
-		parent::tearDown();
-	}
+    public function testCreateTokenFormatsCorrectly(): void {
+        $token = $this->apiClient->createToken('apiuser', 'apipass');
+        $this->assertEquals('A/apiuser/' . md5('apipass'), $token);
+    }
 
-	/**
-	 * Starts a minimal PHP built-in server on 127.0.0.1 that always responds
-	 * with $responseBody as the raw HTTP body (Content-Type: application/json).
-	 */
-	private function startFixtureServer(string $responseBody): string {
-		$this->fixtureServerDocroot = sys_get_temp_dir() . '/user_vo_apiclient_test_' . uniqid();
-		mkdir($this->fixtureServerDocroot);
-		file_put_contents(
-			$this->fixtureServerDocroot . '/index.php',
-			'<?php header("Content-Type: application/json"); echo ' . var_export($responseBody, true) . ';'
-		);
+    public function testCreateTokenHashesPasswordNotUsername(): void {
+        $token = $this->apiClient->createToken('apiuser', 'apipass');
+        $this->assertStringNotContainsString('apipass', $token, 'Raw password must never appear in the token');
+    }
 
-		$this->fixtureServerProcess = proc_open(
-			['php', '-S', '127.0.0.1:' . $this->fixtureServerPort, '-t', $this->fixtureServerDocroot],
-			[1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-			$pipes
-		);
-		$this->assertIsResource($this->fixtureServerProcess, 'Failed to start PHP fixture server');
+    public function testMakeRequestReturnsDecodedArrayOnSuccess(): void {
+        $this->client->method('post')->willReturn($this->mockResponse(200, '{"id": "42"}'));
 
-		$deadline = microtime(true) + 3;
-		while (microtime(true) < $deadline) {
-			$conn = @fsockopen('127.0.0.1', $this->fixtureServerPort, $errno, $errstr, 0.2);
-			if ($conn) {
-				fclose($conn);
-				return 'http://127.0.0.1:' . $this->fixtureServerPort . '/';
-			}
-			usleep(50000);
-		}
-		$this->fail('Fixture server did not start listening in time');
-	}
+        $result = $this->apiClient->makeRequest('https://vo.example/', [], 'A/test/test');
 
-	public function testCreateTokenFormatsCorrectly(): void {
-		$token = $this->apiClient->createToken('apiuser', 'apipass');
-		$this->assertEquals('A/apiuser/' . md5('apipass'), $token);
-	}
+        $this->assertSame(['id' => '42'], $result);
+    }
 
-	public function testCreateTokenHashesPasswordNotUsername(): void {
-		$token = $this->apiClient->createToken('apiuser', 'apipass');
-		$this->assertStringNotContainsString('apipass', $token, 'Raw password must never appear in the token');
-	}
+    public function testMakeRequestSendsExpectedRequestShape(): void {
+        $this->client->expects($this->once())
+            ->method('post')
+            ->with(
+                'https://vo.example/?api=Test',
+                $this->callback(function (array $options) {
+                    return $options['headers']['Authorization'] === 'A/test/token'
+                        && $options['headers']['Content-Type'] === 'application/json'
+                        && $options['body'] === json_encode(['foo' => 'bar'])
+                        && $options['http_errors'] === false;
+                })
+            )
+            ->willReturn($this->mockResponse(200, '{}'));
 
-	public function testMakeRequestReturnsNullOnConnectionFailureWhenNotThrowing(): void {
-		$result = $this->apiClient->makeRequest(
-			'http://127.0.0.1:1/', // nothing listens here - guaranteed connection refused
-			[],
-			'A/test/test',
-			throwOnError: false
-		);
+        $this->apiClient->makeRequest('https://vo.example/?api=Test', ['foo' => 'bar'], 'A/test/token');
+    }
 
-		$this->assertNull($result);
-	}
+    public function testMakeRequestReturnsNullOnConnectionFailureWhenNotThrowing(): void {
+        $this->client->method('post')->willThrowException(new \Exception('Connection refused'));
 
-	public function testMakeRequestThrowsOnConnectionFailureWhenThrowOnErrorTrue(): void {
-		$this->expectException(\Exception::class);
+        $result = $this->apiClient->makeRequest('https://vo.example/', [], 'A/test/test', throwOnError: false);
 
-		$this->apiClient->makeRequest(
-			'http://127.0.0.1:1/',
-			[],
-			'A/test/test',
-			throwOnError: true
-		);
-	}
+        $this->assertNull($result);
+    }
 
-	public function testMakeRequestReturnsNullOnNonArrayJsonResponseWhenNotThrowing(): void {
-		$url = $this->startFixtureServer('"just a plain string, not an object or array"');
+    public function testMakeRequestThrowsOnConnectionFailureWhenThrowOnErrorTrue(): void {
+        $this->client->method('post')->willThrowException(new \Exception('Connection refused'));
 
-		$result = $this->apiClient->makeRequest($url, [], 'A/test/test', throwOnError: false);
+        $this->expectException(\Exception::class);
+        $this->apiClient->makeRequest('https://vo.example/', [], 'A/test/test', throwOnError: true);
+    }
 
-		$this->assertNull($result);
-	}
+    public function testMakeRequestReturnsNullOn401WhenNotThrowing(): void {
+        $this->client->method('post')->willReturn($this->mockResponse(401, ''));
 
-	public function testMakeRequestThrowsOnNonArrayJsonResponseWhenThrowOnErrorTrue(): void {
-		$url = $this->startFixtureServer('true');
+        $result = $this->apiClient->makeRequest('https://vo.example/', [], 'A/test/test', throwOnError: false);
 
-		$this->expectException(\Exception::class);
-		$this->apiClient->makeRequest($url, [], 'A/test/test', throwOnError: true);
-	}
+        $this->assertNull($result);
+    }
 
-	public function testMakeRequestReturnsArrayForValidJsonObjectResponse(): void {
-		$url = $this->startFixtureServer('{"id": "42"}');
+    public function testMakeRequestThrowsOn403WhenThrowOnErrorTrue(): void {
+        $this->client->method('post')->willReturn($this->mockResponse(403, ''));
 
-		$result = $this->apiClient->makeRequest($url, [], 'A/test/test', throwOnError: false);
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessageMatches('/Authentication failed/');
+        $this->apiClient->makeRequest('https://vo.example/', [], 'A/test/test', throwOnError: true);
+    }
 
-		$this->assertSame(['id' => '42'], $result);
-	}
+    public function testMakeRequestReturnsNullOnOtherHttpErrorWhenNotThrowing(): void {
+        $this->client->method('post')->willReturn($this->mockResponse(500, 'Internal Server Error'));
+
+        $result = $this->apiClient->makeRequest('https://vo.example/', [], 'A/test/test', throwOnError: false);
+
+        $this->assertNull($result);
+    }
+
+    public function testMakeRequestReturnsNullOnNonArrayJsonResponseWhenNotThrowing(): void {
+        $this->client->method('post')->willReturn($this->mockResponse(200, '"just a plain string, not an object or array"'));
+
+        $result = $this->apiClient->makeRequest('https://vo.example/', [], 'A/test/test', throwOnError: false);
+
+        $this->assertNull($result);
+    }
+
+    public function testMakeRequestThrowsOnNonArrayJsonResponseWhenThrowOnErrorTrue(): void {
+        $this->client->method('post')->willReturn($this->mockResponse(200, 'true'));
+
+        $this->expectException(\Exception::class);
+        $this->apiClient->makeRequest('https://vo.example/', [], 'A/test/test', throwOnError: true);
+    }
+
+    public function testMakeRequestReturnsNullOnMalformedJsonWhenNotThrowing(): void {
+        $this->client->method('post')->willReturn($this->mockResponse(200, '{not valid json'));
+
+        $result = $this->apiClient->makeRequest('https://vo.example/', [], 'A/test/test', throwOnError: false);
+
+        $this->assertNull($result);
+    }
+
+    public function testMakeRequestReturnsNullWhenBodyIsNotAString(): void {
+        // IResponse::getBody() is typed null|resource|string - a non-string body
+        // (e.g. a stream resource) must be handled gracefully, not passed to
+        // json_decode() directly.
+        $this->client->method('post')->willReturn($this->mockResponse(200, null));
+
+        $result = $this->apiClient->makeRequest('https://vo.example/', [], 'A/test/test', throwOnError: false);
+
+        $this->assertNull($result);
+    }
 }

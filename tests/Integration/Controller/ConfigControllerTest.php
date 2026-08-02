@@ -6,6 +6,7 @@ use OCA\UserVO\Controller\ConfigController;
 use OCA\UserVO\Service\ApiClient;
 use OCA\UserVO\Service\ConfigService;
 use OCP\AppFramework\Http\JSONResponse;
+use OCP\Http\Client\IClientService;
 use OCP\IConfig;
 use OCP\IRequest;
 use PHPUnit\Framework\TestCase;
@@ -54,7 +55,7 @@ class ConfigControllerTest extends NextcloudTestCase {
 
 		// Create real ConfigService and ApiClient
 		$this->configService = new ConfigService($this->config);
-		$this->apiClient = new ApiClient($this->logger);
+		$this->apiClient = new ApiClient($this->logger, \OC::$server->get(IClientService::class));
 
 		// Create controller
 		$this->controller = new ConfigController(

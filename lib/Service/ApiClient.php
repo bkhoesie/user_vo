@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\UserVO\Service;
 
+use OCP\Http\Client\IClientService;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -13,9 +14,11 @@ use Psr\Log\LoggerInterface;
  */
 class ApiClient {
     private LoggerInterface $logger;
+    private IClientService $clientService;
 
-    public function __construct(LoggerInterface $logger) {
+    public function __construct(LoggerInterface $logger, IClientService $clientService) {
         $this->logger = $logger;
+        $this->clientService = $clientService;
     }
 
     /**
@@ -29,28 +32,21 @@ class ApiClient {
      * @throws \Exception When throwOnError=true and request fails
      */
     public function makeRequest(string $url, array $data, string $token, bool $throwOnError = true): ?array {
-        $curl = curl_init();
-        curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json',
-            'Authorization: ' . $token,
-        ]);
-        curl_setopt($curl, CURLOPT_POST, 1);
-        curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($data));
-        curl_setopt($curl, CURLOPT_HEADER, false);
-        curl_setopt($curl, CURLOPT_TIMEOUT, 10); // 10 second timeout
-        curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 5); // 5 second connection timeout
-
-        $response = curl_exec($curl);
-        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        $error = curl_error($curl);
-
-        curl_close($curl);
-
-        // Handle connection failures
-        if ($response === false) {
-            $errorMsg = 'API request failed: ' . $error;
+        try {
+            $response = $this->clientService->newClient()->post($url, [
+                'headers' => [
+                    'Content-Type' => 'application/json',
+                    'Authorization' => $token,
+                ],
+                'body' => json_encode($data),
+                'timeout' => 10, // seconds
+                'connect_timeout' => 5, // seconds
+                // Handle non-2xx status codes ourselves below (matching the previous
+                // raw-curl behavior) rather than having the client throw on them.
+                'http_errors' => false,
+            ]);
+        } catch (\Exception $e) {
+            $errorMsg = 'API request failed: ' . $e->getMessage();
             $this->logger->error($errorMsg, ['app' => 'user_vo', 'url' => $url]);
 
             if ($throwOnError) {
@@ -58,6 +54,8 @@ class ApiClient {
             }
             return null;
         }
+
+        $httpCode = $response->getStatusCode();
 
         // Handle authentication failures
         if ($httpCode === 401 || $httpCode === 403) {
@@ -81,7 +79,8 @@ class ApiClient {
             return null;
         }
 
-        $decoded = json_decode($response, true);
+        $body = $response->getBody();
+        $decoded = is_string($body) ? json_decode($body, true) : null;
         if (!is_array($decoded)) {
             $errorMsg = 'API returned invalid or non-array JSON response';
             $this->logger->error($errorMsg, ['app' => 'user_vo', 'url' => $url]);

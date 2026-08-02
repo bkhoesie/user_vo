@@ -3,6 +3,7 @@ namespace OCA\UserVO\Tests\LiveApi;
 
 use OCA\UserVO\Service\ApiClient;
 use OCA\UserVO\UserVOAuth;
+use OCP\Http\Client\IClientService;
 use Psr\Log\LoggerInterface;
 use Test\TestCase;
 
@@ -65,7 +66,7 @@ class VoApiContractTest extends TestCase {
 		}
 		self::$loginAttempted = true;
 
-		$apiClient = new ApiClient(\OC::$server->get(LoggerInterface::class));
+		$apiClient = new ApiClient(\OC::$server->get(LoggerInterface::class), \OC::$server->get(IClientService::class));
 		$token = $apiClient->createToken(self::$env['api_username'], self::$env['api_password']);
 		$result = $apiClient->makeRequest(
 			rtrim(self::$env['url'], '/') . '/?api=VerifyLogin',
