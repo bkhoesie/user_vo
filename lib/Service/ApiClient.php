@@ -81,7 +81,18 @@ class ApiClient {
             return null;
         }
 
-        return json_decode($response, true);
+        $decoded = json_decode($response, true);
+        if (!is_array($decoded)) {
+            $errorMsg = 'API returned invalid or non-array JSON response';
+            $this->logger->error($errorMsg, ['app' => 'user_vo', 'url' => $url]);
+
+            if ($throwOnError) {
+                throw new \Exception($errorMsg);
+            }
+            return null;
+        }
+
+        return $decoded;
     }
 
     /**
