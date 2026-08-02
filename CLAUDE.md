@@ -169,11 +169,15 @@ The plugin includes a multi-layer testing strategy:
 ```
 
 **What gets tested:**
-- 9 critical read-only endpoints (33% coverage)
-- Config endpoints: status, test connection
+- 8 critical read-only (GET) endpoints
+- Config endpoints: status
 - User sync: preview local/VO users, nightly sync status
 - User account: scan duplicates
 - Group endpoints: fetch all/managed groups
+- Not `test-config` (POST): correctly requires CSRF protection (it makes the server POST
+  to an attacker-controllable URL if unprotected), and this script's plain
+  `OCS-APIRequest: true` + Basic Auth doesn't reliably bypass NC's CSRF check for POST on
+  NC28/29. Covered instead by `ConfigControllerTest`'s integration tests.
 
 **What's skipped:**
 - Destructive operations (save/clear config, create/delete users/groups)

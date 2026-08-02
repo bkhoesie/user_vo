@@ -152,8 +152,13 @@ echo ""
 echo -e "${BLUE}Config Endpoints:${NC}"
 test_endpoint "GET" "/admin" "200" "" "Admin settings page"
 test_endpoint "GET" "/admin/config-status" "200" ".is_configured != null" "Check configuration status"
-test_endpoint "POST" "/admin/test-config" "400" ".success == false" "Test VO API connection (no config)" "{}"
-# Note: Not testing save-config or clear-config to avoid modifying test environment
+# Note: Not testing save-config or clear-config to avoid modifying test environment.
+# Not testing test-config either (was tested here until it correctly gained CSRF
+# protection - it makes the server POST to an attacker-controllable URL, so it's not
+# actually safe to exempt): OCS-APIRequest + Basic Auth alone doesn't reliably bypass
+# NC's CSRF check for POST requests on NC28/29 (works fine on NC30+), and this script
+# doesn't fetch a request token. Covered instead by ConfigControllerTest's
+# testConfiguration() integration tests, which call the controller directly.
 
 # User Sync Controller Endpoints
 echo ""
