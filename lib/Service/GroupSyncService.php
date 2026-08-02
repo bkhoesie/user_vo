@@ -440,7 +440,8 @@ class GroupSyncService {
      */
     private function syncSingleGroupFull(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, bool $nonBlocking = false): array {
         if ($nonBlocking) {
-            if (!$this->lockService->tryAcquire($voGroupId)) {
+            $lockToken = $this->lockService->tryAcquire($voGroupId);
+            if ($lockToken === null) {
                 logger('user_vo')->debug('Skipping group sync - already in progress elsewhere', ['vo_group_id' => $voGroupId]);
                 return [
                     'added' => [],
@@ -451,14 +452,17 @@ class GroupSyncService {
                     'non_vo_member_count' => 0,
                 ];
             }
-        } elseif (!$this->lockService->acquireWithBoundedWait($voGroupId, self::LOCK_WAIT_SECONDS)) {
-            throw new \Exception('Group sync already in progress, please try again shortly');
+        } else {
+            $lockToken = $this->lockService->acquireWithBoundedWait($voGroupId, self::LOCK_WAIT_SECONDS);
+            if ($lockToken === null) {
+                throw new \Exception('Group sync already in progress, please try again shortly');
+            }
         }
 
         try {
             return $this->syncSingleGroupFullLocked($voGroupId, $ncGroupId, $storedVOName, $voGroupMap);
         } finally {
-            $this->lockService->release($voGroupId);
+            $this->lockService->release($voGroupId, $lockToken);
         }
     }
 

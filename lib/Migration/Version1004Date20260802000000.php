@@ -33,8 +33,9 @@ use OCP\Migration\IOutput;
 use OCP\Migration\SimpleMigrationStep;
 
 /**
- * Add sync_lock_until to user_vo_groups: a per-group DB-backed lease used by
- * GroupSyncLockService to serialize concurrent syncs of the same group.
+ * Add sync_lock_until/sync_lock_token to user_vo_groups: a per-group
+ * DB-backed lease used by GroupSyncLockService to serialize concurrent
+ * syncs of the same group.
  *
  * Nextcloud's 5-minute credential-token revalidation re-runs a full group
  * sync per active session on every login; at real production scale this
@@ -43,6 +44,12 @@ use OCP\Migration\SimpleMigrationStep;
  * different snapshots of user_vo (rewritten by other concurrent logins) and
  * the losing thread's stale read can silently restore a user's membership
  * in a group they were just removed from in VO. The lease closes that race.
+ *
+ * sync_lock_token fences the lease: without it, a holder whose work outlives
+ * the TTL would release the lease unconditionally on finishing, potentially
+ * clearing a *different*, legitimately-acquired-after-expiry holder's lock
+ * out from under it. release() is conditional on the token matching, so a
+ * stale release from an overrun holder is a safe no-op instead.
  */
 class Version1004Date20260802000000 extends SimpleMigrationStep {
 
@@ -61,6 +68,7 @@ class Version1004Date20260802000000 extends SimpleMigrationStep {
 		}
 
 		$table = $schema->getTable('user_vo_groups');
+		$changed = false;
 
 		if (!$table->hasColumn('sync_lock_until')) {
 			$table->addColumn('sync_lock_until', Types::DATETIME, [
@@ -68,9 +76,19 @@ class Version1004Date20260802000000 extends SimpleMigrationStep {
 				'comment' => 'Lease expiry for the per-group sync lock - NULL or in the past means unlocked'
 			]);
 			$output->info('Added column sync_lock_until to user_vo_groups');
-			return $schema;
+			$changed = true;
 		}
 
-		return null;
+		if (!$table->hasColumn('sync_lock_token')) {
+			$table->addColumn('sync_lock_token', Types::STRING, [
+				'notnull' => false,
+				'length' => 64,
+				'comment' => 'Fencing token for the current lease holder - release() is conditional on this matching'
+			]);
+			$output->info('Added column sync_lock_token to user_vo_groups');
+			$changed = true;
+		}
+
+		return $changed ? $schema : null;
 	}
 }

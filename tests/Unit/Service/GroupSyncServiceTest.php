@@ -30,8 +30,8 @@ class GroupSyncServiceTest extends TestCase {
 		$this->lockService = $this->createMock(GroupSyncLockService::class);
 		// Unit tests exercise sync logic, not lock contention - default to
 		// "lock always available" so existing behavior is unaffected.
-		$this->lockService->method('tryAcquire')->willReturn(true);
-		$this->lockService->method('acquireWithBoundedWait')->willReturn(true);
+		$this->lockService->method('tryAcquire')->willReturn('test-token');
+		$this->lockService->method('acquireWithBoundedWait')->willReturn('test-token');
 
 		$this->service = new GroupSyncService(
 			$this->connection,

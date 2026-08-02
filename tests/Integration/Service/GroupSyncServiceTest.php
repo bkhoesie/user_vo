@@ -296,7 +296,8 @@ class GroupSyncServiceTest extends TestCase {
 
 		try {
 			// Simulate "another sync is already running for this group."
-			$this->assertTrue($lockService->tryAcquire($voGroupId));
+			$lockToken = $lockService->tryAcquire($voGroupId);
+			$this->assertNotNull($lockToken);
 
 			$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
 			$this->assertTrue($result['success']);
@@ -306,7 +307,7 @@ class GroupSyncServiceTest extends TestCase {
 			$members = array_map(fn ($u) => $u->getUID(), $ncGroup->getUsers());
 			$this->assertNotContains($uid, $members, 'User must NOT have been added while the group was locked');
 		} finally {
-			$lockService->release($voGroupId);
+			$lockService->release($voGroupId, $lockToken);
 		}
 
 		// Lease is free again - the same sync should now apply normally.

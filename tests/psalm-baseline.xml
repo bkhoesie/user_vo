@@ -157,6 +157,8 @@
     <UndefinedDocblockClass>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
     </UndefinedDocblockClass>
   </file>
   <file src="lib/Service/ConfigService.php">
