@@ -120,7 +120,7 @@ class UserAccountService {
                     'file_count' => $this->countUserFiles($uid),
                     'displayname' => $displayname,
                     'groups' => $this->getUserGroups($uid),
-                    'creation_date' => $this->getUserDirectoryCreationDate($uid),
+                    'folder_created_date' => $this->getUserDirectoryCreationDate($uid),
                     'is_normalized' => ($uid === $normalizedUid),
                 ];
             }

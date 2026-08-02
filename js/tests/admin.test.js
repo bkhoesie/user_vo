@@ -41,6 +41,25 @@ describe('formatDateTime', () => {
     test('formats an ISO date string', () => {
         expect(formatDateTime('2026-03-05 12:00:00', 'YYYY-MM-DD')).toBe('2026-03-05');
     });
+
+    test('treats string datetimes as UTC and converts to the local timezone, not the browser default', () => {
+        // Regression test: the backend writes 'YYYY-MM-DD HH:MM:SS' strings using the
+        // server's default timezone (UTC in this app's deployments) with no timezone
+        // marker. A plain moment(value) parses that as browser-local time and displays
+        // it unconverted - e.g. a CEST (UTC+2) user would see times 2 hours behind.
+        // Force a fixed non-UTC local timezone so this is deterministic regardless of
+        // what timezone the test runner itself happens to be in (CI runners default to
+        // UTC, which would make a naive "does it differ" assertion pass even when the
+        // bug is present).
+        const originalTz = process.env.TZ;
+        process.env.TZ = 'Europe/Berlin';
+        try {
+            // January - unambiguously CET (UTC+1), no DST in effect.
+            expect(formatDateTime('2026-01-15 10:00:00', 'YYYY-MM-DD HH:mm')).toBe('2026-01-15 11:00');
+        } finally {
+            process.env.TZ = originalTz;
+        }
+    });
 });
 
 describe('renderExposeCheckbox', () => {

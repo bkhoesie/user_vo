@@ -20,13 +20,18 @@ function formatDateTime(value, format = 'L LTS') {
         return '-';
     }
 
-    // Handle Unix timestamps (numbers)
+    // Handle Unix timestamps (numbers) - already an absolute instant, moment()
+    // converts to the browser's local timezone automatically.
     if (typeof value === 'number') {
         return moment(value * 1000).format(format);
     }
 
-    // Handle ISO strings from database (YYYY-MM-DD HH:MM:SS)
-    return moment(value).format(format);
+    // Handle datetime strings from the database (YYYY-MM-DD HH:MM:SS). These are
+    // written by PHP's DateTime/date() using the server's default timezone (UTC in
+    // this app's deployments), with no timezone marker in the string itself. A plain
+    // moment(value) would parse that string as browser-local time and display it
+    // unconverted - parse explicitly as UTC first, then convert to local for display.
+    return moment.utc(value).local().format(format);
 }
 
 function renderExposeCheckbox(variant) {
@@ -628,7 +633,7 @@ document.addEventListener('DOMContentLoaded', function() {
             html += '<div class="duplicate-set">';
             html += '<h5>' + escapeHtml(title) + '</h5>';
             html += '<table class="duplicate-variants">';
-            html += '<thead><tr><th>' + t('user_vo', 'Username') + '</th><th>' + t('user_vo', 'Canonical') + '</th><th>' + t('user_vo', 'Exposed') + '</th><th>' + t('user_vo', 'Files') + '</th><th>' + t('user_vo', 'Groups') + '</th><th>' + t('user_vo', 'Created') + '</th><th>' + t('user_vo', 'Display Name') + '</th></tr></thead>';
+            html += '<thead><tr><th>' + t('user_vo', 'Username') + '</th><th>' + t('user_vo', 'Canonical') + '</th><th>' + t('user_vo', 'Exposed') + '</th><th>' + t('user_vo', 'Files') + '</th><th>' + t('user_vo', 'Groups') + '</th><th>' + t('user_vo', 'User Folder Created') + '</th><th>' + t('user_vo', 'Display Name') + '</th></tr></thead>';
             html += '<tbody>';
 
             set.variants.forEach(variant => {
@@ -638,7 +643,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 html += '<td>' + renderExposeCheckbox(variant) + '</td>';
                 html += '<td>' + variant.file_count + '</td>';
                 html += '<td>' + renderGroups(variant.groups) + '</td>';
-                html += '<td>' + renderCreationDate(variant.creation_date) + '</td>';
+                html += '<td>' + renderCreationDate(variant.folder_created_date) + '</td>';
                 html += '<td>' + escapeHtml(variant.displayname) + '</td>';
                 html += '</tr>';
             });
@@ -665,7 +670,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function displayAllPluginUsers(allPluginUsers) {
         let html = '<div class="all-plugin-users">';
         html += '<table class="all-users-table">';
-        html += '<thead><tr><th>' + t('user_vo', 'Username') + '</th><th>' + t('user_vo', 'Canonical') + '</th><th>' + t('user_vo', 'Exposed') + '</th><th>' + t('user_vo', 'Normalized') + '</th><th>' + t('user_vo', 'Files') + '</th><th>' + t('user_vo', 'Groups') + '</th><th>' + t('user_vo', 'Created') + '</th><th>' + t('user_vo', 'Display Name') + '</th></tr></thead>';
+        html += '<thead><tr><th>' + t('user_vo', 'Username') + '</th><th>' + t('user_vo', 'Canonical') + '</th><th>' + t('user_vo', 'Exposed') + '</th><th>' + t('user_vo', 'Normalized') + '</th><th>' + t('user_vo', 'Files') + '</th><th>' + t('user_vo', 'Groups') + '</th><th>' + t('user_vo', 'User Folder Created') + '</th><th>' + t('user_vo', 'Display Name') + '</th></tr></thead>';
         html += '<tbody>';
 
         allPluginUsers.forEach(user => {
@@ -676,7 +681,7 @@ document.addEventListener('DOMContentLoaded', function() {
             html += '<td>' + (user.is_normalized ? '✔️' : '') + '</td>';
             html += '<td>' + user.file_count + '</td>';
             html += '<td>' + renderGroups(user.groups) + '</td>';
-            html += '<td>' + renderCreationDate(user.creation_date) + '</td>';
+            html += '<td>' + renderCreationDate(user.folder_created_date) + '</td>';
             html += '<td>' + escapeHtml(user.displayname) + '</td>';
             html += '</tr>';
         });
