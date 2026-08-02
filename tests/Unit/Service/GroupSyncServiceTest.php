@@ -2,7 +2,6 @@
 namespace OCA\UserVO\Tests\Unit\Service;
 
 use OCA\UserVO\Service\GroupSyncService;
-use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use OCA\UserVO\UserVOAuth;
 use OCP\IDBConnection;
@@ -18,7 +17,6 @@ class GroupSyncServiceTest extends TestCase {
 	private $connection;
 	private $groupManager;
 	private $userManager;
-	private $configService;
 	private $harmonizer;
 	private $service;
 
@@ -26,14 +24,12 @@ class GroupSyncServiceTest extends TestCase {
 		$this->connection = $this->createMock(IDBConnection::class);
 		$this->groupManager = $this->createMock(IGroupManager::class);
 		$this->userManager = $this->createMock(IUserManager::class);
-		$this->configService = $this->createMock(ConfigService::class);
 		$this->harmonizer = $this->createMock(GroupNameHarmonizer::class);
 
 		$this->service = new GroupSyncService(
 			$this->connection,
 			$this->groupManager,
 			$this->userManager,
-			$this->configService,
 			$this->harmonizer
 		);
 	}
@@ -156,7 +152,8 @@ class GroupSyncServiceTest extends TestCase {
 	}
 
 	public function testSyncGroupsByIdsReturnsEmptyForEmptyInput() {
-		$result = $this->service->syncGroupsByIds([]);
+		$backend = $this->createMock(UserVOAuth::class);
+		$result = $this->service->syncGroupsByIds([], $backend);
 
 		$this->assertTrue($result['success']);
 		$this->assertEquals(0, $result['synced']);
@@ -182,7 +179,8 @@ class GroupSyncServiceTest extends TestCase {
 
 		$this->connection->method('getQueryBuilder')->willReturn($qb);
 
-		$result = $this->service->syncGroupsByIds(['123', '456']);
+		$backend = $this->createMock(UserVOAuth::class);
+		$result = $this->service->syncGroupsByIds(['123', '456'], $backend);
 
 		$this->assertTrue($result['success']);
 		$this->assertEquals(0, $result['synced']);

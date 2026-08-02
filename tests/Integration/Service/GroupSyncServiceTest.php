@@ -2,7 +2,6 @@
 namespace OCA\UserVO\Tests\Integration\Service;
 
 use OCA\UserVO\Service\GroupSyncService;
-use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use OCA\UserVO\UserVOAuth;
 use OCP\IDBConnection;
@@ -23,7 +22,6 @@ class GroupSyncServiceTest extends TestCase {
 	private IDBConnection $connection;
 	private IGroupManager $groupManager;
 	private IUserManager $userManager;
-	private ConfigService $configService;
 
 	protected function setUp(): void {
 		parent::setUp();
@@ -31,14 +29,12 @@ class GroupSyncServiceTest extends TestCase {
 		$this->connection = \OC::$server->get(\OCP\IDBConnection::class);
 		$this->groupManager = \OC::$server->get(\OCP\IGroupManager::class);
 		$this->userManager = \OC::$server->get(\OCP\IUserManager::class);
-		$this->configService = $this->createMock(ConfigService::class);
 		$harmonizer = new GroupNameHarmonizer();
 
 		$this->service = new GroupSyncService(
 			$this->connection,
 			$this->groupManager,
 			$this->userManager,
-			$this->configService,
 			$harmonizer
 		);
 
@@ -193,33 +189,64 @@ class GroupSyncServiceTest extends TestCase {
 
 	public function testSyncGroupsByIdsWithRealDatabase() {
 		// Create 2 test groups
+		$voGroupIds = [];
 		for ($i = 4; $i <= 5; $i++) {
 			$groupId = "uservo_test_{$i}56";
 			$voGroupId = "test_{$i}56";
 			$voGroupName = "Test Group {$i}";
+			$voGroupIds[] = $voGroupId;
 
 			$ncGroup = $this->groupManager->createGroup($groupId);
 			$this->assertNotNull($ncGroup);
 			$this->createTestGroupInDB($voGroupId, $groupId, $voGroupName);
 		}
 
-		// Mock config service
-		$this->configService->method('loadConfiguration')->willReturn([
-			'api_url' => 'https://example.com',
-			'api_username' => 'test',
-			'api_password' => 'test'
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'test_456', 'name' => 'Test Group 4', 'parentid' => null, 'pos' => 1],
+			['id' => 'test_556', 'name' => 'Test Group 5', 'parentid' => null, 'pos' => 2],
 		]);
 
-		// Note: syncGroupsByIds creates its own backend internally
-		// We can't easily mock it without more refactoring, so we'll skip this test
-		// and rely on unit tests for that method
-		$this->markTestSkipped('syncGroupsByIds creates backend internally - needs refactoring to be testable');
+		$result = $this->service->syncGroupsByIds($voGroupIds, $backend);
+
+		$this->assertTrue($result['success']);
+		$this->assertEquals(2, $result['synced']);
+		$this->assertEquals(0, $result['failed']);
+		$this->assertCount(2, $result['results']);
+		foreach ($result['results'] as $groupResult) {
+			$this->assertEquals('success', $groupResult['status']);
+			$this->assertArrayHasKey('added', $groupResult);
+			$this->assertArrayHasKey('removed', $groupResult);
+		}
 	}
 
 	public function testSyncHandlesDeletedGroupsInVO() {
-		// TODO: This test needs more investigation
-		// The service behavior when a group is deleted from VO is complex and involves
-		// multiple error paths. Skipping for now - covered by unit tests.
-		$this->markTestSkipped('Deleted group handling needs more investigation - complex error paths');
+		$ncGroup = $this->groupManager->createGroup('uservo_test_789');
+		$this->assertNotNull($ncGroup);
+		$this->createTestGroupInDB('test_789', 'uservo_test_789', 'Test Group Gone');
+
+		// Group no longer appears in VO's group list (deleted in VO), but a
+		// different group is still returned so fetchAllGroups() isn't empty.
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'some_other_group', 'name' => 'Still There', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->syncSingleGroupById('test_789', $backend);
+
+		// Deletion in VO isn't a sync failure - the group is kept, using its
+		// last-known (stored) name, and flagged as deleted for the admin UI.
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+		$this->assertEquals('Test Group Gone', $result['vo_group_name']);
+
+		$qb = $this->connection->getQueryBuilder();
+		$qb->select('deleted_in_vo')
+			->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter('test_789')));
+		$dbResult = $qb->executeQuery();
+		$row = $dbResult->fetch();
+		$dbResult->closeCursor();
+
+		$this->assertEquals(1, $row['deleted_in_vo']);
 	}
 }

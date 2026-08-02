@@ -196,13 +196,6 @@
       <code><![CDATA[$childrenMap]]></code>
       <code><![CDATA[$childrenMap]]></code>
     </PossiblyNullArrayOffset>
-    <UndefinedClass>
-      <code><![CDATA[\Doctrine\DBAL\Connection]]></code>
-    </UndefinedClass>
-    <UndefinedFunction>
-      <code><![CDATA[logger('user_vo')]]></code>
-      <code><![CDATA[logger('user_vo')]]></code>
-    </UndefinedFunction>
   </file>
   <file src="lib/Service/UserAccountService.php">
     <UndefinedClass>

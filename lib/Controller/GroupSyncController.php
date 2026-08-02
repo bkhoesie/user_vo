@@ -78,7 +78,8 @@ class GroupSyncController extends Controller {
 			], 400);
 		}
 
-		$result = $this->groupSyncService->syncGroupsByIds($voGroupIds);
+		$backend = $this->createBackend();
+		$result = $this->groupSyncService->syncGroupsByIds($voGroupIds, $backend);
 
 		// Transform response format to match frontend expectations
 		// Frontend expects: {success, summary: {total, succeeded, failed}, results}

@@ -768,7 +768,7 @@ class UserVOAuth extends Base {
 
             // Use GroupSyncService to do full sync (metadata + membership)
             $groupSyncService = \OC::$server->get(\OCA\UserVO\Service\GroupSyncService::class);
-            $result = $groupSyncService->syncGroupsByIds($allGroupIdsToSync);
+            $result = $groupSyncService->syncGroupsByIds($allGroupIdsToSync, $this);
 
             if ($result['success']) {
                 logger('user_vo')->info("Login-time group sync completed", [

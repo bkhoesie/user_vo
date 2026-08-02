@@ -230,7 +230,7 @@ class UserProvisioningService {
 
                 if (!empty($voGroupIds)) {
                     $groupSyncService = \OC::$server->get(\OCA\UserVO\Service\GroupSyncService::class);
-                    $result = $groupSyncService->syncGroupsByIds($voGroupIds);
+                    $result = $groupSyncService->syncGroupsByIds($voGroupIds, $backend);
 
                     if ($result['success']) {
                         $groupsSynced = $result['synced'] ?? 0;

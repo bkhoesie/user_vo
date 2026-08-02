@@ -15,7 +15,6 @@ use OCP\IDBConnection;
 use OCP\IGroupManager;
 use OCP\IUserManager;
 use OCA\UserVO\UserVOAuth;
-use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use function OCP\Log\logger;
 
@@ -55,20 +54,17 @@ class GroupSyncService {
     private IDBConnection $connection;
     private IGroupManager $groupManager;
     private IUserManager $userManager;
-    private ConfigService $configService;
     private GroupNameHarmonizer $groupNameHarmonizer;
 
     public function __construct(
         IDBConnection $connection,
         IGroupManager $groupManager,
         IUserManager $userManager,
-        ConfigService $configService,
         GroupNameHarmonizer $groupNameHarmonizer
     ) {
         $this->connection = $connection;
         $this->groupManager = $groupManager;
         $this->userManager = $userManager;
-        $this->configService = $configService;
         $this->groupNameHarmonizer = $groupNameHarmonizer;
     }
 
@@ -83,9 +79,10 @@ class GroupSyncService {
      * - Updates database metadata (last_synced, member counts, etc.)
      *
      * @param array $voGroupIds Array of VO group IDs to sync
+     * @param UserVOAuth $backend Backend instance for API access
      * @return GroupSyncByIdsResult
      */
-    public function syncGroupsByIds(array $voGroupIds): array {
+    public function syncGroupsByIds(array $voGroupIds, UserVOAuth $backend): array {
         try {
             if (empty($voGroupIds)) {
                 return [
@@ -116,12 +113,6 @@ class GroupSyncService {
             }
 
             // Fetch all VO groups to build the group map (needed for metadata sync)
-            $configuration = $this->configService->loadConfiguration(maskPassword: false);
-            $backend = new UserVOAuth(
-                $configuration['api_url'],
-                $configuration['api_username'],
-                $configuration['api_password']
-            );
             $allVOGroups = $backend->fetchAllGroups();
 
             if (!$allVOGroups) {
