@@ -58,7 +58,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -69,7 +69,7 @@ class GroupSyncServiceTest extends TestCase {
 		}
 
 		// Delete test users
-		$testUsers = ['testuser1', 'testuser2', 'testuser3', 'testuser_lockrace'];
+		$testUsers = ['testuser1', 'testuser2', 'testuser3', 'testuser_lockrace', 'testuser_nonblocking_api_down'];
 		foreach ($testUsers as $userId) {
 			if ($this->userManager->userExists($userId)) {
 				$user = $this->userManager->get($userId);
@@ -286,6 +286,47 @@ class GroupSyncServiceTest extends TestCase {
 
 		$this->assertEquals(0, $row['deleted_in_vo'], 'Must not flag deletion from a map that might just be a stale/cached snapshot');
 		$this->assertEquals('Test Group Maybe Gone', $row['vo_group_name'], 'Should still keep the last-known name, same as the blocking path');
+	}
+
+	/**
+	 * A GetGroups failure must not abort login-time membership sync -
+	 * membership doesn't depend on that data at all (it comes from the local
+	 * user_vo table). Previously this aborted the whole login-triggered
+	 * batch, silently breaking "log in again and it'll sync" for exactly the
+	 * case that goal cares about: a genuine VO metadata outage.
+	 */
+	public function testNonBlockingSyncStillSyncsMembershipWhenGetGroupsFailsEntirely() {
+		$voGroupId = 'test_nonblocking_api_down';
+		$ncGroupId = 'uservo_test_nonblocking_api_down';
+		$uid = 'testuser_nonblocking_api_down';
+
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Group API Down');
+
+		if (!$this->userManager->userExists($uid)) {
+			$this->userManager->createUser($uid, 'ATestPassword123!');
+		}
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo')->values([
+			'uid' => $qb->createNamedParameter($uid),
+			'backend' => $qb->createNamedParameter('user_vo'),
+			'vo_group_ids' => $qb->createNamedParameter($voGroupId),
+		])->executeStatement();
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn(null);
+
+		$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
+
+		$this->assertTrue($result['success'], 'Membership sync must still succeed despite the metadata fetch failure');
+		$this->assertEquals(1, $result['synced']);
+		$this->assertContains($uid, $result['results'][0]['added']);
+
+		$ncGroup = $this->groupManager->get($ncGroupId);
+		$members = array_map(fn ($u) => $u->getUID(), $ncGroup->getUsers());
+		$this->assertContains($uid, $members, 'User should actually be added to the NC group');
+
+		$this->userManager->get($uid)?->delete();
 	}
 
 	/**

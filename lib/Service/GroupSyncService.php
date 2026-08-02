@@ -141,14 +141,27 @@ class GroupSyncService {
             $allVOGroups = $backend->fetchAllGroups(allowCached: $nonBlocking);
 
             if (!$allVOGroups) {
-                return [
-                    'success' => false,
-                    'error' => 'Failed to fetch groups from VereinOnline',
-                    'synced' => 0,
-                    'failed' => 0,
-                    'skipped' => 0,
-                    'results' => []
-                ];
+                if (!$nonBlocking) {
+                    return [
+                        'success' => false,
+                        'error' => 'Failed to fetch groups from VereinOnline',
+                        'synced' => 0,
+                        'failed' => 0,
+                        'skipped' => 0,
+                        'results' => []
+                    ];
+                }
+
+                // Login-time sync must not abort membership sync over a metadata
+                // fetch failure (and any exhausted stale-cache fallback already
+                // happened inside fetchAllGroups()) - membership doesn't depend on
+                // this data at all. Proceed with an empty map: syncSingleGroupFullLocked()
+                // falls back to stored metadata per group and (per $mayDetectDeletion)
+                // won't flag deleted_in_vo from its absence either.
+                logger('user_vo')->warning('Failed to fetch VO group metadata for login-time sync - proceeding with membership sync only', [
+                    'vo_group_ids' => $voGroupIds
+                ]);
+                $allVOGroups = [];
             }
 
             // Build map of VO group data for quick lookup

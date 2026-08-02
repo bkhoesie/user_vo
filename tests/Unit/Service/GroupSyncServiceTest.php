@@ -197,6 +197,37 @@ class GroupSyncServiceTest extends TestCase {
 	}
 
 	/**
+	 * Unlike the login (non-blocking) path, a blocking caller (admin UI,
+	 * pre-provisioning) explicitly wants fresh data and must still fail
+	 * loudly on a VO metadata fetch failure, not silently proceed degraded.
+	 */
+	public function testSyncGroupsByIdsBlockingModeStillAbortsOnApiFailure() {
+		$qb = $this->createMock(IQueryBuilder::class);
+		$queryResult = $this->createMock(IResult::class);
+		$queryResult->method('fetchAll')->willReturn([
+			['vo_group_id' => '123', 'vo_group_name' => 'Group 123', 'nc_group_id' => 'uservo_123'],
+		]);
+
+		$expr = $this->createMock(\OCP\DB\QueryBuilder\IExpressionBuilder::class);
+		$qb->method('select')->willReturnSelf();
+		$qb->method('from')->willReturnSelf();
+		$qb->method('where')->willReturnSelf();
+		$qb->method('andWhere')->willReturnSelf();
+		$qb->method('expr')->willReturn($expr);
+		$qb->method('createNamedParameter')->willReturnArgument(0);
+		$qb->method('executeQuery')->willReturn($queryResult);
+		$this->connection->method('getQueryBuilder')->willReturn($qb);
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn(null);
+
+		$result = $this->service->syncGroupsByIds(['123'], $backend, nonBlocking: false);
+
+		$this->assertFalse($result['success']);
+		$this->assertEquals('Failed to fetch groups from VereinOnline', $result['error']);
+	}
+
+	/**
 	 * A group skipped due to lock contention (non-blocking mode) must be
 	 * counted and reported distinctly from an actual successful sync - not
 	 * indistinguishable "success" with fabricated empty results. Otherwise a
