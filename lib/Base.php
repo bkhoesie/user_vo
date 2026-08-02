@@ -260,35 +260,24 @@ abstract class Base extends \OC\User\Backend {
 	 * Create user record in database
 	 *
 	 * @param string $uid The username - should be lowercase for new users, existing capitalization for existing users
-	 * @param array $groups Groups to add the user to on creation
 	 *
 	 * @return void
 	 */
-	public function storeUser($uid, $groups = []) {
+	public function storeUser($uid) {
 		// Check for !duplicate marker - this should never happen for any user
 		if (str_ends_with($uid, '!duplicate')) {
 			error_log("ERROR: storeUser() called with !duplicate marker '$uid'. This indicates a serious bug in the login flow. Stripping marker.");
 			$uid = $this->stripDuplicateMarker($uid);
 		}
-		
+
 		if (!$this->userExists($uid)) {
 			// This is a new user - verify it's lowercase (as per our design)
 			if ($uid !== strtolower($uid)) {
 				error_log("WARNING: storeUser() creating new user with non-lowercase uid '$uid'. This suggests a bug in the login flow. Forcing lowercase.");
 				$uid = strtolower($uid);
 			}
-			
-			// uid is now clean and lowercase for new users
-			$cleanUid = $uid;
 
 			$this->insertUserRow($uid);
-
-			if ($groups) {
-				$createduser = \OC::$server->get(\OCP\IUserManager::class)->get($cleanUid);
-				foreach ($groups as $group) {
-					\OC::$server->get(\OCP\IGroupManager::class)->createGroup($group)->addUser($createduser);
-				}
-			}
 		}
 	}
 

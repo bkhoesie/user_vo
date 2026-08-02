@@ -54,6 +54,9 @@ class GroupSyncLockService {
         $expiresAt = (clone $now)->modify("+{$leaseSeconds} seconds");
         $token = bin2hex(random_bytes(16));
 
+        // Literal 'datetime' rather than IQueryBuilder::PARAM_DATE: that constant is
+        // deprecated as of NC 31 in favor of PARAM_DATETIME_MUTABLE, which only exists
+        // since NC 31 - this app supports NC 28+, so neither constant is usable here.
         $qb = $this->connection->getQueryBuilder();
         $qb->update('user_vo_groups')
             ->set('sync_lock_until', $qb->createNamedParameter($expiresAt, 'datetime'))
