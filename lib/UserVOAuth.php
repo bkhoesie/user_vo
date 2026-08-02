@@ -481,17 +481,25 @@ class UserVOAuth extends Base {
                 return ['success' => false, 'message' => 'Invalid URL'];
             }
 
-            // Check file size before downloading
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $photoUrl);
-            curl_setopt($ch, CURLOPT_NOBODY, true);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-            curl_exec($ch);
-            $contentLength = curl_getinfo($ch, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
+            $client = \OC::$server->get(\OCP\Http\Client\IClientService::class)->newClient();
 
+            // Check file size before downloading
+            try {
+                $headResponse = $client->head($photoUrl, [
+                    'timeout' => 10,
+                    'allow_redirects' => true,
+                    'http_errors' => false,
+                ]);
+            } catch (\Exception $e) {
+                logger('user_vo')->error("Photo URL not accessible", [
+                    'uid' => $uid,
+                    'url' => $photoUrl,
+                    'error' => $e->getMessage()
+                ]);
+                return ['success' => false, 'message' => 'Photo not accessible'];
+            }
+
+            $httpCode = $headResponse->getStatusCode();
             if ($httpCode !== 200) {
                 logger('user_vo')->error("Photo URL returned non-200 status", [
                     'uid' => $uid,
@@ -502,6 +510,8 @@ class UserVOAuth extends Base {
             }
 
             // Size limit: 10MB
+            $contentLengthHeader = $headResponse->getHeader('Content-Length');
+            $contentLength = $contentLengthHeader !== '' ? (int)$contentLengthHeader : 0;
             $maxSize = 10 * 1024 * 1024;
             if ($contentLength > $maxSize) {
                 logger('user_vo')->warning("Photo file too large", [
@@ -513,16 +523,25 @@ class UserVOAuth extends Base {
             }
 
             // Download photo
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $photoUrl);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-            $imageData = curl_exec($ch);
-            $downloadHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
+            try {
+                $downloadResponse = $client->get($photoUrl, [
+                    'timeout' => 10,
+                    'allow_redirects' => true,
+                    'http_errors' => false,
+                ]);
+            } catch (\Exception $e) {
+                logger('user_vo')->error("Failed to download photo", [
+                    'uid' => $uid,
+                    'url' => $photoUrl,
+                    'error' => $e->getMessage()
+                ]);
+                return ['success' => false, 'message' => 'Download failed'];
+            }
 
-            if ($imageData === false || $downloadHttpCode !== 200) {
+            $downloadHttpCode = $downloadResponse->getStatusCode();
+            $imageData = $downloadResponse->getBody();
+
+            if (!is_string($imageData) || $downloadHttpCode !== 200) {
                 logger('user_vo')->error("Failed to download photo", [
                     'uid' => $uid,
                     'url' => $photoUrl,
