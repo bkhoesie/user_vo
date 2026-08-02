@@ -1327,6 +1327,16 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    const voUserSearchInput = document.getElementById('vo-user-search');
+    if (voUserSearchInput && searchVOUsersBtn) {
+        voUserSearchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                searchVOUsersBtn.click();
+            }
+        });
+    }
+
     function displayVOUserSearchResults(response) {
         const summary = document.getElementById('vo-user-search-summary');
         const list = document.getElementById('vo-user-search-list');
@@ -2024,6 +2034,56 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 bulkSyncGroupsButton.disabled = false;
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
+            });
+        });
+    }
+
+    // Sync All Managed Groups button - unlike "Sync Selected", this doesn't depend on
+    // the currently loaded/selected rows at all; it syncs every managed group server-side.
+    const syncAllGroupsButton = document.getElementById('sync-all-groups');
+    if (syncAllGroupsButton) {
+        syncAllGroupsButton.addEventListener('click', function() {
+            syncAllGroupsButton.disabled = true;
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/sync-all-groups'), {
+                method: 'POST',
+                headers: {
+                    'requesttoken': OC.requestToken,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            })
+            .then(response => response.json())
+            .then(data => {
+                syncAllGroupsButton.disabled = false;
+
+                if (data.success) {
+                    const summary = data.summary;
+                    const message = t('user_vo', 'Synced {total} groups ({succeeded} succeeded, {failed} failed)', {
+                        total: summary.total,
+                        succeeded: summary.succeeded,
+                        failed: summary.failed
+                    });
+
+                    OC.Notification.showTemporary(message);
+
+                    if (data.results && data.results.length > 0) {
+                        console.log('Sync all groups results:', data.results);
+                    }
+
+                    // Reload groups view to show updated data
+                    if (currentViewType === 'managed' && loadManagedGroupsButton) {
+                        loadManagedGroupsButton.click();
+                    } else if (currentViewType === 'all' && loadAllVOGroupsButton) {
+                        loadAllVOGroupsButton.click();
+                    }
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + (data.error || 'Unknown error'), { type: 'error' });
+                }
+            })
+            .catch(error => {
+                syncAllGroupsButton.disabled = false;
                 OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
             });
         });

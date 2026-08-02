@@ -330,9 +330,61 @@ style('user_vo', 'admin');
         </div>
     </div>
 
-    <!-- User Account Management Section -->
+    <!-- Group Management Section -->
     <div class="user-sync-section">
-        <h3><?php p($l->t('User Account Management')); ?></h3>
+        <h3><?php p($l->t('Group Management')); ?></h3>
+
+        <div class="vo-notice">
+            <span class="icon icon-info"></span>
+            <?php p($l->t('Manage VereinOnline groups in Nextcloud. Create and synchronize groups from VO, preserving non-VO members.')); ?>
+        </div>
+
+        <h4><?php p($l->t('View Groups')); ?></h4>
+        <p><?php p($l->t('Load groups from VereinOnline or view groups that are already managed in Nextcloud.')); ?></p>
+        <p>
+            <button id="load-all-vo-groups" class="button"><?php p($l->t('Load All VO Groups')); ?></button>
+            <button id="load-managed-groups" class="button"><?php p($l->t('Load Managed Groups')); ?></button>
+            <span id="groups-status"></span>
+        </p>
+
+        <div id="groups-results" style="display:none; margin-top: 20px;">
+            <h4><?php p($l->t('Group List')); ?></h4>
+            <div id="groups-summary"></div>
+            <div style="margin-bottom: 10px;">
+                <button id="expand-all-groups" class="button"><?php p($l->t('Expand All')); ?></button>
+                <button id="collapse-all-groups" class="button"><?php p($l->t('Collapse All')); ?></button>
+                <button id="bulk-create-groups" class="button" style="margin-left: 15px;"><?php p($l->t('Create Selected')); ?></button>
+                <button id="bulk-sync-groups" class="button"><?php p($l->t('Sync Selected')); ?></button>
+                <button id="sync-all-groups" class="button"><?php p($l->t('Sync All Managed Groups')); ?></button>
+                <button id="bulk-delete-groups" class="button button-danger"><?php p($l->t('Delete Selected')); ?></button>
+                <span id="bulk-groups-status"></span>
+            </div>
+            <table class="vo-groups-table">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="select-all-groups" /></th>
+                        <th><?php p($l->t('Pos')); ?></th>
+                        <th><?php p($l->t('VO Group Name')); ?></th>
+                        <th><?php p($l->t('VO Group ID')); ?></th>
+                        <th><?php p($l->t('NC Display Name')); ?></th>
+                        <th><?php p($l->t('NC Group ID')); ?></th>
+                        <th><?php p($l->t('Status')); ?></th>
+                        <th><?php p($l->t('VO Members')); ?></th>
+                        <th><?php p($l->t('Non-VO Members')); ?></th>
+                        <th><?php p($l->t('Last Synced')); ?></th>
+                        <th><?php p($l->t('Actions')); ?></th>
+                    </tr>
+                </thead>
+                <tbody id="groups-list"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- User Account Management Section - collapsed by default: this tool only matters
+         for orgs affected by the case-sensitivity bug in v0.1.2 and earlier, not general
+         day-to-day use. -->
+    <details class="user-sync-section advanced-section">
+        <summary><?php p($l->t('Advanced: User Account Management')); ?></summary>
 
         <div class="vo-notice">
             <span class="icon icon-info"></span>
@@ -362,54 +414,5 @@ style('user_vo', 'admin');
                 <div id="all-users-list"></div>
             </div>
         </div>
-    </div>
-
-    <!-- Group Management Section -->
-    <div class="user-sync-section">
-        <h3><?php p($l->t('Group Management')); ?></h3>
-
-        <div class="vo-notice">
-            <span class="icon icon-info"></span>
-            <?php p($l->t('Manage VereinOnline groups in Nextcloud. Create and synchronize groups from VO, preserving non-VO members.')); ?>
-        </div>
-
-        <h4><?php p($l->t('View Groups')); ?></h4>
-        <p><?php p($l->t('Load groups from VereinOnline or view groups that are already managed in Nextcloud.')); ?></p>
-        <p>
-            <button id="load-all-vo-groups" class="button"><?php p($l->t('Load All VO Groups')); ?></button>
-            <button id="load-managed-groups" class="button"><?php p($l->t('Load Managed Groups')); ?></button>
-            <span id="groups-status"></span>
-        </p>
-
-        <div id="groups-results" style="display:none; margin-top: 20px;">
-            <h4><?php p($l->t('Group List')); ?></h4>
-            <div id="groups-summary"></div>
-            <div style="margin-bottom: 10px;">
-                <button id="expand-all-groups" class="button"><?php p($l->t('Expand All')); ?></button>
-                <button id="collapse-all-groups" class="button"><?php p($l->t('Collapse All')); ?></button>
-                <button id="bulk-create-groups" class="button" style="margin-left: 15px;"><?php p($l->t('Create Selected')); ?></button>
-                <button id="bulk-sync-groups" class="button"><?php p($l->t('Sync Selected')); ?></button>
-                <button id="bulk-delete-groups" class="button button-danger"><?php p($l->t('Delete Selected')); ?></button>
-                <span id="bulk-groups-status"></span>
-            </div>
-            <table class="vo-groups-table">
-                <thead>
-                    <tr>
-                        <th><input type="checkbox" id="select-all-groups" /></th>
-                        <th><?php p($l->t('Pos')); ?></th>
-                        <th><?php p($l->t('VO Group Name')); ?></th>
-                        <th><?php p($l->t('VO Group ID')); ?></th>
-                        <th><?php p($l->t('NC Display Name')); ?></th>
-                        <th><?php p($l->t('NC Group ID')); ?></th>
-                        <th><?php p($l->t('Status')); ?></th>
-                        <th><?php p($l->t('VO Members')); ?></th>
-                        <th><?php p($l->t('Non-VO Members')); ?></th>
-                        <th><?php p($l->t('Last Synced')); ?></th>
-                        <th><?php p($l->t('Actions')); ?></th>
-                    </tr>
-                </thead>
-                <tbody id="groups-list"></tbody>
-            </table>
-        </div>
-    </div>
+    </details>
 </div>

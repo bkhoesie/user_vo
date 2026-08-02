@@ -717,6 +717,23 @@
     border-radius: 3px;
 }
 
+/* Collapsed-by-default sections (e.g. "Advanced: User Account Management") */
+.advanced-section summary {
+    font-size: 20px;
+    font-weight: bold;
+    line-height: 1.2;
+    cursor: pointer;
+    user-select: none;
+}
+
+.advanced-section:not([open]) summary {
+    margin: 0;
+}
+
+.advanced-section[open] summary {
+    margin-bottom: 15px;
+}
+
 .vo-notice {
     background: #e3f2fd;
     border-left: 4px solid #2196F3;

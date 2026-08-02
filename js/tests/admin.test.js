@@ -263,3 +263,7 @@ describe('sortGroupsHierarchically', () => {
         expect(sorted.some(g => g._is_placeholder)).toBe(false);
     });
 });
+
+// See admin.interactions.test.js for closure-bound DOM-wiring tests (button
+// clicks, keydown listeners) - those need a real isolated DOM/event dispatch
+// and run under a different Jest environment than this file.
