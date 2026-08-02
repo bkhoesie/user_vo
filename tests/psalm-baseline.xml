@@ -153,6 +153,12 @@
       <code><![CDATA[$table]]></code>
     </UndefinedDocblockClass>
   </file>
+  <file src="lib/Migration/Version1004Date20260802000000.php">
+    <UndefinedDocblockClass>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+    </UndefinedDocblockClass>
+  </file>
   <file src="lib/Service/ConfigService.php">
     <DeprecatedMethod>
       <code><![CDATA[deleteAppValue]]></code>
@@ -208,6 +214,9 @@
       <code><![CDATA[$childrenMap]]></code>
       <code><![CDATA[$childrenMap]]></code>
     </PossiblyNullArrayOffset>
+    <UndefinedFunction>
+      <code><![CDATA[logger('user_vo')]]></code>
+    </UndefinedFunction>
   </file>
   <file src="lib/Service/UserAccountService.php">
     <UndefinedClass>

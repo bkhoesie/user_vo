@@ -3,6 +3,7 @@ namespace OCA\UserVO\Tests\Integration\Service;
 
 use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
+use OCA\UserVO\Service\GroupSyncLockService;
 use OCA\UserVO\UserVOAuth;
 use OCP\IDBConnection;
 use OCP\IGroupManager;
@@ -30,12 +31,14 @@ class GroupSyncServiceTest extends TestCase {
 		$this->groupManager = \OC::$server->get(\OCP\IGroupManager::class);
 		$this->userManager = \OC::$server->get(\OCP\IUserManager::class);
 		$harmonizer = new GroupNameHarmonizer();
+		$lockService = new GroupSyncLockService($this->connection);
 
 		$this->service = new GroupSyncService(
 			$this->connection,
 			$this->groupManager,
 			$this->userManager,
-			$harmonizer
+			$harmonizer,
+			$lockService
 		);
 
 		// Clean up any test data

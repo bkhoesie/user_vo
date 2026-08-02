@@ -51,21 +51,27 @@ use function OCP\Log\logger;
  * @psalm-type GroupSyncByIdsResult = array{success: bool, error?: string, synced: int, failed: int, results: array}
  */
 class GroupSyncService {
+    /** Bounded wait for admin/cron syncs contending on an already-locked group. */
+    private const LOCK_WAIT_SECONDS = 3.0;
+
     private IDBConnection $connection;
     private IGroupManager $groupManager;
     private IUserManager $userManager;
     private GroupNameHarmonizer $groupNameHarmonizer;
+    private GroupSyncLockService $lockService;
 
     public function __construct(
         IDBConnection $connection,
         IGroupManager $groupManager,
         IUserManager $userManager,
-        GroupNameHarmonizer $groupNameHarmonizer
+        GroupNameHarmonizer $groupNameHarmonizer,
+        GroupSyncLockService $lockService
     ) {
         $this->connection = $connection;
         $this->groupManager = $groupManager;
         $this->userManager = $userManager;
         $this->groupNameHarmonizer = $groupNameHarmonizer;
+        $this->lockService = $lockService;
     }
 
 
@@ -80,9 +86,12 @@ class GroupSyncService {
      *
      * @param array $voGroupIds Array of VO group IDs to sync
      * @param UserVOAuth $backend Backend instance for API access
+     * @param bool $nonBlocking Login-time sync must never block a login: skip a
+     *        group (once, no wait) if another sync already holds its lease,
+     *        rather than the default bounded wait admin/provisioning callers get.
      * @return GroupSyncByIdsResult
      */
-    public function syncGroupsByIds(array $voGroupIds, UserVOAuth $backend): array {
+    public function syncGroupsByIds(array $voGroupIds, UserVOAuth $backend, bool $nonBlocking = false): array {
         try {
             if (empty($voGroupIds)) {
                 return [
@@ -144,7 +153,7 @@ class GroupSyncService {
                 $voGroupName = $groupRow['vo_group_name'];
 
                 try {
-                    $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $voGroupName, $voGroupMap);
+                    $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $voGroupName, $voGroupMap, $nonBlocking);
                     $results[] = [
                         'vo_group_id' => $voGroupId,
                         'vo_group_name' => $voGroupName,
@@ -418,8 +427,45 @@ class GroupSyncService {
     /**
      * Helper method to sync a single group with full metadata updates
      * This is extracted from AdminController for reusability
+     *
+     * Serializes concurrent syncs of the same group via GroupSyncLockService -
+     * without it, two overlapping syncs can read different snapshots of
+     * user_vo (rewritten by other concurrent logins) and the losing thread's
+     * stale read can silently restore a user's membership in a group they
+     * were just removed from in VO. $nonBlocking controls what happens when
+     * the group is already locked: login-time sync (via syncGroupsByIds())
+     * must never block, so it skips this group once and lets whichever sync
+     * is already running finish; every other caller waits briefly, then
+     * throws so the caller can surface a clear per-group failure.
      */
-    private function syncSingleGroupFull(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap): array {
+    private function syncSingleGroupFull(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, bool $nonBlocking = false): array {
+        if ($nonBlocking) {
+            if (!$this->lockService->tryAcquire($voGroupId)) {
+                logger('user_vo')->debug('Skipping group sync - already in progress elsewhere', ['vo_group_id' => $voGroupId]);
+                return [
+                    'added' => [],
+                    'removed' => [],
+                    'skipped' => [],
+                    'member_count' => 0,
+                    'vo_member_count' => 0,
+                    'non_vo_member_count' => 0,
+                ];
+            }
+        } elseif (!$this->lockService->acquireWithBoundedWait($voGroupId, self::LOCK_WAIT_SECONDS)) {
+            throw new \Exception('Group sync already in progress, please try again shortly');
+        }
+
+        try {
+            return $this->syncSingleGroupFullLocked($voGroupId, $ncGroupId, $storedVOName, $voGroupMap);
+        } finally {
+            $this->lockService->release($voGroupId);
+        }
+    }
+
+    /**
+     * The actual sync body, only ever called with the group's sync lease held.
+     */
+    private function syncSingleGroupFullLocked(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap): array {
         // Get stored metadata
         $qb = $this->connection->getQueryBuilder();
         $qb->select('vo_parent_id', 'vo_position')

@@ -3,6 +3,7 @@ namespace OCA\UserVO\Tests\Unit\Service;
 
 use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
+use OCA\UserVO\Service\GroupSyncLockService;
 use OCA\UserVO\UserVOAuth;
 use OCP\IDBConnection;
 use OCP\IGroup;
@@ -18,6 +19,7 @@ class GroupSyncServiceTest extends TestCase {
 	private $groupManager;
 	private $userManager;
 	private $harmonizer;
+	private $lockService;
 	private $service;
 
 	protected function setUp(): void {
@@ -25,12 +27,18 @@ class GroupSyncServiceTest extends TestCase {
 		$this->groupManager = $this->createMock(IGroupManager::class);
 		$this->userManager = $this->createMock(IUserManager::class);
 		$this->harmonizer = $this->createMock(GroupNameHarmonizer::class);
+		$this->lockService = $this->createMock(GroupSyncLockService::class);
+		// Unit tests exercise sync logic, not lock contention - default to
+		// "lock always available" so existing behavior is unaffected.
+		$this->lockService->method('tryAcquire')->willReturn(true);
+		$this->lockService->method('acquireWithBoundedWait')->willReturn(true);
 
 		$this->service = new GroupSyncService(
 			$this->connection,
 			$this->groupManager,
 			$this->userManager,
-			$this->harmonizer
+			$this->harmonizer,
+			$this->lockService
 		);
 	}
 
