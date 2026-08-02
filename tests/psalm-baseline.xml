@@ -19,6 +19,22 @@
     </MissingDependency>
   </file>
   <file src="lib/Controller/ConfigController.php">
+    <DeprecatedMethod>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+    </DeprecatedMethod>
     <MissingDependency>
       <code><![CDATA[UserVOAuth]]></code>
     </MissingDependency>
@@ -50,6 +66,15 @@
     </MissingDependency>
   </file>
   <file src="lib/Cron/SyncUsersJob.php">
+    <DeprecatedMethod>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+    </DeprecatedMethod>
     <MissingDependency>
       <code><![CDATA[UserVOAuth]]></code>
       <code><![CDATA[UserVOAuth]]></code>
@@ -122,6 +147,26 @@
     </PossiblyInvalidArgument>
   </file>
   <file src="lib/Service/ConfigService.php">
+    <DeprecatedMethod>
+      <code><![CDATA[deleteAppValue]]></code>
+      <code><![CDATA[deleteAppValue]]></code>
+      <code><![CDATA[deleteAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+    </DeprecatedMethod>
     <PossiblyUndefinedArrayOffset>
       <code><![CDATA[$adminValues[$key]]]></code>
       <code><![CDATA[$configPhpValues[$key]]]></code>

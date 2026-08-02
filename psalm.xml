@@ -19,4 +19,16 @@
     <extraFiles>
         <directory name="vendor" />
     </extraFiles>
+    <issueHandlers>
+        <!--
+            Deprecated-OCP-method usage is the exact early-warning signal that would have
+            flagged the NC33/34 removed-getter bugs (getUserManager(), getAvatarManager(), etc.)
+            before those methods were actually removed upstream. Promoted to error level (rather
+            than lowering errorLevel overall, which is mostly noise on this codebase - see
+            psalm-baseline.xml's history) so new deprecations fail CI going forward; today's 39
+            hits (all IConfig::getAppValue/setAppValue/deleteAppValue, deprecated in favor of
+            IAppConfig) are baselined, not fixed - migrating them is a separate, larger effort.
+        -->
+        <DeprecatedMethod errorLevel="error" />
+    </issueHandlers>
 </psalm>
