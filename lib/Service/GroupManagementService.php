@@ -13,6 +13,8 @@ use Psr\Log\LoggerInterface;
  *
  * Handles creating and deleting Nextcloud groups from VereinOnline groups,
  * including hierarchical position calculation.
+ *
+ * @psalm-import-type GroupSyncSingleSuccess from GroupSyncService
  */
 class GroupManagementService {
     private IDBConnection $connection;
@@ -589,6 +591,7 @@ class GroupManagementService {
                 $syncResult = $this->groupSyncService->syncSingleGroupById($voGroupId, $backend);
 
                 if ($syncResult['success']) {
+                    /** @var GroupSyncSingleSuccess $syncResult */
                     // Merge sync results into response
                     $result['synced'] = true;
                     $result['sync_summary'] = $syncResult['summary'];

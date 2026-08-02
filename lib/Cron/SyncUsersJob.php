@@ -27,6 +27,8 @@ use OCA\UserVO\UserVOAuth;
  * Each can be enabled/disabled independently via config.
  *
  * Backward compatible: Existing 'enable_nightly_sync' config enables user sync.
+ *
+ * @psalm-import-type GroupSyncAllSuccess from GroupSyncService
  */
 class SyncUsersJob extends TimedJob {
     private IConfig $config;
@@ -136,6 +138,7 @@ class SyncUsersJob extends TimedJob {
                     throw new \Exception($result['error'] ?? 'Group sync failed');
                 }
 
+                /** @var GroupSyncAllSuccess $result */
                 $groupSummary = [
                     'total' => $result['summary']['total'],
                     'succeeded' => $result['summary']['succeeded'],

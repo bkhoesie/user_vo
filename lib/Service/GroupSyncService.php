@@ -21,6 +21,35 @@ use function OCP\Log\logger;
 
 /**
  * Shared service for syncing VO group memberships to Nextcloud groups
+ *
+ * @psalm-type GroupSyncSingleSummary = array{
+ *     added: int,
+ *     removed: int,
+ *     skipped: int,
+ *     total_members: int,
+ *     vo_members: int,
+ *     non_vo_members: int
+ * }
+ * @psalm-type GroupSyncSingleSuccess = array{
+ *     success: true,
+ *     message: string,
+ *     vo_group_id: string,
+ *     nc_group_id: string,
+ *     vo_group_name: string,
+ *     added: array,
+ *     removed: array,
+ *     skipped: array,
+ *     member_count: int,
+ *     vo_member_count: int,
+ *     non_vo_member_count: int,
+ *     summary: GroupSyncSingleSummary
+ * }
+ * @psalm-type GroupSyncError = array{success: false, error: string, status_code?: 400|404|500}
+ * @psalm-type GroupSyncSingleResult = GroupSyncSingleSuccess|GroupSyncError
+ * @psalm-type GroupSyncAllSummary = array{total: int, succeeded: int, failed: int}
+ * @psalm-type GroupSyncAllSuccess = array{success: true, message?: string, summary: GroupSyncAllSummary, results: array}
+ * @psalm-type GroupSyncAllResult = GroupSyncAllSuccess|GroupSyncError
+ * @psalm-type GroupSyncByIdsResult = array{success: bool, error?: string, synced: int, failed: int, results: array}
  */
 class GroupSyncService {
     private IDBConnection $connection;
@@ -54,7 +83,7 @@ class GroupSyncService {
      * - Updates database metadata (last_synced, member counts, etc.)
      *
      * @param array $voGroupIds Array of VO group IDs to sync
-     * @return array Result with 'success', 'synced', 'failed', 'results'
+     * @return GroupSyncByIdsResult
      */
     public function syncGroupsByIds(array $voGroupIds): array {
         try {
@@ -180,7 +209,7 @@ class GroupSyncService {
      *
      * @param string $voGroupId VO group ID to sync
      * @param UserVOAuth $backend Backend instance for API access
-     * @return array Result with success, message, detailed sync info, or error
+     * @return GroupSyncSingleResult
      */
     public function syncSingleGroupById(string $voGroupId, UserVOAuth $backend): array {
         try {
@@ -280,7 +309,7 @@ class GroupSyncService {
      * Returns summary suitable for JSON API response.
      *
      * @param UserVOAuth $backend Backend instance for API access
-     * @return array Result with success, message, summary, results
+     * @return GroupSyncAllResult
      */
     public function syncAllManagedGroups(UserVOAuth $backend): array {
         try {
