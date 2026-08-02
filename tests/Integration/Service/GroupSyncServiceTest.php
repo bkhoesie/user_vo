@@ -58,7 +58,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -389,5 +389,74 @@ class GroupSyncServiceTest extends TestCase {
 		$this->assertFalse($result['success']);
 		$this->assertEquals('Group no longer exists', $result['error']);
 		$this->assertLessThan(1.0, $elapsed, 'Must fail fast instead of burning the full bounded wait');
+	}
+
+	/**
+	 * The lease must be released via the wrapper's finally block even when
+	 * the locked sync body itself throws mid-way - otherwise a single failed
+	 * sync would wedge that group's lease for its full TTL, well beyond any
+	 * reasonable retry. Only the happy (successful-release) path was
+	 * previously covered.
+	 */
+	public function testLeaseIsReleasedWhenLockedSyncBodyThrows(): void {
+		$voGroupId = 'test_throws_midsync';
+		// Points at an NC group that was never created - syncSingleGroupFullLocked()
+		// throws "NC group does not exist" once it gets past the lock-acquire.
+		$this->createTestGroupInDB($voGroupId, 'uservo_test_throws_midsync_missing', 'Test Throws Group');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Throws Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertFalse($result['success']);
+		$this->assertStringContainsString('NC group does not exist', $result['error']);
+
+		$lockService = new GroupSyncLockService($this->connection);
+		$token = $lockService->tryAcquire($voGroupId);
+		$this->assertNotNull($token, 'Lease must have been released despite the body throwing - a failed sync must not wedge the lease');
+		$lockService->release($voGroupId, $token);
+	}
+
+	/**
+	 * Contention on one group during a bulk sync must surface as that one
+	 * group's failure, not abort or corrupt the results for the other,
+	 * unlocked groups in the same batch.
+	 */
+	public function testBulkSyncReportsContentionOnOneGroupWithoutAffectingOthers(): void {
+		$lockedVoGroupId = 'test_bulk_locked';
+		$freeVoGroupId = 'test_bulk_free';
+
+		$this->groupManager->createGroup('uservo_test_bulk_locked');
+		$this->createTestGroupInDB($lockedVoGroupId, 'uservo_test_bulk_locked', 'Locked Group');
+		$this->groupManager->createGroup('uservo_test_bulk_free');
+		$this->createTestGroupInDB($freeVoGroupId, 'uservo_test_bulk_free', 'Free Group');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $lockedVoGroupId, 'name' => 'Locked Group', 'parentid' => null, 'pos' => 1],
+			['id' => $freeVoGroupId, 'name' => 'Free Group', 'parentid' => null, 'pos' => 2],
+		]);
+
+		$lockService = new GroupSyncLockService($this->connection);
+		$token = $lockService->tryAcquire($lockedVoGroupId);
+		$this->assertNotNull($token);
+
+		try {
+			$result = $this->service->syncAllManagedGroups($backend);
+		} finally {
+			$lockService->release($lockedVoGroupId, $token);
+		}
+
+		$this->assertTrue($result['success'], 'A single contended group must not fail the whole bulk sync');
+		$byGroupId = [];
+		foreach ($result['results'] as $groupResult) {
+			$byGroupId[$groupResult['vo_group_id']] = $groupResult;
+		}
+
+		$this->assertEquals('error', $byGroupId[$lockedVoGroupId]['status']);
+		$this->assertStringContainsString('already in progress', $byGroupId[$lockedVoGroupId]['error']);
+		$this->assertEquals('success', $byGroupId[$freeVoGroupId]['status'], 'The unlocked group must still sync normally');
 	}
 }
