@@ -286,6 +286,31 @@ and isn't reachable for unit testing - only functions with no closure-captured s
 to module scope for this. `js/tests/setup.js` stubs the Nextcloud-provided `t()` and `moment`
 globals these functions rely on.
 
+Closure-bound interactive behavior (button clicks, keydown listeners) is covered separately in
+`js/tests/admin.interactions.test.js`, which loads the real `admin.js` into a fully isolated
+per-test JSDOM instance (via `js/tests/domFixture.js`) and drives real DOM events. See that file's
+header comment for a documented, narrow Jest+jsdom harness quirk it works around (not an
+application bug - verified independently multiple ways).
+
+**Layer 6: Live VO API Contract Tests**
+```bash
+# Fill in .env.vo-test first (see that file - gitignored, never commit it)
+./tests/run-live-api-tests.sh
+```
+
+Runs against the **real** VereinOnline API using a dedicated test API account + test member
+account + test group - there's no isolated VO sandbox org, so this is real production
+infrastructure, just with synthetic accounts that don't touch real member data. Scope is
+deliberately read-only: `VerifyLogin` with known-good credentials (called at most once per run,
+cached - see `VoApiContractTest::resolveTestMemberId()`), `GetMember`, `GetMembers`, and groups
+listing. Deliberately not testing a wrong-password path (real VO lockout risk). Skipped (not
+failed) automatically when the `VO_TEST_*` environment variables aren't set, so it's safe to be
+absent from regular dev machines. CI runs this via `.github/workflows/live-api-tests.yml` on
+`workflow_dispatch` + a nightly schedule only - never on push/PR, to avoid hitting production VO
+on every commit. Credentials are stored as GitHub Actions secrets, uploaded via
+`scripts/upload-vo-test-secrets.sh` (reads `.env.vo-test`, pipes each value to `gh secret set` via
+stdin - never as a CLI arg or in shell history).
+
 ### Creating a Release
 
 Follow these steps to create a new release (see `readme-dev.md` for details):

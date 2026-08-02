@@ -131,6 +131,7 @@ appstore:
 	gtar cvz --exclude-vcs \
 	--exclude="../$(app_name)/build" \
 	--exclude="../$(app_name)/tests" \
+	--exclude="../$(app_name)/scripts" \
 	--exclude="../$(app_name)/Makefile" \
 	--exclude="../$(app_name)/readme-dev.md" \
 	--exclude="../$(app_name)/*.log" \

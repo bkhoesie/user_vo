@@ -1,0 +1,67 @@
+name: Live VO API contract tests
+
+# Deliberately NOT on push/pull_request: these tests hit the real VereinOnline
+# API (a dedicated test account, but real production infrastructure - no VO
+# sandbox org exists) rather than a mock. Running them on every push would
+# hammer production VO far more than the contract actually changes. Manual
+# trigger covers "check this now"; nightly catches drift without doing that.
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '17 3 * * *' # nightly, off-peak, arbitrary minute to avoid the exact-hour stampede
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-api-tests
+  cancel-in-progress: false
+
+env:
+  APP_NAME: user_vo
+
+jobs:
+  live-api-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout server
+        uses: actions/checkout@v5
+        with:
+          submodules: true
+          repository: nextcloud/server
+          ref: stable34
+
+      - name: Checkout app
+        uses: actions/checkout@v5
+        with:
+          path: apps/${{ env.APP_NAME }}
+
+      - name: Set up php
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: bz2, ctype, curl, dom, fileinfo, gd, iconv, intl, json, libxml, mbstring, openssl, pcntl, posix, session, simplexml, xmlreader, xmlwriter, zip, zlib, sqlite, pdo_sqlite
+          tools: phpunit
+          coverage: none
+          ini-values: disable_functions=
+
+      - name: Set up Nextcloud
+        run: |
+          mkdir data
+          php occ maintenance:install --verbose --database=sqlite --admin-user admin --admin-pass admin
+          php occ app:enable --force ${{ env.APP_NAME }}
+
+      - name: Live VO API contract tests
+        working-directory: apps/${{ env.APP_NAME }}
+        env:
+          VO_TEST_API_URL: ${{ secrets.VO_TEST_API_URL }}
+          VO_TEST_API_USERNAME: ${{ secrets.VO_TEST_API_USERNAME }}
+          VO_TEST_API_PASSWORD: ${{ secrets.VO_TEST_API_PASSWORD }}
+          VO_TEST_MEMBER_USERNAME: ${{ secrets.VO_TEST_MEMBER_USERNAME }}
+          VO_TEST_MEMBER_PASSWORD: ${{ secrets.VO_TEST_MEMBER_PASSWORD }}
+        run: phpunit -c tests/LiveApi/phpunit.xml
+
+      - name: Print Nextcloud log
+        if: failure()
+        run: cat data/nextcloud.log

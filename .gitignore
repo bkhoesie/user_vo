@@ -9,6 +9,7 @@ test_user_*.php
 temp_*.php
 api_results*.txt
 docs/VO_API_FINDINGS.md
+.env.vo-test
 
 # PHPUnit cache files
 .phpunit.result.cache
