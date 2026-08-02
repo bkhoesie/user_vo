@@ -51,7 +51,6 @@ class ConfigController extends Controller {
 	/**
 	 * Save configuration via admin interface
 	 *
-	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function saveConfiguration(): JSONResponse {
@@ -104,7 +103,6 @@ class ConfigController extends Controller {
 	/**
 	 * Test configuration by making a test API request
 	 *
-	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function testConfiguration(): JSONResponse {
@@ -234,7 +232,6 @@ class ConfigController extends Controller {
 	/**
 	 * Clear configuration from admin interface
 	 *
-	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function clearConfiguration(): JSONResponse {
@@ -263,7 +260,6 @@ class ConfigController extends Controller {
 	/**
 	 * Save user sync settings
 	 *
-	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function saveUserSyncSettings(): JSONResponse {
@@ -292,7 +288,6 @@ class ConfigController extends Controller {
 	/**
 	 * Save nightly sync setting
 	 *
-	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function saveNightlySyncSetting(): JSONResponse {

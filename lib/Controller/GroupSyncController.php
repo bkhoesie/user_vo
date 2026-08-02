@@ -52,7 +52,6 @@ class GroupSyncController extends Controller {
 	/**
 	 * Sync a single group's members from VereinOnline
 	 *
-	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function syncGroup(): JSONResponse {
@@ -67,7 +66,6 @@ class GroupSyncController extends Controller {
 	/**
 	 * Sync selected groups
 	 *
-	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function syncSelectedGroups(): JSONResponse {
@@ -99,7 +97,6 @@ class GroupSyncController extends Controller {
 	/**
 	 * Sync all managed groups
 	 *
-	 * @NoCSRFRequired
 	 * @return JSONResponse
 	 */
 	public function syncAllGroups(): JSONResponse {

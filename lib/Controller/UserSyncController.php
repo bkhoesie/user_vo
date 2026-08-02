@@ -85,7 +85,6 @@ class UserSyncController extends Controller {
     /**
      * Sync all users from VO API
      *
-     * @NoCSRFRequired
      * @return JSONResponse
      */
     public function syncFromVO(): JSONResponse {
@@ -98,7 +97,6 @@ class UserSyncController extends Controller {
     /**
      * Sync selected users from VereinOnline
      *
-     * @NoCSRFRequired
      * @return JSONResponse
      */
     public function syncSelectedUsers(): JSONResponse {
