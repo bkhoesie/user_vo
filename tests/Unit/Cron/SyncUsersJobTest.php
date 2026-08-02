@@ -14,10 +14,12 @@ use Test\TestCase;
  * fully mockable, so this needs no real database. run() is protected (it's a
  * TimedJob callback), invoked via reflection.
  *
- * Focus: the enable/disable flag logic (including legacy 'enable_nightly_sync'
- * backward compatibility) and the "don't run group sync if user sync failed"
- * ordering rule - both are meaningful orchestration decisions with no other
- * coverage anywhere.
+ * Focus: the enable/disable flag logic and the "don't run group sync if user
+ * sync failed" ordering rule - both are meaningful orchestration decisions
+ * with no other coverage anywhere. The legacy 'enable_nightly_sync' flag is
+ * no longer read here at all - MigrateLegacyNightlySyncFlag (a one-time
+ * repair step run on upgrade) migrates it into 'enable_nightly_user_sync'
+ * and removes it, so this job only ever needs to read the new key.
  */
 class SyncUsersJobTest extends TestCase {
 	private ITimeFactory $time;
@@ -67,24 +69,6 @@ class SyncUsersJobTest extends TestCase {
 		$this->runJob($config, $userSyncService, $this->createMock(ConfigService::class), $groupSyncService);
 
 		$this->assertEmpty($this->recordedConfig, 'No status should be written when nothing ran');
-	}
-
-	public function testLegacyEnableNightlySyncEnablesUserSync(): void {
-		$config = $this->configMock([
-			'enable_nightly_sync' => 'true', // legacy flag, no explicit 'enable_nightly_user_sync' set
-		]);
-		$configService = $this->createMock(ConfigService::class);
-		$configService->method('loadConfiguration')->willReturn(['api_url' => '', 'api_username' => '', 'api_password' => '']);
-
-		$userSyncService = $this->createMock(UserSyncService::class);
-		$userSyncService->expects($this->once())->method('syncAllUsers')->willReturn([
-			'success' => true,
-			'summary' => ['total' => 1, 'success' => 1, 'failed' => 0, 'skipped' => 0],
-		]);
-
-		$this->runJob($config, $userSyncService, $configService, $this->createMock(GroupSyncService::class));
-
-		$this->assertEquals('success', $this->recordedConfig['nightly_sync_last_status']);
 	}
 
 	public function testUserSyncFailurePreventsGroupSyncFromRunning(): void {

@@ -306,9 +306,8 @@ class ConfigControllerTest extends NextcloudTestCase {
 		$data = $response->getData();
 		$this->assertTrue($data['success']);
 
-		// Verify settings were saved (both new and legacy keys)
+		// Verify setting was saved
 		$this->assertEquals('true', $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', ''));
-		$this->assertEquals('true', $this->config->getAppValue('user_vo', 'enable_nightly_sync', ''));
 	}
 
 	public function testSaveNightlySyncSettingForGroupSync() {

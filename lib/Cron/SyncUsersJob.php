@@ -26,8 +26,6 @@ use OCA\UserVO\UserVOAuth;
  * Runs user sync first (updates vo_group_ids), then group sync (uses those IDs).
  * Each can be enabled/disabled independently via config.
  *
- * Backward compatible: Existing 'enable_nightly_sync' config enables user sync.
- *
  * @psalm-import-type GroupSyncAllSuccess from GroupSyncService
  */
 class SyncUsersJob extends TimedJob {
@@ -54,11 +52,7 @@ class SyncUsersJob extends TimedJob {
     }
 
     protected function run($argument): void {
-        // Backward compatibility: 'enable_nightly_sync' enables user sync
-        // New: 'enable_nightly_user_sync' explicitly controls user sync
-        // New: 'enable_nightly_group_sync' controls group sync
-        $legacyEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_sync', 'false') === 'true';
-        $userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', $legacyEnabled ? 'true' : 'false') === 'true';
+        $userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', 'false') === 'true';
         $groupSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', 'false') === 'true';
 
         if (!$userSyncEnabled && !$groupSyncEnabled) {

@@ -29,18 +29,6 @@ class UserVOAdminSettings implements ISettings {
             'sync_photo' => $this->configService->get('sync_photo', 'false')
         ];
 
-        // Get nightly sync settings with migration
-        // Backward compatibility: 'enable_nightly_sync' -> 'enable_nightly_user_sync'
-        $legacyEnabled = $this->configService->get('enable_nightly_sync', 'false') === 'true';
-        $userSyncValue = $this->configService->get('enable_nightly_user_sync', '');
-
-        // One-time migration: if legacy config exists but new config doesn't, migrate it
-        if ($legacyEnabled && $userSyncValue === '') {
-            // Migrate legacy setting to new format
-            $this->configService->set('enable_nightly_user_sync', 'true');
-            $userSyncValue = 'true';
-        }
-
         // Count managed VO groups for display
         $managedGroupsCount = 0;
         try {
@@ -56,7 +44,7 @@ class UserVOAdminSettings implements ISettings {
         }
 
         $nightlySync = [
-            'enabled' => ($userSyncValue !== '' ? $userSyncValue : ($legacyEnabled ? 'true' : 'false')) === 'true',
+            'enabled' => $this->configService->get('enable_nightly_user_sync', 'false') === 'true',
             'group_enabled' => $this->configService->get('enable_nightly_group_sync', 'false') === 'true',
             'managed_groups_count' => $managedGroupsCount
         ];

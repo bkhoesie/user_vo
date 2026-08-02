@@ -297,10 +297,7 @@ class ConfigController extends Controller {
 		if ($syncType === 'group') {
 			$this->config->setAppValue('user_vo', 'enable_nightly_group_sync', $enabled ? 'true' : 'false');
 		} else {
-			// User sync - also update new config key for consistency
 			$this->config->setAppValue('user_vo', 'enable_nightly_user_sync', $enabled ? 'true' : 'false');
-			// Keep legacy key for backward compatibility
-			$this->config->setAppValue('user_vo', 'enable_nightly_sync', $enabled ? 'true' : 'false');
 		}
 
 		return new JSONResponse([
@@ -316,9 +313,7 @@ class ConfigController extends Controller {
 	 * @return JSONResponse
 	 */
 	public function getNightlySyncStatus(): JSONResponse {
-		// Get both user and group sync settings (backward compatible)
-		$legacyEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_sync', 'false') === 'true';
-		$userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', $legacyEnabled ? 'true' : 'false') === 'true';
+		$userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', 'false') === 'true';
 		$groupSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', 'false') === 'true';
 
 		$lastRun = $this->config->getAppValue('user_vo', 'nightly_sync_last_run', '');

@@ -34,4 +34,9 @@ The [documentation](https://github.com/bkhoesie/user_vo) describes how this plug
 	<background-jobs>
 		<job>OCA\UserVO\Cron\SyncUsersJob</job>
 	</background-jobs>
+	<repair-steps>
+		<post-migration>
+			<step>OCA\UserVO\Migration\MigrateLegacyNightlySyncFlag</step>
+		</post-migration>
+	</repair-steps>
 </info>
