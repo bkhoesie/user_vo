@@ -1,11 +1,14 @@
 name: Live VO API contract tests
 
-# Deliberately NOT on push/pull_request: these tests hit the real VereinOnline
-# API (a dedicated test account, but real production infrastructure - no VO
-# sandbox org exists) rather than a mock. Running them on every push would
-# hammer production VO far more than the contract actually changes. Manual
-# trigger covers "check this now"; nightly catches drift without doing that.
+# TEMPORARY: push trigger added to get one real CI-runner verification in,
+# since `workflow_dispatch` can't be invoked via API/CLI for a workflow that
+# only exists on a non-default branch (GitHub requires the workflow file on
+# the default branch first). Revert to workflow_dispatch + schedule only
+# once confirmed working - see the comment this replaced.
 on:
+  push:
+    branches:
+      - 'feature/**'
   workflow_dispatch: {}
   schedule:
     - cron: '17 3 * * *' # nightly, off-peak, arbitrary minute to avoid the exact-hour stampede
