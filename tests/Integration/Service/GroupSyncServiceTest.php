@@ -459,4 +459,75 @@ class GroupSyncServiceTest extends TestCase {
 		$this->assertStringContainsString('already in progress', $byGroupId[$lockedVoGroupId]['error']);
 		$this->assertEquals('success', $byGroupId[$freeVoGroupId]['status'], 'The unlocked group must still sync normally');
 	}
+
+	/**
+	 * Login-time (non-blocking) sync must actually wait up to its shared
+	 * budget on contention rather than giving up instantly - a login that
+	 * wins the lock within budget reads fresh data and can repair a
+	 * concurrent sync's stale result, instead of always just skipping.
+	 */
+	public function testNonBlockingSyncWaitsUpToSharedBudgetBeforeSkipping(): void {
+		$voGroupId = 'test_login_wait';
+		$this->createTestGroupInDB($voGroupId, 'uservo_test_login_wait', 'Test Login Wait Group');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Login Wait Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$lockService = new GroupSyncLockService($this->connection);
+		// Long enough lease that it won't self-expire during this test.
+		$token = $lockService->tryAcquire($voGroupId, 60);
+		$this->assertNotNull($token);
+
+		try {
+			$start = microtime(true);
+			$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
+			$elapsed = microtime(true) - $start;
+
+			$this->assertEquals(1, $result['skipped']);
+			$this->assertGreaterThanOrEqual(0.7, $elapsed, 'Should have actually spent close to the wait budget, not skipped instantly');
+			$this->assertLessThan(2.0, $elapsed, 'Must still be bounded, not the admin/cron 3s wait');
+		} finally {
+			$lockService->release($voGroupId, $token);
+		}
+	}
+
+	/**
+	 * The wait budget is shared across the whole login-triggered batch, not
+	 * reset per group - otherwise a login with several contended groups
+	 * could block for (budget x group count) instead of a bounded total.
+	 */
+	public function testNonBlockingSyncSharesWaitBudgetAcrossGroupsNotPerGroup(): void {
+		$firstVoGroupId = 'test_login_wait_a';
+		$secondVoGroupId = 'test_login_wait_b';
+		$this->createTestGroupInDB($firstVoGroupId, 'uservo_test_login_wait_a', 'Test Login Wait Group A');
+		$this->createTestGroupInDB($secondVoGroupId, 'uservo_test_login_wait_b', 'Test Login Wait Group B');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $firstVoGroupId, 'name' => 'Test Login Wait Group A', 'parentid' => null, 'pos' => 1],
+			['id' => $secondVoGroupId, 'name' => 'Test Login Wait Group B', 'parentid' => null, 'pos' => 2],
+		]);
+
+		$lockService = new GroupSyncLockService($this->connection);
+		$tokenA = $lockService->tryAcquire($firstVoGroupId, 60);
+		$tokenB = $lockService->tryAcquire($secondVoGroupId, 60);
+		$this->assertNotNull($tokenA);
+		$this->assertNotNull($tokenB);
+
+		try {
+			$start = microtime(true);
+			$result = $this->service->syncGroupsByIds([$firstVoGroupId, $secondVoGroupId], $backend, nonBlocking: true);
+			$elapsed = microtime(true) - $start;
+
+			$this->assertEquals(2, $result['skipped']);
+			// If the budget reset per group, two contended groups would take
+			// roughly 2x the total budget instead of sharing one.
+			$this->assertLessThan(1.8, $elapsed, 'Wait budget must be shared across the batch, not given fresh to each group');
+		} finally {
+			$lockService->release($firstVoGroupId, $tokenA);
+			$lockService->release($secondVoGroupId, $tokenB);
+		}
+	}
 }

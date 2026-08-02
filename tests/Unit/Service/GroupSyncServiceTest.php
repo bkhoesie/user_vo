@@ -229,6 +229,7 @@ class GroupSyncServiceTest extends TestCase {
 		// Deny lock acquisition entirely, forcing every group down the skip path.
 		$lockService = $this->createMock(GroupSyncLockService::class);
 		$lockService->method('tryAcquire')->willReturn(null);
+		$lockService->method('acquireWithBoundedWait')->willReturn(null);
 		$service = new GroupSyncService($this->connection, $this->groupManager, $this->userManager, $this->harmonizer, $lockService);
 
 		$result = $service->syncGroupsByIds(['123'], $backend, nonBlocking: true);

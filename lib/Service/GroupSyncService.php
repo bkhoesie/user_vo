@@ -55,6 +55,15 @@ class GroupSyncService {
     /** Bounded wait for admin/cron syncs contending on an already-locked group. */
     private const LOCK_WAIT_SECONDS = 3.0;
 
+    /**
+     * Total wait budget shared across an entire login-triggered sync batch
+     * (not per-group - a login can have many groups, and this must stay
+     * bounded even if several are contended). A login that wins the lock
+     * within this budget reads fresh user_vo data and can repair a
+     * concurrent full sync's stale result, rather than just skipping.
+     */
+    private const LOGIN_TOTAL_WAIT_BUDGET_SECONDS = 1.0;
+
     private IDBConnection $connection;
     private IGroupManager $groupManager;
     private IUserManager $userManager;
@@ -151,6 +160,8 @@ class GroupSyncService {
             $failedCount = 0;
             $skippedCount = 0;
             $results = [];
+            // Shared across the whole batch, not per-group - see LOGIN_TOTAL_WAIT_BUDGET_SECONDS.
+            $remainingWaitBudget = self::LOGIN_TOTAL_WAIT_BUDGET_SECONDS;
 
             foreach ($managedGroups as $groupRow) {
                 $voGroupId = $groupRow['vo_group_id'];
@@ -158,7 +169,11 @@ class GroupSyncService {
                 $voGroupName = $groupRow['vo_group_name'];
 
                 try {
-                    $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $voGroupName, $voGroupMap, $nonBlocking);
+                    $groupStart = microtime(true);
+                    $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $voGroupName, $voGroupMap, $nonBlocking, $remainingWaitBudget);
+                    if ($nonBlocking) {
+                        $remainingWaitBudget = max(0.0, $remainingWaitBudget - (microtime(true) - $groupStart));
+                    }
 
                     if ($syncResult['locked'] ?? false) {
                         // Another sync already holds this group's lease (only reachable
@@ -475,13 +490,18 @@ class GroupSyncService {
      * stale read can silently restore a user's membership in a group they
      * were just removed from in VO. $nonBlocking controls what happens when
      * the group is already locked: login-time sync (via syncGroupsByIds())
-     * must never block, so it skips this group once and lets whichever sync
-     * is already running finish; every other caller waits briefly, then
-     * throws so the caller can surface a clear per-group failure.
+     * must never block for long, so it waits only up to $nonBlockingWaitBudget
+     * (shared across the whole login batch, not a fresh budget per group) and
+     * then skips this one group, letting whichever sync is already running
+     * finish - a login that *does* win the lock within budget reads fresh
+     * user_vo data and can repair a concurrent sync's stale result, rather
+     * than just giving up immediately. Every other caller waits up to
+     * LOCK_WAIT_SECONDS, then throws so the caller can surface a clear
+     * per-group failure.
      */
-    private function syncSingleGroupFull(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, bool $nonBlocking = false): array {
+    private function syncSingleGroupFull(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, bool $nonBlocking = false, float $nonBlockingWaitBudget = 0.0): array {
         if ($nonBlocking) {
-            $lockToken = $this->lockService->tryAcquire($voGroupId);
+            $lockToken = $this->lockService->acquireWithBoundedWait($voGroupId, $nonBlockingWaitBudget);
             if ($lockToken === null) {
                 logger('user_vo')->debug('Skipping group sync - already in progress elsewhere', ['vo_group_id' => $voGroupId]);
                 return [
