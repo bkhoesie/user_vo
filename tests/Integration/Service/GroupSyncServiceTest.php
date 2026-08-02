@@ -58,7 +58,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_789'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -69,7 +69,7 @@ class GroupSyncServiceTest extends TestCase {
 		}
 
 		// Delete test users
-		$testUsers = ['testuser1', 'testuser2', 'testuser3'];
+		$testUsers = ['testuser1', 'testuser2', 'testuser3', 'testuser_lockrace'];
 		foreach ($testUsers as $userId) {
 			if ($this->userManager->userExists($userId)) {
 				$user = $this->userManager->get($userId);
@@ -251,5 +251,73 @@ class GroupSyncServiceTest extends TestCase {
 		$dbResult->closeCursor();
 
 		$this->assertEquals(1, $row['deleted_in_vo']);
+	}
+
+	/**
+	 * Regression test for the lost-update race Step 18's per-group lease
+	 * closes: at real production scale, overlapping syncs of the same
+	 * shared group (driven by NC's periodic credential-token revalidation
+	 * across many active sessions) can interleave their reads/writes of
+	 * user_vo and NC group membership, and a straggler acting on a stale
+	 * snapshot can silently restore membership a concurrent sync just
+	 * removed. PHPUnit can't run genuinely concurrent syncs, so this
+	 * verifies the mechanism the fix actually depends on directly: while
+	 * another sync holds a group's lease, a non-blocking sync of that same
+	 * group must not touch its NC membership at all (not "usually skip" -
+	 * genuinely never mutate while locked), and must catch up correctly
+	 * once the lease is released. If the lock-acquire wrapper were ever
+	 * bypassed or miswired, this would start mutating membership on the
+	 * locked call and fail.
+	 */
+	public function testNonBlockingSyncNeverMutatesMembershipWhileGroupIsLocked(): void {
+		$voGroupId = 'test_lockrace';
+		$ncGroupId = 'uservo_test_lockrace';
+		$uid = 'testuser_lockrace';
+
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Lock Race Group');
+
+		if (!$this->userManager->userExists($uid)) {
+			$this->userManager->createUser($uid, 'ATestPassword123!');
+		}
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo')->values([
+			'uid' => $qb->createNamedParameter($uid),
+			'backend' => $qb->createNamedParameter('user_vo'),
+			'vo_group_ids' => $qb->createNamedParameter($voGroupId),
+		])->executeStatement();
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Lock Race Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$lockService = new GroupSyncLockService($this->connection);
+
+		try {
+			// Simulate "another sync is already running for this group."
+			$this->assertTrue($lockService->tryAcquire($voGroupId));
+
+			$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
+			$this->assertTrue($result['success']);
+			$this->assertEmpty($result['results'][0]['added'], 'Locked sync must not report any membership change');
+
+			$ncGroup = $this->groupManager->get($ncGroupId);
+			$members = array_map(fn ($u) => $u->getUID(), $ncGroup->getUsers());
+			$this->assertNotContains($uid, $members, 'User must NOT have been added while the group was locked');
+		} finally {
+			$lockService->release($voGroupId);
+		}
+
+		// Lease is free again - the same sync should now apply normally.
+		$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
+		$this->assertTrue($result['success']);
+		$this->assertContains($uid, $result['results'][0]['added']);
+
+		$ncGroup = $this->groupManager->get($ncGroupId);
+		$members = array_map(fn ($u) => $u->getUID(), $ncGroup->getUsers());
+		$this->assertContains($uid, $members, 'User should be added once the lease is available');
+
+		$this->userManager->get($uid)?->delete();
 	}
 }
