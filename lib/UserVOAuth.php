@@ -311,19 +311,6 @@ class UserVOAuth extends Base {
         return $listResponse;
     }
 
-    /**
-     * Clears the cached VO groups list for this backend's configured org, so
-     * the next allowCached fetchAllGroups() call gets fresh data instead of
-     * waiting out the TTL. Call after any admin action that changes which
-     * groups exist in VO (from this app's side - e.g. group creation).
-     */
-    public function invalidateGroupCache(): void {
-        $cache = \OC::$server->get(\OCP\ICacheFactory::class)->createDistributed('user_vo-groups');
-        $cacheKey = md5($this->apiUrl);
-        $cache->remove($cacheKey);
-        $cache->remove($cacheKey . '-stale');
-    }
-
     public function fetchMembersMapForUsers(array $targetUsernames): array {
         $listResponse = $this->fetchAllMembers();
 

@@ -15,6 +15,14 @@ use Test\TestCase;
  * test (restored in tearDown), matching the pattern already used for
  * syncUserPhoto()'s IClientService override.
  *
+ * No explicit cache-invalidation-on-group-change exists (or is needed):
+ * every GroupManagementService call site that touches groups (create,
+ * delete's precondition check, bulk create/list) always does an
+ * allowCached: false fetch, which - per testUncachedCallStillPopulatesTheCacheForLaterCachedCalls -
+ * already refreshes the shared cache as a side effect regardless of whether
+ * that specific call used it. So any admin action that creates or lists
+ * groups already keeps the next login-triggered cached read fresh.
+ *
  * Also overrides ICacheFactory so createDistributed() always returns the
  * same in-memory ICache instance. Under PHPUnit, Nextcloud forces all cache
  * backends to OC\Memcache\ArrayCache for test isolation (see
@@ -173,17 +181,5 @@ class UserVOAuthGroupCacheTest extends TestCase {
 
 		// Admin/always-fresh callers must fail loudly, never silently serve stale data.
 		$this->assertNull($backend->fetchAllGroups(allowCached: false));
-	}
-
-	public function testInvalidateGroupCacheClearsBothEntries(): void {
-		$apiClient = $this->mockApiClient();
-		$apiClient->expects($this->exactly(2))->method('makeRequest')
-			->willReturn([['id' => '1', 'name' => 'Group 1', 'parentid' => null, 'pos' => 1]]);
-
-		$backend = $this->createBackend();
-		$backend->fetchAllGroups(allowCached: true);
-		$backend->invalidateGroupCache();
-		// Cache was cleared, so this must be a second live fetch, not a cache hit.
-		$backend->fetchAllGroups(allowCached: true);
 	}
 }
