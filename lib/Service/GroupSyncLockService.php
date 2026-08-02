@@ -102,4 +102,21 @@ class GroupSyncLockService {
             ->andWhere($qb->expr()->eq('sync_lock_token', $qb->createNamedParameter($token)));
         $qb->executeStatement();
     }
+
+    /**
+     * Whether the group still has a row in user_vo_groups at all. A failed
+     * acquire can't otherwise distinguish "still locked" from "the group's
+     * row is simply gone" (deleted mid-sync) - both look like 0 affected
+     * rows on the conditional UPDATE.
+     */
+    public function groupExists(string $voGroupId): bool {
+        $qb = $this->connection->getQueryBuilder();
+        $qb->select('vo_group_id')
+            ->from('user_vo_groups')
+            ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
+        $result = $qb->executeQuery();
+        $exists = $result->fetch() !== false;
+        $result->closeCursor();
+        return $exists;
+    }
 }

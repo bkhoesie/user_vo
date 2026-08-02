@@ -58,7 +58,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -322,5 +322,72 @@ class GroupSyncServiceTest extends TestCase {
 		$this->assertContains($uid, $members, 'User should be added once the lease is available');
 
 		$this->userManager->get($uid)?->delete();
+	}
+
+	/**
+	 * The blocking path (used by everything except login-time sync) must
+	 * surface genuine lock contention as a distinct, non-500 status - not
+	 * indistinguishable from a real sync failure.
+	 */
+	public function testSyncSingleGroupByIdReturns409NotFor500WhenContended(): void {
+		$voGroupId = 'test_contended';
+		$ncGroupId = 'uservo_test_contended';
+
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Contended Group');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Contended Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$lockService = new GroupSyncLockService($this->connection);
+		$lockToken = $lockService->tryAcquire($voGroupId);
+		$this->assertNotNull($lockToken);
+
+		try {
+			$start = microtime(true);
+			$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+			$elapsed = microtime(true) - $start;
+
+			$this->assertFalse($result['success']);
+			$this->assertEquals(409, $result['status_code'], 'Genuine contention must be a distinct status, not a generic 500');
+			$this->assertGreaterThanOrEqual(2.5, $elapsed, 'Should have actually waited close to the bound, not failed immediately');
+		} finally {
+			$lockService->release($voGroupId, $lockToken);
+		}
+	}
+
+	/**
+	 * A group deleted between syncSingleGroupById()'s own pre-check and the
+	 * lock-acquire attempt must fail fast with an accurate message, not burn
+	 * the full bounded wait only to misreport "already in progress" for a
+	 * group that no longer exists at all.
+	 */
+	public function testSyncSingleGroupByIdFailsFastWithAccurateMessageWhenGroupDeletedMidSync(): void {
+		$voGroupId = 'test_deleted_midsync';
+		$ncGroupId = 'uservo_test_deleted_midsync';
+
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Deleted Mid-Sync Group');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		// Simulate a concurrent deletion landing between the pre-check (which
+		// already passed once we get here) and the lock-acquire attempt.
+		$backend->method('fetchAllGroups')->willReturnCallback(function () use ($voGroupId) {
+			$qb = $this->connection->getQueryBuilder();
+			$qb->delete('user_vo_groups')
+				->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+				->executeStatement();
+			return [['id' => $voGroupId, 'name' => 'Test Deleted Mid-Sync Group', 'parentid' => null, 'pos' => 1]];
+		});
+
+		$start = microtime(true);
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$elapsed = microtime(true) - $start;
+
+		$this->assertFalse($result['success']);
+		$this->assertEquals('Group no longer exists', $result['error']);
+		$this->assertLessThan(1.0, $elapsed, 'Must fail fast instead of burning the full bounded wait');
 	}
 }

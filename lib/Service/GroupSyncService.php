@@ -15,6 +15,7 @@ use OCP\IDBConnection;
 use OCP\IGroupManager;
 use OCP\IUserManager;
 use OCA\UserVO\UserVOAuth;
+use OCA\UserVO\Service\Exception\GroupSyncLockContentionException;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use function OCP\Log\logger;
 
@@ -43,7 +44,7 @@ use function OCP\Log\logger;
  *     non_vo_member_count: int,
  *     summary: GroupSyncSingleSummary
  * }
- * @psalm-type GroupSyncError = array{success: false, error: string, status_code?: 400|404|500}
+ * @psalm-type GroupSyncError = array{success: false, error: string, status_code?: 400|404|409|500}
  * @psalm-type GroupSyncSingleResult = GroupSyncSingleSuccess|GroupSyncError
  * @psalm-type GroupSyncAllSummary = array{total: int, succeeded: int, failed: int}
  * @psalm-type GroupSyncAllSuccess = array{success: true, message?: string, summary: GroupSyncAllSummary, results: array}
@@ -225,6 +226,7 @@ class GroupSyncService {
                 'error' => $e->getMessage(),
                 'synced' => 0,
                 'failed' => 0,
+                'skipped' => 0,
                 'results' => []
             ];
         }
@@ -317,6 +319,16 @@ class GroupSyncService {
                 ]
             ];
 
+        } catch (GroupSyncLockContentionException $e) {
+            logger('user_vo')->info('Group sync skipped - already in progress', [
+                'vo_group_id' => $voGroupId ?? 'unknown'
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'status_code' => 409
+            ];
         } catch (\Exception $e) {
             logger('user_vo')->error('Failed to sync group', [
                 'vo_group_id' => $voGroupId ?? 'unknown',
@@ -483,9 +495,18 @@ class GroupSyncService {
                 ];
             }
         } else {
+            // Check existence first, before waiting: a failed acquire can't otherwise
+            // tell "still locked" apart from "the group's row is simply gone" (deleted
+            // mid-sync) - both look identical (0 affected rows) to the conditional
+            // UPDATE, and waiting the full bound just to report the wrong reason isn't
+            // worth it.
+            if (!$this->lockService->groupExists($voGroupId)) {
+                throw new \Exception('Group no longer exists');
+            }
+
             $lockToken = $this->lockService->acquireWithBoundedWait($voGroupId, self::LOCK_WAIT_SECONDS);
             if ($lockToken === null) {
-                throw new \Exception('Group sync already in progress, please try again shortly');
+                throw new GroupSyncLockContentionException('Group sync already in progress, please try again shortly');
             }
         }
 
