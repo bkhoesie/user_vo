@@ -213,4 +213,76 @@ class ConfigServiceTest extends TestCase {
 
 		$this->assertSame('config.php', $source);
 	}
+
+	/**
+	 * Test per-field source reporting: per-field precedence, not the whole-config
+	 * verdict getConfigurationSource() gives - a config.php URL alongside an
+	 * admin-interface-only password should report each field's own source.
+	 */
+	public function testGetConfigurationSourcesReportsMixedSourcesPerField(): void {
+		$this->config->method('getSystemValue')
+			->with('user_backends', [])
+			->willReturn([
+				[
+					'class' => '\OCA\UserVO\UserVOAuth',
+					'arguments' => ['https://vo.example/org', 'apiuser', '']
+				]
+			]);
+		$this->config->method('getAppValue')
+			->willReturnCallback(fn($app, $key, $default) => $key === 'api_password' ? 'adminpass' : $default);
+
+		$sources = $this->configService->getConfigurationSources();
+
+		$this->assertSame('config.php', $sources['api_url']);
+		$this->assertSame('config.php', $sources['api_username']);
+		$this->assertSame('admin_interface', $sources['api_password']);
+	}
+
+	public function testGetConfigurationSourcesReportsNullForUnsetFields(): void {
+		$this->config->method('getSystemValue')->willReturn([]);
+		$this->config->method('getAppValue')->willReturnCallback(fn($app, $key, $default) => $default);
+
+		$sources = $this->configService->getConfigurationSources();
+
+		$this->assertNull($sources['api_url']);
+		$this->assertNull($sources['api_username']);
+		$this->assertNull($sources['api_password']);
+	}
+
+	public function testGetConfigurationSourcesAllFromAdminInterface(): void {
+		$this->config->method('getSystemValue')->willReturn([]);
+		$this->config->method('getAppValue')
+			->willReturnCallback(fn($app, $key, $default) => match ($key) {
+				'api_url' => 'https://vo.example/org',
+				'api_username' => 'apiuser',
+				'api_password' => 'apipass',
+				default => $default,
+			});
+
+		$sources = $this->configService->getConfigurationSources();
+
+		$this->assertSame('admin_interface', $sources['api_url']);
+		$this->assertSame('admin_interface', $sources['api_username']);
+		$this->assertSame('admin_interface', $sources['api_password']);
+	}
+
+	public function testGetConfigurationSourcesIgnoresEmptyConfigPhpArguments(): void {
+		// A config.php backend entry with an empty-string URL must not count as
+		// "config.php provides this field" - falls through to admin_interface/null.
+		$this->config->method('getSystemValue')
+			->with('user_backends', [])
+			->willReturn([
+				[
+					'class' => '\OCA\UserVO\UserVOAuth',
+					'arguments' => ['', 'apiuser', 'apipass']
+				]
+			]);
+		$this->config->method('getAppValue')->willReturnCallback(fn($app, $key, $default) => $default);
+
+		$sources = $this->configService->getConfigurationSources();
+
+		$this->assertNull($sources['api_url'], 'Empty config.php argument must not count as a config.php source');
+		$this->assertSame('config.php', $sources['api_username']);
+		$this->assertSame('config.php', $sources['api_password']);
+	}
 }

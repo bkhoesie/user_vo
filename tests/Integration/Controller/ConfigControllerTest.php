@@ -165,6 +165,88 @@ class ConfigControllerTest extends NextcloudTestCase {
 		$this->assertNotEmpty($this->config->getAppValue('user_vo', 'api_password', ''));
 	}
 
+	// --- testConfiguration() ---
+	// $this->apiClient is real (raw curl, not mockable - see ApiClientTest's scope note), so
+	// these can't reach a genuine success response; they cover the validation branches that
+	// run before any network call, plus the password-precedence resolution combined with a
+	// guaranteed-refused connection (http://127.0.0.1:1) to confirm resolution actually
+	// happened without needing a live VO server.
+
+	public function testTestConfigurationFailsWithMissingFields() {
+		$this->config->deleteAppValue('user_vo', 'api_password');
+		$this->request->method('getParam')->willReturnCallback(fn($key, $default) => $default);
+
+		$response = $this->controller->testConfiguration();
+		$this->assertEquals(400, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertFalse($data['success']);
+		$this->assertStringContainsString('required for testing', $data['message']);
+	}
+
+	public function testTestConfigurationFailsWithInvalidURL() {
+		$this->request->method('getParam')
+			->willReturnCallback(function ($key, $default) {
+				$params = ['api_url' => 'not-a-valid-url', 'api_username' => 'u', 'api_password' => 'p'];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $this->controller->testConfiguration();
+		$this->assertEquals(400, $response->getStatus());
+
+		$data = $response->getData();
+		$this->assertFalse($data['success']);
+		$this->assertStringContainsString('Invalid API URL', $data['message']);
+	}
+
+	public function testTestConfigurationResolvesPasswordFromDatabaseInAdminInterfaceMode() {
+		// url + username given directly, no password param - admin-interface-mode precedence
+		// must resolve the password from the database, not treat it as still missing.
+		$this->config->setAppValue('user_vo', 'api_password', 'dbpass');
+		$this->request->method('getParam')
+			->willReturnCallback(function ($key, $default) {
+				$params = ['api_url' => 'http://127.0.0.1:1/', 'api_username' => 'u'];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $this->controller->testConfiguration();
+
+		// If the password hadn't resolved, this would 400 "required for testing" instead -
+		// reaching the network call (which then fails to connect) proves resolution worked.
+		$this->assertEquals(500, $response->getStatus());
+		$data = $response->getData();
+		$this->assertFalse($data['success']);
+		$this->assertStringContainsString('Configuration test failed', $data['message']);
+	}
+
+	public function testTestConfigurationFallsBackToFullPrecedenceWhenUrlAndUsernameMissing() {
+		// No url/username/password params at all, and nothing configured anywhere -
+		// exercises the config.php-mode precedence branch (ConfigService::loadConfiguration),
+		// which here still resolves to empty, so validation correctly still fails.
+		$this->config->deleteAppValue('user_vo', 'api_url');
+		$this->config->deleteAppValue('user_vo', 'api_username');
+		$this->config->deleteAppValue('user_vo', 'api_password');
+		$this->request->method('getParam')->willReturnCallback(fn($key, $default) => $default);
+
+		$response = $this->controller->testConfiguration();
+
+		$this->assertEquals(400, $response->getStatus());
+		$this->assertStringContainsString('required for testing', $response->getData()['message']);
+	}
+
+	public function testTestConfigurationReachesApiWithAllFieldsProvidedDirectly() {
+		$this->request->method('getParam')
+			->willReturnCallback(function ($key, $default) {
+				$params = ['api_url' => 'http://127.0.0.1:1/', 'api_username' => 'u', 'api_password' => 'p'];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $this->controller->testConfiguration();
+
+		$this->assertEquals(500, $response->getStatus());
+		$this->assertStringContainsString('Configuration test failed', $response->getData()['message']);
+	}
+
 	public function testClearConfigurationSucceeds() {
 		// Set some configuration first
 		$this->config->setAppValue('user_vo', 'api_url', 'https://example.com');
