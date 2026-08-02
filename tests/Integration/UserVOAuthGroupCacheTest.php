@@ -23,6 +23,15 @@ use Test\TestCase;
  * that specific call used it. So any admin action that creates or lists
  * groups already keeps the next login-triggered cached read fresh.
  *
+ * fetchAllGroups() also has a request-scoped (per-instance) memo, separate
+ * from the allowCached TTL cache: once a live fetch succeeds, that same
+ * UserVOAuth instance reuses it for the rest of its lifetime regardless of
+ * $allowCached, so e.g. bulk-creating N groups (which auto-syncs each one
+ * right after, each doing its own fetchAllGroups() call on the same backend)
+ * doesn't hit the API N times. This means "does allowCached: false always
+ * hit the API" is only true for a fresh instance - tests of that property
+ * use two separate createBackend() calls, not two calls on the same one.
+ *
  * Also overrides ICacheFactory so createDistributed() always returns the
  * same in-memory ICache instance. Under PHPUnit, Nextcloud forces all cache
  * backends to OC\Memcache\ArrayCache for test isolation (see
@@ -90,14 +99,33 @@ class UserVOAuthGroupCacheTest extends TestCase {
 		return new UserVOAuth(self::API_URL, 'apiuser', 'apipass');
 	}
 
-	public function testAllowCachedFalseAlwaysHitsTheApi(): void {
+	public function testAllowCachedFalseAlwaysHitsTheApiForAFreshInstance(): void {
 		$apiClient = $this->mockApiClient();
 		$apiClient->expects($this->exactly(2))->method('makeRequest')
 			->willReturn([['id' => '1', 'name' => 'Group 1', 'parentid' => null, 'pos' => 1]]);
 
+		// Two separate instances, matching two separate admin requests - the
+		// per-instance memo (see testLiveFetchIsMemoizedForTheRestOfTheInstanceLifetime)
+		// must not carry over between them.
+		$this->createBackend()->fetchAllGroups(allowCached: false);
+		$this->createBackend()->fetchAllGroups(allowCached: false);
+	}
+
+	public function testLiveFetchIsMemoizedForTheRestOfTheInstanceLifetime(): void {
+		$apiClient = $this->mockApiClient();
+		$apiClient->expects($this->once())->method('makeRequest')
+			->willReturn([['id' => '1', 'name' => 'Group 1', 'parentid' => null, 'pos' => 1]]);
+
+		// Simulates bulkCreateGroups() calling fetchAllGroups() once itself,
+		// then once more per created group via each group's own auto-sync -
+		// all on the same backend instance.
 		$backend = $this->createBackend();
-		$backend->fetchAllGroups(allowCached: false);
-		$backend->fetchAllGroups(allowCached: false);
+		$first = $backend->fetchAllGroups(allowCached: false);
+		$second = $backend->fetchAllGroups(allowCached: false);
+		$third = $backend->fetchAllGroups(allowCached: true);
+
+		$this->assertEquals($first, $second);
+		$this->assertEquals($first, $third);
 	}
 
 	public function testAllowCachedTrueServesSecondCallFromCache(): void {
@@ -118,11 +146,13 @@ class UserVOAuthGroupCacheTest extends TestCase {
 			['id' => '1', 'name' => 'Group 1', 'parentid' => null, 'pos' => 1, 'extra_field' => 'should not survive caching'],
 		]);
 
-		$backend = $this->createBackend();
-		$live = $backend->fetchAllGroups(allowCached: true);
+		$live = $this->createBackend()->fetchAllGroups(allowCached: true);
 		$this->assertArrayHasKey('extra_field', $live[0], 'A live fetch should return the full data');
 
-		$cached = $backend->fetchAllGroups(allowCached: true);
+		// A fresh instance, so this reads the external TTL cache rather than
+		// the first instance's own request-scoped memo (which holds the full,
+		// untrimmed data).
+		$cached = $this->createBackend()->fetchAllGroups(allowCached: true);
 		$this->assertArrayNotHasKey('extra_field', $cached[0], 'The cached projection must be trimmed to id/name/parentid/pos');
 		$this->assertEquals('1', $cached[0]['id']);
 		$this->assertEquals('Group 1', $cached[0]['name']);
@@ -133,53 +163,56 @@ class UserVOAuthGroupCacheTest extends TestCase {
 		$apiClient->expects($this->once())->method('makeRequest')
 			->willReturn([['id' => '1', 'name' => 'Group 1', 'parentid' => null, 'pos' => 1]]);
 
-		$backend = $this->createBackend();
-		$backend->fetchAllGroups(allowCached: false);
-		// Should be served from the cache the first call populated, not a second API hit.
-		$cached = $backend->fetchAllGroups(allowCached: true);
+		$this->createBackend()->fetchAllGroups(allowCached: false);
+		// A fresh instance, so this can only be served from the external cache
+		// the first instance's live fetch populated - not that instance's own
+		// request-scoped memo, which a different instance never sees.
+		$cached = $this->createBackend()->fetchAllGroups(allowCached: true);
 		$this->assertNotNull($cached);
 	}
 
 	/**
-	 * @return ApiClient A mock whose makeRequest() succeeds on the first call
-	 *     and returns null (simulating a failed live fetch) on every call
-	 *     after that. UserVOAuth resolves and caches its ApiClient once at
-	 *     construction time, so a test that needs "succeeds, then later
-	 *     fails" on the *same* backend instance must vary one mock's
-	 *     behavior across calls rather than swapping the registered service
-	 *     mid-test (which a constructed backend would never see).
+	 * Registers a mock ApiClient whose makeRequest() always fails (returns
+	 * null), for use with a fresh, not-yet-successful backend instance - a
+	 * backend whose own request-scoped memo already holds a prior success
+	 * would never even attempt this mock's call, per
+	 * testLiveFetchIsMemoizedForTheRestOfTheInstanceLifetime.
 	 */
-	private function mockApiClientSucceedingOnceThenFailing(): ApiClient {
+	private function mockFailingApiClient(): void {
 		$apiClient = $this->mockApiClient();
-		$callCount = 0;
-		$apiClient->method('makeRequest')->willReturnCallback(function () use (&$callCount) {
-			$callCount++;
-			return $callCount === 1 ? [['id' => '1', 'name' => 'Group 1', 'parentid' => null, 'pos' => 1]] : null;
-		});
-		return $apiClient;
+		$apiClient->method('makeRequest')->willReturn(null);
 	}
 
 	public function testAllowCachedTrueFallsBackToStaleCacheWhenLiveFetchFails(): void {
-		$this->mockApiClientSucceedingOnceThenFailing();
-		$backend = $this->createBackend();
-		$backend->fetchAllGroups(allowCached: true);
+		$apiClient = $this->mockApiClient();
+		$apiClient->method('makeRequest')->willReturn(
+			[['id' => '1', 'name' => 'Group 1', 'parentid' => null, 'pos' => 1]]
+		);
+		// A separate instance populates the external stale-fallback cache -
+		// using the same instance here would let its own memo (not the
+		// external cache) satisfy the second call below, per
+		// testLiveFetchIsMemoizedForTheRestOfTheInstanceLifetime.
+		$this->createBackend()->fetchAllGroups(allowCached: true);
 
 		// Simulate the short-lived entry expiring (TTL passed) while the
 		// longer-lived stale fallback is still present.
 		$this->cache->remove(md5(self::API_URL));
 
-		// The second call's live fetch now fails (per the mock above).
-		$result = $backend->fetchAllGroups(allowCached: true);
+		$this->mockFailingApiClient();
+		$result = $this->createBackend()->fetchAllGroups(allowCached: true);
 		$this->assertNotNull($result, 'Should fall back to the stale cached copy instead of failing outright');
 		$this->assertEquals('1', $result[0]['id']);
 	}
 
 	public function testAllowCachedFalseReturnsNullOnFailureEvenWithAStaleCacheAvailable(): void {
-		$this->mockApiClientSucceedingOnceThenFailing();
-		$backend = $this->createBackend();
-		$backend->fetchAllGroups(allowCached: true);
+		$apiClient = $this->mockApiClient();
+		$apiClient->method('makeRequest')->willReturn(
+			[['id' => '1', 'name' => 'Group 1', 'parentid' => null, 'pos' => 1]]
+		);
+		$this->createBackend()->fetchAllGroups(allowCached: true);
 
+		$this->mockFailingApiClient();
 		// Admin/always-fresh callers must fail loudly, never silently serve stale data.
-		$this->assertNull($backend->fetchAllGroups(allowCached: false));
+		$this->assertNull($this->createBackend()->fetchAllGroups(allowCached: false));
 	}
 }

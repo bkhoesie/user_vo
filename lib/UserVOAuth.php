@@ -29,6 +29,8 @@ class UserVOAuth extends Base {
     private $config;
     private $configService;
     private $apiClient;
+    /** @var array|null Request-scoped memo for fetchAllGroups() - see that method. */
+    private ?array $liveGroupsFetchMemo = null;
 
     public function __construct($apiUrl = null, $username = null, $password = null, IConfig $config = null) {
         parent::__construct('user_vo');
@@ -267,6 +269,19 @@ class UserVOAuth extends Base {
      *     served from cache).
      */
     public function fetchAllGroups(bool $allowCached = false): ?array {
+        // Request-scoped memo, independent of the allowCached TTL cache above:
+        // a single UserVOAuth instance can end up doing a live fetchAllGroups()
+        // call once per group in a loop (e.g. bulk-creating N groups, each
+        // auto-syncing its own membership right after creation) - reusing the
+        // first live result for the rest of this instance's lifetime avoids
+        // N-1 redundant live fetches in one request without weakening the
+        // "admin wants fresh data" guarantee (still fresh as of request start).
+        // Only a successful fetch is memoized - a failure isn't, so a
+        // transient error on one group doesn't suppress retrying for the rest.
+        if ($this->liveGroupsFetchMemo !== null) {
+            return $this->liveGroupsFetchMemo;
+        }
+
         $cache = \OC::$server->get(\OCP\ICacheFactory::class)->createDistributed('user_vo-groups');
         $cacheKey = md5($this->apiUrl);
 
@@ -307,6 +322,7 @@ class UserVOAuth extends Base {
         ], $listResponse);
         $cache->set($cacheKey, $projection, self::GROUP_CACHE_TTL_SECONDS);
         $cache->set($cacheKey . '-stale', $projection, self::GROUP_CACHE_STALE_TTL_SECONDS);
+        $this->liveGroupsFetchMemo = $listResponse;
 
         return $listResponse;
     }
