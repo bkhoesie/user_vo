@@ -58,7 +58,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -251,6 +251,41 @@ class GroupSyncServiceTest extends TestCase {
 		$dbResult->closeCursor();
 
 		$this->assertEquals(1, $row['deleted_in_vo']);
+	}
+
+	/**
+	 * Same "missing from the fetched VO group map" shape as above, but via
+	 * the non-blocking (login) path - the only path that can ever see a
+	 * cached/stale map, not a guaranteed-live one. A group missing from a
+	 * possibly-stale snapshot isn't trustworthy evidence it was actually
+	 * deleted, so deleted_in_vo must NOT get set here, unlike the blocking
+	 * path above.
+	 */
+	public function testNonBlockingSyncDoesNotFlagDeletedInVoFromAPossiblyStaleMap() {
+		$ncGroup = $this->groupManager->createGroup('uservo_test_nonblocking_missing');
+		$this->assertNotNull($ncGroup);
+		$this->createTestGroupInDB('test_nonblocking_missing', 'uservo_test_nonblocking_missing', 'Test Group Maybe Gone');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'some_other_group', 'name' => 'Still There', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->syncGroupsByIds(['test_nonblocking_missing'], $backend, nonBlocking: true);
+
+		$this->assertTrue($result['success']);
+		$this->assertEquals(1, $result['synced']);
+
+		$qb = $this->connection->getQueryBuilder();
+		$qb->select('deleted_in_vo', 'vo_group_name')
+			->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter('test_nonblocking_missing')));
+		$dbResult = $qb->executeQuery();
+		$row = $dbResult->fetch();
+		$dbResult->closeCursor();
+
+		$this->assertEquals(0, $row['deleted_in_vo'], 'Must not flag deletion from a map that might just be a stale/cached snapshot');
+		$this->assertEquals('Test Group Maybe Gone', $row['vo_group_name'], 'Should still keep the last-known name, same as the blocking path');
 	}
 
 	/**

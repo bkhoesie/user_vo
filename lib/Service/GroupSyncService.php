@@ -535,7 +535,11 @@ class GroupSyncService {
         }
 
         try {
-            return $this->syncSingleGroupFullLocked($voGroupId, $ncGroupId, $storedVOName, $voGroupMap);
+            // $nonBlocking (the login path) may have fetched $voGroupMap from a
+            // cache rather than live - a group missing from a stale snapshot isn't
+            // trustworthy evidence it was actually deleted in VO, so only a
+            // guaranteed-live fetch (every other caller) may set deleted_in_vo.
+            return $this->syncSingleGroupFullLocked($voGroupId, $ncGroupId, $storedVOName, $voGroupMap, mayDetectDeletion: !$nonBlocking);
         } finally {
             $this->lockService->release($voGroupId, $lockToken);
         }
@@ -543,8 +547,14 @@ class GroupSyncService {
 
     /**
      * The actual sync body, only ever called with the group's sync lease held.
+     *
+     * @param bool $mayDetectDeletion Whether $voGroupMap is trustworthy enough
+     *     to conclude a group missing from it was actually deleted in VO - only
+     *     true for a guaranteed-live fetch (a cached/stale map, only possible
+     *     on the login path, might simply be missing the group by coincidence
+     *     of timing, not because it's gone).
      */
-    private function syncSingleGroupFullLocked(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap): array {
+    private function syncSingleGroupFullLocked(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, bool $mayDetectDeletion = true): array {
         // Get stored metadata
         $qb = $this->connection->getQueryBuilder();
         $qb->select('vo_parent_id', 'vo_position')
@@ -561,11 +571,12 @@ class GroupSyncService {
         $storedVOParentId = $groupRow['vo_parent_id'];
         $storedVOPosition = $groupRow['vo_position'] ? (int)$groupRow['vo_position'] : null;
 
-        // Get current VO metadata (or use stored values if group deleted in VO)
+        // Get current VO metadata (or use stored values if group deleted in VO,
+        // or if the group is merely absent from a map we can't fully trust)
         $currentVOGroup = $voGroupMap[$voGroupId] ?? null;
-        $groupDeletedInVO = ($currentVOGroup === null);
+        $groupDeletedInVO = $mayDetectDeletion && ($currentVOGroup === null);
 
-        if ($groupDeletedInVO) {
+        if ($currentVOGroup === null) {
             $currentVOName = $storedVOName;
             $currentVOParentId = $storedVOParentId;
             $currentVOPosition = $storedVOPosition;
