@@ -777,6 +777,7 @@ class UserVOAuth extends Base {
                     'uid' => $uid,
                     'synced' => $result['synced'],
                     'failed' => $result['failed'],
+                    'skipped' => $result['skipped'],
                     'total_groups' => count($allGroupIdsToSync),
                     'old_groups' => count($oldVoGroupIds),
                     'new_groups' => count($newVoGroupIds)

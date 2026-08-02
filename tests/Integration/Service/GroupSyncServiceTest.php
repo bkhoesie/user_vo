@@ -301,7 +301,9 @@ class GroupSyncServiceTest extends TestCase {
 
 			$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
 			$this->assertTrue($result['success']);
-			$this->assertEmpty($result['results'][0]['added'], 'Locked sync must not report any membership change');
+			$this->assertEquals(1, $result['skipped'], 'A lock-contended sync must be counted as skipped, not synced');
+			$this->assertEquals(0, $result['synced']);
+			$this->assertEquals('skipped', $result['results'][0]['status'], 'Must be reported distinctly from a real success - not indistinguishable from an empty sync');
 
 			$ncGroup = $this->groupManager->get($ncGroupId);
 			$members = array_map(fn ($u) => $u->getUID(), $ncGroup->getUsers());

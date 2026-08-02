@@ -48,7 +48,7 @@ use function OCP\Log\logger;
  * @psalm-type GroupSyncAllSummary = array{total: int, succeeded: int, failed: int}
  * @psalm-type GroupSyncAllSuccess = array{success: true, message?: string, summary: GroupSyncAllSummary, results: array}
  * @psalm-type GroupSyncAllResult = GroupSyncAllSuccess|GroupSyncError
- * @psalm-type GroupSyncByIdsResult = array{success: bool, error?: string, synced: int, failed: int, results: array}
+ * @psalm-type GroupSyncByIdsResult = array{success: bool, error?: string, synced: int, failed: int, skipped: int, results: array}
  */
 class GroupSyncService {
     /** Bounded wait for admin/cron syncs contending on an already-locked group. */
@@ -98,6 +98,7 @@ class GroupSyncService {
                     'success' => true,
                     'synced' => 0,
                     'failed' => 0,
+                    'skipped' => 0,
                     'results' => []
                 ];
             }
@@ -117,6 +118,7 @@ class GroupSyncService {
                     'success' => true,
                     'synced' => 0,
                     'failed' => 0,
+                    'skipped' => 0,
                     'results' => []
                 ];
             }
@@ -130,6 +132,7 @@ class GroupSyncService {
                     'error' => 'Failed to fetch groups from VereinOnline',
                     'synced' => 0,
                     'failed' => 0,
+                    'skipped' => 0,
                     'results' => []
                 ];
             }
@@ -145,6 +148,7 @@ class GroupSyncService {
             // Sync each group
             $syncedCount = 0;
             $failedCount = 0;
+            $skippedCount = 0;
             $results = [];
 
             foreach ($managedGroups as $groupRow) {
@@ -154,6 +158,22 @@ class GroupSyncService {
 
                 try {
                     $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $voGroupName, $voGroupMap, $nonBlocking);
+
+                    if ($syncResult['locked'] ?? false) {
+                        // Another sync already holds this group's lease (only reachable
+                        // in non-blocking/login mode) - nothing was touched, so this must
+                        // not be counted or reported the same as an actual successful sync.
+                        $results[] = [
+                            'vo_group_id' => $voGroupId,
+                            'vo_group_name' => $voGroupName,
+                            'nc_group_id' => $ncGroupId,
+                            'status' => 'skipped',
+                            'reason' => 'Sync already in progress for this group'
+                        ];
+                        $skippedCount++;
+                        continue;
+                    }
+
                     $results[] = [
                         'vo_group_id' => $voGroupId,
                         'vo_group_name' => $voGroupName,
@@ -179,10 +199,19 @@ class GroupSyncService {
                 }
             }
 
+            if ($skippedCount > 0) {
+                logger('user_vo')->info('Some group syncs were skipped due to lock contention', [
+                    'skipped' => $skippedCount,
+                    'synced' => $syncedCount,
+                    'failed' => $failedCount
+                ]);
+            }
+
             return [
                 'success' => true,
                 'synced' => $syncedCount,
                 'failed' => $failedCount,
+                'skipped' => $skippedCount,
                 'results' => $results
             ];
 
@@ -450,6 +479,7 @@ class GroupSyncService {
                     'member_count' => 0,
                     'vo_member_count' => 0,
                     'non_vo_member_count' => 0,
+                    'locked' => true,
                 ];
             }
         } else {

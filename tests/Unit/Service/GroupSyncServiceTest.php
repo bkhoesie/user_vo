@@ -195,4 +195,48 @@ class GroupSyncServiceTest extends TestCase {
 		$this->assertEquals(0, $result['failed']);
 		$this->assertEmpty($result['results']);
 	}
+
+	/**
+	 * A group skipped due to lock contention (non-blocking mode) must be
+	 * counted and reported distinctly from an actual successful sync - not
+	 * indistinguishable "success" with fabricated empty results. Otherwise a
+	 * perpetually-contended group's login-time syncs would look healthy in
+	 * logs/summaries while never actually running.
+	 */
+	public function testSyncGroupsByIdsReportsSkippedSeparatelyFromSynced() {
+		$qb = $this->createMock(IQueryBuilder::class);
+		$queryResult = $this->createMock(IResult::class);
+		$queryResult->method('fetchAll')->willReturn([
+			['vo_group_id' => '123', 'vo_group_name' => 'Group 123', 'nc_group_id' => 'uservo_123'],
+		]);
+
+		$expr = $this->createMock(\OCP\DB\QueryBuilder\IExpressionBuilder::class);
+		$qb->method('select')->willReturnSelf();
+		$qb->method('from')->willReturnSelf();
+		$qb->method('where')->willReturnSelf();
+		$qb->method('andWhere')->willReturnSelf();
+		$qb->method('expr')->willReturn($expr);
+		$qb->method('createNamedParameter')->willReturnArgument(0);
+		$qb->method('executeQuery')->willReturn($queryResult);
+
+		$this->connection->method('getQueryBuilder')->willReturn($qb);
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => '123', 'name' => 'Group 123', 'parentid' => null, 'pos' => 1]
+		]);
+
+		// Deny lock acquisition entirely, forcing every group down the skip path.
+		$lockService = $this->createMock(GroupSyncLockService::class);
+		$lockService->method('tryAcquire')->willReturn(null);
+		$service = new GroupSyncService($this->connection, $this->groupManager, $this->userManager, $this->harmonizer, $lockService);
+
+		$result = $service->syncGroupsByIds(['123'], $backend, nonBlocking: true);
+
+		$this->assertTrue($result['success']);
+		$this->assertEquals(0, $result['synced']);
+		$this->assertEquals(1, $result['skipped']);
+		$this->assertEquals(0, $result['failed']);
+		$this->assertEquals('skipped', $result['results'][0]['status']);
+	}
 }
