@@ -123,6 +123,38 @@ class GroupManagementServiceTest extends TestCase {
 	}
 
 	/**
+	 * Test that a concurrent create for the same VO group - i.e. two calls that both
+	 * pass createGroup()'s check-then-insert existence check before either has
+	 * inserted - fails gracefully via the unique index instead of throwing. Simulated
+	 * by calling the private insert helper directly twice, bypassing the pre-check
+	 * both real callers (createGroup(), bulkCreateGroups()) do before reaching it.
+	 */
+	public function testConcurrentCreateOfSameGroupReturnsErrorInsteadOfDuplicateRow(): void {
+		$groupData = ['id' => 'test_789', 'name' => 'Test Race Group', 'parent_id' => null, 'pos' => 1];
+		$allGroups = [$groupData];
+
+		$ref = new \ReflectionMethod(GroupManagementService::class, 'createGroupFromData');
+		$ref->setAccessible(true);
+
+		$first = $ref->invoke($this->service, 'test_789', $groupData, $allGroups);
+		$this->assertTrue($first['success'], $first['error'] ?? '');
+
+		// Second "racer" - the DB insert underneath must reject this, not create a
+		// second row for the same vo_group_id/nc_group_id.
+		$second = $ref->invoke($this->service, 'test_789', $groupData, $allGroups);
+		$this->assertFalse($second['success']);
+		$this->assertEquals('Group is already managed', $second['error']);
+		$this->assertEquals(409, $second['status_code']);
+
+		$qb = $this->connection->getQueryBuilder();
+		$rows = $qb->select('*')
+			->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter('test_789')))
+			->executeQuery()->fetchAll();
+		$this->assertCount(1, $rows, 'Exactly one row should exist for the group, not a duplicate');
+	}
+
+	/**
 	 * Test deleting a group removes from database and NC
 	 */
 	public function testDeleteGroupRemovesFromDatabase(): void {

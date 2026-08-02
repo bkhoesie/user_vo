@@ -510,7 +510,21 @@ class GroupManagementService {
                 'vo_member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
                 'non_vo_member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
             ]);
-        $insertQb->executeStatement();
+        try {
+            $insertQb->executeStatement();
+        } catch (\OCP\DB\Exception $e) {
+            if ($e->getReason() !== \OCP\DB\Exception::REASON_UNIQUE_CONSTRAINT_VIOLATION) {
+                throw $e;
+            }
+            // Lost a race with a concurrent create for the same VO group - the other
+            // request's row wins; the NC group we may have just created above is picked
+            // up and adopted by the "already exists" branch on any later retry.
+            return [
+                'success' => false,
+                'error' => 'Group is already managed',
+                'status_code' => 409
+            ];
+        }
 
         return [
             'success' => true,
