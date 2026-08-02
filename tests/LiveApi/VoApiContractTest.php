@@ -15,9 +15,11 @@ use Test\TestCase;
  * test group (see .env.vo-test.example / tests/run-live-api-tests.sh for
  * local setup, or .github/workflows/live-api-tests.yml for CI). Scope is
  * deliberately read-only: VerifyLogin with known-good credentials, GetMember,
- * GetMembers, and groups listing. Deliberately NOT testing a wrong-password
- * path - real VO lockout risk on repeated failed attempts against a real
- * account, not worth it for a contract test.
+ * GetMembers, groups listing, and fetching the test member's real photo
+ * (uploaded specifically to exercise this - see testFetchesRealMemberPhoto()).
+ * Deliberately NOT testing a wrong-password path - real VO lockout risk on
+ * repeated failed attempts against a real account, not worth it for a
+ * contract test.
  *
  * Skipped entirely (not failed) when the VO_TEST_* environment variables
  * aren't set - this suite is opt-in, not part of the regular unit/integration
@@ -108,6 +110,35 @@ class VoApiContractTest extends TestCase {
 		$this->assertNotEmpty($members);
 		$ids = array_column($members, 'id');
 		$this->assertContains($memberId, $ids, 'Test member should appear in the GetMembers listing');
+	}
+
+	public function testFetchesRealMemberPhoto(): void {
+		$memberId = $this->resolveTestMemberId();
+		$backend = $this->createBackend();
+
+		$memberData = $backend->fetchUserDataFromVO($memberId);
+		$foto = $memberData['foto'] ?? '';
+		$this->assertNotSame('', $foto, 'Test member is expected to have a real (non-default) photo set for this check');
+		$this->assertNotSame('anonym.gif', $foto, 'Test member should have a real uploaded photo, not the VO default placeholder');
+
+		// Same URL construction as UserVOAuth::syncUserData() - verifying only
+		// that VO's photo-serving endpoint itself works as our app assumes
+		// (right status, real image bytes), not the app's own download/
+		// validation logic (already covered by the mocked
+		// tests/Integration/SyncUserPhotoTest.php).
+		$photoUrl = rtrim(self::$env['url'], '/') . '/fotos/' . $foto;
+		$response = \OC::$server->get(IClientService::class)->newClient()->get($photoUrl, [
+			'timeout' => 10,
+			'http_errors' => false,
+		]);
+
+		$this->assertSame(200, $response->getStatusCode(), "VO photo endpoint should return 200 for $photoUrl");
+		$body = $response->getBody();
+		$this->assertIsString($body);
+		$this->assertNotEmpty($body);
+
+		$mimeType = (new \finfo(FILEINFO_MIME_TYPE))->buffer($body);
+		$this->assertStringStartsWith('image/', $mimeType, "VO should serve real image bytes for the test member's photo");
 	}
 
 	public function testGetGroupsListsGroupsIncludingTestMemberGroup(): void {
