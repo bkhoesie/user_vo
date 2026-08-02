@@ -104,6 +104,32 @@ class BaseTest extends TestCase {
 		$this->assertTrue($this->base->userExists('oops.test'));
 	}
 
+	/**
+	 * Regression test for two concurrent first-logins of the same brand-new
+	 * user (e.g. two devices at once) both passing storeUser()'s own
+	 * userExists() check before either has inserted. Simulated by invoking
+	 * the private insert helper directly twice, bypassing the pre-check the
+	 * same way two real concurrent requests would.
+	 */
+	public function testConcurrentStoreUserOfSameNewUserDoesNotThrow(): void {
+		$ref = new \ReflectionMethod(\OCA\UserVO\Base::class, 'insertUserRow');
+		$ref->setAccessible(true);
+
+		$ref->invoke($this->base, 'racer.test');
+		// Must not throw - the "losing" racer's insert hits the same
+		// unique (uid, backend) constraint and should be swallowed.
+		$ref->invoke($this->base, 'racer.test');
+
+		$this->assertTrue($this->base->userExists('racer.test'));
+
+		$qb = $this->connection->getQueryBuilder();
+		$rows = $qb->select('uid')->from('user_vo')
+			->where($qb->expr()->eq('backend', $qb->createNamedParameter(self::TEST_BACKEND)))
+			->andWhere($qb->expr()->eq('uid', $qb->createNamedParameter('racer.test')))
+			->executeQuery()->fetchAll();
+		$this->assertCount(1, $rows, 'Exactly one row should exist, not a duplicate');
+	}
+
 	// --- getDisplayName() / getDisplayNames() ---
 
 	public function testGetDisplayNameReturnsStoredName(): void {

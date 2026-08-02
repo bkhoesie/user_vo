@@ -280,20 +280,37 @@ abstract class Base extends \OC\User\Backend {
 			
 			// uid is now clean and lowercase for new users
 			$cleanUid = $uid;
-			
-			$query = \OC::$server->get(\OCP\IDBConnection::class)->getQueryBuilder();
-			$query->insert('user_vo')
-				->values([
-					'uid' => $query->createNamedParameter($uid),
-					'backend' => $query->createNamedParameter($this->backend),
-				]);
-			$query->executeStatement();
+
+			$this->insertUserRow($uid);
 
 			if ($groups) {
 				$createduser = \OC::$server->get(\OCP\IUserManager::class)->get($cleanUid);
 				foreach ($groups as $group) {
 					\OC::$server->get(\OCP\IGroupManager::class)->createGroup($group)->addUser($createduser);
 				}
+			}
+		}
+	}
+
+	/**
+	 * Inserts the user_vo row for a new user. Tolerates losing a race with
+	 * another concurrent first-login for the same uid (e.g. two devices at
+	 * once): the unique (uid, backend) constraint rejects the second insert,
+	 * which is caught and swallowed rather than failing that login, since the
+	 * user exists either way once either insert wins.
+	 */
+	private function insertUserRow(string $uid): void {
+		$query = \OC::$server->get(\OCP\IDBConnection::class)->getQueryBuilder();
+		$query->insert('user_vo')
+			->values([
+				'uid' => $query->createNamedParameter($uid),
+				'backend' => $query->createNamedParameter($this->backend),
+			]);
+		try {
+			$query->executeStatement();
+		} catch (\OCP\DB\Exception $e) {
+			if ($e->getReason() !== \OCP\DB\Exception::REASON_UNIQUE_CONSTRAINT_VIOLATION) {
+				throw $e;
 			}
 		}
 	}
