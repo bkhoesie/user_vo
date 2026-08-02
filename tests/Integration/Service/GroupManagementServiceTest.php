@@ -155,6 +155,42 @@ class GroupManagementServiceTest extends TestCase {
 	}
 
 	/**
+	 * Same race as above, but driven through the public createGroup() entry point
+	 * rather than the private insert helper directly - this is what actually catches
+	 * bugs in how createGroup() maps createGroupFromData()'s result to an HTTP status
+	 * code (a real bug slipped through here: createGroup() unconditionally overwrote
+	 * any failure's status_code to 500, silently turning the 409 above into a 500).
+	 *
+	 * Simulates the race by inserting the "other racer's" row as a side effect of the
+	 * fetchAllGroups() mock call - which runs after createGroup()'s own pre-check but
+	 * before its insert, the same window a real concurrent request would land in.
+	 */
+	public function testCreateGroupReturns409NotFor500WhenRaceLostAtPublicApi(): void {
+		$voGroupId = 'test_race_public';
+		$groupData = ['id' => $voGroupId, 'name' => 'Test Public Race Group', 'parentid' => null, 'pos' => 1];
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturnCallback(function () use ($voGroupId, $groupData) {
+			$this->createTestGroup($voGroupId, $groupData['name'], '1');
+			return [$groupData];
+		});
+
+		$result = $this->service->createGroup($voGroupId, $backend);
+
+		$this->assertFalse($result['success']);
+		$this->assertEquals(409, $result['status_code'], 'A lost create-race must surface as 409, not 500');
+
+		$qb = $this->connection->getQueryBuilder();
+		$rows = $qb->select('*')
+			->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetchAll();
+		$this->assertCount(1, $rows, 'Exactly one row should exist, not a duplicate');
+	}
+
+	/**
 	 * Test deleting a group removes from database and NC
 	 */
 	public function testDeleteGroupRemovesFromDatabase(): void {

@@ -590,9 +590,11 @@ class GroupManagementService {
         // Use shared creation logic
         $result = $this->createGroupFromData($voGroupId, $groupData, $allGroups);
 
-        // Add status codes for HTTP responses
+        // Add status codes for HTTP responses. createGroupFromData() already sets a specific
+        // status_code (e.g. 409 on a lost create-race) on some failure paths - only default to
+        // 500 when it didn't.
         if (!$result['success']) {
-            $result['status_code'] = 500;
+            $result['status_code'] ??= 500;
         } else {
             // Auto-sync group members after successful creation
             try {
