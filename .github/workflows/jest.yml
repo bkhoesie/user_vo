@@ -17,6 +17,7 @@ concurrency:
 jobs:
   jest:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout app
         uses: actions/checkout@v5
@@ -28,7 +29,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: js
-        run: npm install
+        run: npm ci
 
       - name: Run Jest
         working-directory: js

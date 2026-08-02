@@ -20,6 +20,7 @@ env:
 jobs:
   matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       # sparse-matrix pairs every supported server version (both min and max from
       # appinfo/info.xml, not just max) with its OWN compatible PHP version - not just
@@ -39,6 +40,7 @@ jobs:
   phpunit:
     runs-on: ubuntu-latest
     needs: matrix
+    timeout-minutes: 15
 
     strategy:
       fail-fast: false
@@ -96,7 +98,10 @@ jobs:
           USERNAME: admin
           PASSWORD: admin
         run: |
-          sleep 2
+          for i in $(seq 1 20); do
+            curl -sf -o /dev/null http://localhost:8080/ && break
+            sleep 0.5
+          done
           ./tests/smoke/test_api.sh
 
       - name: Print Nextcloud log
