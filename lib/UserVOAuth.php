@@ -18,6 +18,11 @@ use OCA\UserVO\Service\ApiClient;
 use OCA\UserVO\Service\ConfigService;
 
 class UserVOAuth extends Base {
+    /** Fresh cache lifetime for fetchAllGroups(allowCached: true). */
+    private const GROUP_CACHE_TTL_SECONDS = 300;
+    /** Longer-lived fallback used only when a live fetch fails outright. */
+    private const GROUP_CACHE_STALE_TTL_SECONDS = 3600;
+
     private $apiUrl;
     private $username;
     private $password;
@@ -247,16 +252,46 @@ class UserVOAuth extends Base {
     /**
      * Fetch all groups from VereinOnline API
      *
-     * @return array|null Array of groups or null on failure
-     *     Each group: ['id' => string, 'name' => string, ...]
+     * @param bool $allowCached When true, may return a short-lived cached
+     *     result instead of hitting the API, and falls back to a
+     *     longer-lived stale cached result if the live fetch fails outright
+     *     (rather than every metadata hiccup aborting the caller entirely).
+     *     The cached value is a trimmed projection (id/name/parentid/pos
+     *     only, the only fields GroupSyncService's sync body reads) - only
+     *     pass true from a caller that doesn't need any other fields.
+     *     Every successful live fetch refreshes the cache for subsequent
+     *     cached callers, regardless of whether this call used it.
+     * @return array|null Array of groups or null on failure with no usable
+     *     cached fallback. Each group: ['id' => string, 'name' => string, ...]
+     *     (full data on a live fetch; only the projected fields above when
+     *     served from cache).
      */
-    public function fetchAllGroups(): ?array {
+    public function fetchAllGroups(bool $allowCached = false): ?array {
+        $cache = \OC::$server->get(\OCP\ICacheFactory::class)->createDistributed('user_vo-groups');
+        $cacheKey = md5($this->apiUrl);
+
+        if ($allowCached) {
+            $cached = $cache->get($cacheKey);
+            if ($cached !== null) {
+                return $cached;
+            }
+        }
+
         $token = 'A/' . $this->username . '/' . md5($this->password);
         $listUrl = $this->apiUrl . "/?api=GetGroups";
         $listResponse = $this->makeRequest($listUrl, [], $token);
 
         if (!$listResponse || !is_array($listResponse)) {
             logger('user_vo')->error("Failed to fetch groups list from VO");
+
+            if ($allowCached) {
+                $stale = $cache->get($cacheKey . '-stale');
+                if ($stale !== null) {
+                    logger('user_vo')->info("Falling back to stale cached VO groups after a live fetch failure");
+                    return $stale;
+                }
+            }
+
             return null;
         }
 
@@ -264,7 +299,29 @@ class UserVOAuth extends Base {
             'group_count' => count($listResponse)
         ]);
 
+        $projection = array_map(fn ($group) => [
+            'id' => $group['id'] ?? null,
+            'name' => $group['name'] ?? null,
+            'parentid' => $group['parentid'] ?? null,
+            'pos' => $group['pos'] ?? null,
+        ], $listResponse);
+        $cache->set($cacheKey, $projection, self::GROUP_CACHE_TTL_SECONDS);
+        $cache->set($cacheKey . '-stale', $projection, self::GROUP_CACHE_STALE_TTL_SECONDS);
+
         return $listResponse;
+    }
+
+    /**
+     * Clears the cached VO groups list for this backend's configured org, so
+     * the next allowCached fetchAllGroups() call gets fresh data instead of
+     * waiting out the TTL. Call after any admin action that changes which
+     * groups exist in VO (from this app's side - e.g. group creation).
+     */
+    public function invalidateGroupCache(): void {
+        $cache = \OC::$server->get(\OCP\ICacheFactory::class)->createDistributed('user_vo-groups');
+        $cacheKey = md5($this->apiUrl);
+        $cache->remove($cacheKey);
+        $cache->remove($cacheKey . '-stale');
     }
 
     public function fetchMembersMapForUsers(array $targetUsernames): array {

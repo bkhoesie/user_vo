@@ -133,8 +133,12 @@ class GroupSyncService {
                 ];
             }
 
-            // Fetch all VO groups to build the group map (needed for metadata sync)
-            $allVOGroups = $backend->fetchAllGroups();
+            // Fetch all VO groups to build the group map (needed for metadata sync).
+            // Login-time (non-blocking) callers may get a short-lived cached result -
+            // membership sync below doesn't depend on this data at all, only cosmetic
+            // metadata (display name, hierarchy) does, so a stale metadata snapshot on
+            // a login is an acceptable tradeoff against hitting VO on every revalidation.
+            $allVOGroups = $backend->fetchAllGroups(allowCached: $nonBlocking);
 
             if (!$allVOGroups) {
                 return [
