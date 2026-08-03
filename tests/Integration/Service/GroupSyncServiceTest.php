@@ -65,7 +65,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child', 'uservo_test_pos_zero_unchanged'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -251,6 +251,56 @@ class GroupSyncServiceTest extends TestCase {
 			->executeQuery()->fetch();
 
 		$this->assertSame('3.2', $row['vo_position_index'], 'Position index must stay in the dotted hierarchical format GroupManagementService also writes, not a bare depth-first integer');
+	}
+
+	/**
+	 * Regression test: a stored position of 0 must not be treated as "no
+	 * position stored" - $groupRow['vo_position'] is falsy for a real, valid
+	 * position of 0, so a truthy check there (rather than isset()) made
+	 * every sync think a position-0 group's position had "changed" (int 0
+	 * vs. the truthy-check's null), triggering an unnecessary
+	 * vo_position_index recalculation on every single sync of such a group.
+	 */
+	public function testSyncDoesNotRecalculatePositionIndexWhenPositionZeroIsUnchanged(): void {
+		$voGroupId = 'test_pos_zero_unchanged';
+		$ncGroupId = 'uservo_test_pos_zero_unchanged';
+
+		$ncGroup = $this->groupManager->createGroup($ncGroupId);
+		$this->assertNotNull($ncGroup);
+
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo_groups')->values([
+			'vo_group_id' => $qb->createNamedParameter($voGroupId),
+			'vo_group_name' => $qb->createNamedParameter('Pos Zero Unchanged'),
+			'nc_group_id' => $qb->createNamedParameter($ncGroupId),
+			'nc_display_name' => $qb->createNamedParameter('Pos Zero Unchanged'),
+			'vo_parent_id' => $qb->createNamedParameter(null),
+			'vo_position' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			// A sentinel calculatePositionIndex() could never legitimately
+			// produce - if it survives the sync untouched, the recalculation
+			// branch correctly didn't fire; if it's replaced, it did.
+			'vo_position_index' => $qb->createNamedParameter('SENTINEL_UNCHANGED'),
+			'deleted_in_vo' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			'member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			'vo_member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			'non_vo_member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+		])->executeStatement();
+
+		// VO reports the exact same position (0) - nothing actually changed.
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Pos Zero Unchanged', 'parentid' => null, 'pos' => 0],
+		]);
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success']);
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('vo_position_index')->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetch();
+
+		$this->assertSame('SENTINEL_UNCHANGED', $row['vo_position_index'], 'Must not recalculate the position index when nothing about the position/parent actually changed');
 	}
 
 	public function testSyncAllManagedGroupsWithMultipleGroups() {

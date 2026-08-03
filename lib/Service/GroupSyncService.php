@@ -595,7 +595,12 @@ class GroupSyncService {
         }
 
         $storedVOParentId = $groupRow['vo_parent_id'];
-        $storedVOPosition = $groupRow['vo_position'] ? (int)$groupRow['vo_position'] : null;
+        // isset(), not a truthy check - a stored position of 0 is falsy in
+        // PHP but is a real, valid position, not "no position stored"
+        // (matching $currentVOPosition's isset() check below - a mismatch
+        // between the two here previously made every group at position 0
+        // look "changed" on every single sync).
+        $storedVOPosition = isset($groupRow['vo_position']) ? (int)$groupRow['vo_position'] : null;
         $seqAtStart = (int)$groupRow['dirty_seq'];
 
         // Get current VO metadata (or use stored values if group deleted in VO,
