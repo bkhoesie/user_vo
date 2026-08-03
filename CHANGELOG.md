@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-03
+
+### Added
+- **Group Management**: create, sync, and manage Nextcloud groups from VereinOnline groups directly
+  in the admin interface
+  - Hierarchical group display matching VereinOnline's parent/child structure
+  - Create individual groups, or bulk-create/delete
+  - Membership synced automatically on login and via a nightly background job, plus manual/selective sync
+  - Detects groups renamed or deleted in VereinOnline, and flags a group whose Nextcloud
+    counterpart was deleted directly (e.g. via Nextcloud's own group management) - with a
+    "Recreate" action to restore it, or "Delete" to drop the stale tracking entry
+  - Refuses to create or adopt a Nextcloud group already managed by a different backend (e.g.
+    LDAP), so membership sync never silently takes over a group it doesn't fully control
+  - Member count tracking (VereinOnline vs. other members) and a VO Groups column in the user
+    sync table
+- **Audit Log**: a new "Advanced" section in the admin interface recording login failures,
+  account/group creation and deletion, group membership changes, sync failures, and configuration
+  changes - useful for troubleshooting without needing direct access to the server's log file
+  - View recent entries, download the full log as a text file, or clear it
+  - Entries are kept for 7 days by default (configurable)
+
+### User Management
+- Pre-provisioning and account creation now detect when a VereinOnline username collides with an
+  existing local Nextcloud account managed by a different authentication backend, and refuse to
+  provision it - instead of silently creating an ambiguous identity, or misleadingly reporting
+  "account exists"
+- Pre-provisioned accounts now have their VereinOnline group memberships synced immediately on
+  creation, instead of showing empty until first login
+
+### Fixed
+- Fatal errors on Nextcloud 33 and 34 caused by internal Nextcloud APIs being removed upstream -
+  could affect login, user lookup, and the plugin's own startup registration on those versions
+- Several state-changing admin actions (saving configuration, triggering sync) were missing CSRF
+  protection
+- Admin endpoints returned a generic server error, instead of a clear message, when VereinOnline
+  is unreachable or not yet configured
+- Rare data-integrity edge cases under concurrent access: two simultaneous group-creation requests,
+  or two devices logging in as a brand-new user at the same time, could previously create
+  duplicate/conflicting database entries
+- A rare race condition where a user's group membership could be briefly restored right after
+  being removed in VereinOnline, if two synchronization runs overlapped
+- Several crashes triggered by unexpected or incomplete data from the VereinOnline API (missing
+  member name fields, malformed responses, etc.)
+- Date/time displays across the admin interface are now consistently locale-aware and
+  timezone-correct
+
+### Changed
+- `sync_photo` and both nightly sync options now default to enabled for new installs (existing
+  installs that already explicitly set these keep their current value)
+- The `enable_nightly_sync` config key has been renamed to `enable_nightly_user_sync` (existing
+  values are migrated automatically on upgrade)
+
 ## [0.3.3] - 2026-07-30
 
 ### Fixed
@@ -98,7 +150,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial version of the UserVO plugin with username and password support.
 
-[unreleased]: https://github.com/bkhoesie/user_vo/compare/v0.3.3...HEAD
+[unreleased]: https://github.com/bkhoesie/user_vo/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/bkhoesie/user_vo/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/bkhoesie/user_vo/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/bkhoesie/user_vo/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/bkhoesie/user_vo/compare/v0.3.0...v0.3.1
