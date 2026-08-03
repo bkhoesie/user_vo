@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\UserVO\Service;
 
 use OCP\IDBConnection;
+use function OCP\Log\logger;
 
 /**
  * DB-backed audit trail (user_vo_audit_log, see Version1006 migration) for
@@ -32,19 +33,33 @@ class AuditLogService {
         $this->connection = $connection;
     }
 
+    /**
+     * Best-effort: a failure to write an audit entry must never break the
+     * operation it's recording (login, account/group creation, config save,
+     * ...), most of which call this unguarded on the assumption that logging
+     * is a side effect, not something that can fail the request. Any error
+     * is caught and reported to the regular server log instead.
+     */
     public function log(string $eventType, ?string $uid, ?string $groupId, string $message): void {
-        $qb = $this->connection->getQueryBuilder();
-        $qb->insert('user_vo_audit_log')
-            ->values([
-                // Literal 'datetime' rather than IQueryBuilder::PARAM_DATE: see
-                // GroupSyncLockService for why (NC 28-30 compat).
-                'created_at' => $qb->createNamedParameter(new \DateTime(), 'datetime'),
-                'event_type' => $qb->createNamedParameter($eventType),
-                'uid' => $qb->createNamedParameter($uid),
-                'group_id' => $qb->createNamedParameter($groupId),
-                'message' => $qb->createNamedParameter($message),
-            ])
-            ->executeStatement();
+        try {
+            $qb = $this->connection->getQueryBuilder();
+            $qb->insert('user_vo_audit_log')
+                ->values([
+                    // Literal 'datetime' rather than IQueryBuilder::PARAM_DATE: see
+                    // GroupSyncLockService for why (NC 28-30 compat).
+                    'created_at' => $qb->createNamedParameter(new \DateTime(), 'datetime'),
+                    'event_type' => $qb->createNamedParameter($eventType),
+                    'uid' => $qb->createNamedParameter($uid),
+                    'group_id' => $qb->createNamedParameter($groupId),
+                    'message' => $qb->createNamedParameter($message),
+                ])
+                ->executeStatement();
+        } catch (\Throwable $e) {
+            logger('user_vo')->error('Failed to write audit log entry: ' . $e->getMessage(), [
+                'event_type' => $eventType,
+                'exception' => $e,
+            ]);
+        }
     }
 
     /**
