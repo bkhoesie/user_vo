@@ -453,7 +453,7 @@ This is **critical for PHP files** that might contain credentials (config files,
 **What gets synced:**
 - ✅ Display name (firstname + lastname) - always enabled
 - ✅ Email address - configurable (enabled by default)
-- ✅ Profile photo - configurable (disabled by default)
+- ✅ Profile photo - configurable (enabled by default)
 
 **Important:** Manual changes to user data in Nextcloud will be overwritten on next sync.
 
@@ -474,7 +474,10 @@ When upgrading to v0.3.0, the first sync automatically populates VO user IDs for
 ### Nightly Sync Configuration
 
 Background job settings (in admin interface):
-- **Disabled by default** - must be explicitly enabled
+- **Enabled by default** for both user and group sync - can be disabled per-install. Existing
+  installs that never explicitly saved a nightly-sync setting are backfilled to enabled on
+  upgrade (`ApplyUpdatedSyncDefaults` repair step); an install that ever explicitly saved a value,
+  true or false, keeps it unchanged.
 - **Interval**: Runs every 24 hours
 - **Execution tracking**: Stores last run time, status, error messages, sync summary
 - **Admin visibility**: Shows Last run → Status → Summary with color-coded badges

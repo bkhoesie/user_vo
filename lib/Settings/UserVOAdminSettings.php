@@ -26,7 +26,7 @@ class UserVOAdminSettings implements ISettings {
         // Get sync settings
         $syncSettings = [
             'sync_email' => $this->configService->get('sync_email', 'true'),
-            'sync_photo' => $this->configService->get('sync_photo', 'false')
+            'sync_photo' => $this->configService->get('sync_photo', 'true')
         ];
 
         // Count managed VO groups for display
@@ -44,8 +44,8 @@ class UserVOAdminSettings implements ISettings {
         }
 
         $nightlySync = [
-            'enabled' => $this->configService->get('enable_nightly_user_sync', 'false') === 'true',
-            'group_enabled' => $this->configService->get('enable_nightly_group_sync', 'false') === 'true',
+            'enabled' => $this->configService->get('enable_nightly_user_sync', 'true') === 'true',
+            'group_enabled' => $this->configService->get('enable_nightly_group_sync', 'true') === 'true',
             'managed_groups_count' => $managedGroupsCount
         ];
 

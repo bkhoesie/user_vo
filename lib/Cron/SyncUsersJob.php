@@ -52,8 +52,8 @@ class SyncUsersJob extends TimedJob {
     }
 
     protected function run($argument): void {
-        $userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', 'false') === 'true';
-        $groupSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', 'false') === 'true';
+        $userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', 'true') === 'true';
+        $groupSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', 'true') === 'true';
 
         if (!$userSyncEnabled && !$groupSyncEnabled) {
             logger('user_vo')->debug('Nightly sync is disabled (both user and group sync disabled), skipping');

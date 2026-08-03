@@ -487,7 +487,7 @@ class UserVOAuth extends Base {
             }
 
             // Update photo (if configured and available)
-            $syncPhoto = $this->config->getAppValue('user_vo', 'sync_photo', 'false') === 'true';
+            $syncPhoto = $this->config->getAppValue('user_vo', 'sync_photo', 'true') === 'true';
             $photoError = null;
             if ($syncPhoto && !empty($voUserData['foto'])) {
                 // Construct photo URL from foto filename

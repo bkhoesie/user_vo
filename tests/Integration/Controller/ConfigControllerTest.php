@@ -347,8 +347,10 @@ class ConfigControllerTest extends NextcloudTestCase {
 
 		$data = $response->getData();
 		$this->assertTrue($data['success']);
-		$this->assertFalse($data['user_sync_enabled']);
-		$this->assertFalse($data['group_sync_enabled']);
+		// Both default to enabled when never explicitly configured (see
+		// ApplyUpdatedSyncDefaults repair step for the existing-install backfill).
+		$this->assertTrue($data['user_sync_enabled']);
+		$this->assertTrue($data['group_sync_enabled']);
 		$this->assertNull($data['last_run']);
 		$this->assertEquals('never', $data['last_status']);
 	}

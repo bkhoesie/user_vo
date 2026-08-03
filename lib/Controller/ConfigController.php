@@ -313,8 +313,8 @@ class ConfigController extends Controller {
 	 * @return JSONResponse
 	 */
 	public function getNightlySyncStatus(): JSONResponse {
-		$userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', 'false') === 'true';
-		$groupSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', 'false') === 'true';
+		$userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', 'true') === 'true';
+		$groupSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', 'true') === 'true';
 
 		$lastRun = $this->config->getAppValue('user_vo', 'nightly_sync_last_run', '');
 		$lastStatus = $this->config->getAppValue('user_vo', 'nightly_sync_last_status', 'never');

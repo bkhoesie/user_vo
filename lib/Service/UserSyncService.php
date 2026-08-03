@@ -508,7 +508,7 @@ class UserSyncService {
 
                 // Determine photo sync status based on actual result
                 $photoStatus = '-';
-                $syncPhoto = $this->config->getAppValue('user_vo', 'sync_photo', 'false') === 'true';
+                $syncPhoto = $this->config->getAppValue('user_vo', 'sync_photo', 'true') === 'true';
                 $hasPhoto = !empty($voUserData['foto']) && $voUserData['foto'] !== 'anonym.gif';
 
                 if ($syncPhoto && $hasPhoto && !$isDeleted) {

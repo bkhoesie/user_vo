@@ -108,6 +108,12 @@
       <code><![CDATA[IEventListener]]></code>
     </MissingTemplateParam>
   </file>
+  <file src="lib/Migration/ApplyUpdatedSyncDefaults.php">
+    <DeprecatedMethod>
+      <code><![CDATA[getAppValue]]></code>
+      <code><![CDATA[setAppValue]]></code>
+    </DeprecatedMethod>
+  </file>
   <file src="lib/Migration/MigrateLegacyNightlySyncFlag.php">
     <DeprecatedMethod>
       <code><![CDATA[deleteAppValue]]></code>
