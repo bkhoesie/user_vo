@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installs that already explicitly set these keep their current value)
 - The `enable_nightly_sync` config key has been renamed to `enable_nightly_user_sync` (existing
   values are migrated automatically on upgrade)
+- All requests to VereinOnline, including login, now time out after 10 seconds (5 seconds to
+  connect) instead of being unbounded - a login against a very slow or unresponsive VereinOnline
+  server will now fail faster instead of potentially hanging
 
 ## [0.3.3] - 2026-07-30
 
