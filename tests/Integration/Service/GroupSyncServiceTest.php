@@ -65,7 +65,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child', 'uservo_test_pos_zero_unchanged'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child', 'uservo_test_pos_zero_unchanged', 'uservo_test_throwable_good', 'uservo_test_throwable_bad'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -301,6 +301,65 @@ class GroupSyncServiceTest extends TestCase {
 			->executeQuery()->fetch();
 
 		$this->assertSame('SENTINEL_UNCHANGED', $row['vo_position_index'], 'Must not recalculate the position index when nothing about the position/parent actually changed');
+	}
+
+	/**
+	 * Regression test: a group whose sync throws a genuine \Error (not just
+	 * \Exception - a \TypeError from unexpected VO data, say) must not abort
+	 * the rest of the batch. Reachable from the login path via
+	 * UserVOAuth::syncUserGroupsOnLogin() (itself only wrapped in
+	 * catch(\Exception) too), so catching only \Exception here would let
+	 * such an error escape this loop, the outer function, and abort the
+	 * entire login - same reasoning as GroupSyncSweepJob's equivalent
+	 * per-group loop, which already catches \Throwable.
+	 */
+	public function testSyncGroupsByIdsRecoversFromAnErrorInOneGroupAndStillSyncsTheRest(): void {
+		$goodVoId = 'test_throwable_good';
+		$goodNcId = 'uservo_test_throwable_good';
+		$badVoId = 'test_throwable_bad';
+		$badNcId = 'uservo_test_throwable_bad';
+
+		$realGoodGroup = $this->groupManager->createGroup($goodNcId);
+		$this->assertNotNull($realGoodGroup);
+		$this->createTestGroupInDB($goodVoId, $goodNcId, 'Throwable Good');
+		$this->createTestGroupInDB($badVoId, $badNcId, 'Throwable Bad');
+
+		$mockGroupManager = $this->createMock(IGroupManager::class);
+		$mockGroupManager->method('get')->willReturnCallback(function ($gid) use ($goodNcId, $badNcId, $realGoodGroup) {
+			if ($gid === $badNcId) {
+				throw new \Error('Simulated fatal error deep in group lookup');
+			}
+			if ($gid === $goodNcId) {
+				return $realGoodGroup;
+			}
+			return null;
+		});
+
+		$service = new GroupSyncService(
+			$this->connection,
+			$mockGroupManager,
+			$this->userManager,
+			new GroupNameHarmonizer(),
+			new GroupSyncLockService($this->connection),
+			$this->ledgerService,
+			\OC::$server->get(AuditLogService::class)
+		);
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $goodVoId, 'name' => 'Throwable Good', 'parentid' => null, 'pos' => 1],
+			['id' => $badVoId, 'name' => 'Throwable Bad', 'parentid' => null, 'pos' => 2],
+		]);
+
+		$result = $service->syncGroupsByIds([$badVoId, $goodVoId], $backend);
+
+		$this->assertTrue($result['success'], 'The batch overall must still succeed despite one group erroring');
+		$this->assertEquals(1, $result['synced']);
+		$this->assertEquals(1, $result['failed']);
+
+		$statuses = array_column($result['results'], 'status', 'vo_group_id');
+		$this->assertEquals('error', $statuses[$badVoId]);
+		$this->assertEquals('success', $statuses[$goodVoId]);
 	}
 
 	public function testSyncAllManagedGroupsWithMultipleGroups() {

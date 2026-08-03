@@ -222,7 +222,13 @@ class GroupSyncService {
                         'removed' => $syncResult['removed']
                     ];
                     $syncedCount++;
-                } catch (\Exception $e) {
+                } catch (\Throwable $e) {
+                    // One group's failure must not abort the rest of this batch
+                    // (or, on the login path via UserVOAuth::syncUserGroupsOnLogin,
+                    // the login itself) - catching only \Exception would let a
+                    // \TypeError/\Error from unexpected VO data escape this loop
+                    // entirely, same reasoning as GroupSyncSweepJob's equivalent
+                    // per-group loop.
                     logger('user_vo')->error('Failed to sync group', [
                         'vo_group_id' => $voGroupId,
                         'error' => $e->getMessage()
