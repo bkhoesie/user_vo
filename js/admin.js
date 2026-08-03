@@ -99,6 +99,11 @@ function generatePhotoErrorsHTML(results) {
 
 // Helper function to render group status badge
 function renderGroupStatusBadge(group) {
+    if (group.nc_group_missing) {
+        const tooltipText = 'NC group ' + group.nc_group_id + ' no longer exists - it may have been deleted directly via Nextcloud\'s own group management';
+        return '<span class="vo-badge vo-badge-error" title="' + escapeHtml(tooltipText) + '">⚠ ' + escapeHtml(t('user_vo', 'NC group missing')) + '</span>';
+    }
+
     if (group.deleted_in_vo) {
         const tooltipText = 'Group ID ' + group.vo_group_id + ' (' + group.vo_group_name + ') was not found in VereinOnline';
         return '<span class="vo-badge vo-badge-error" title="' + escapeHtml(tooltipText) + '">⚠ ' + escapeHtml(t('user_vo', 'Deleted in VO')) + '</span>';
@@ -1721,6 +1726,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (isPlaceholder) {
                 row.className = 'vo-group-placeholder';
                 row.style.opacity = '0.5'; // Dim placeholder rows
+            } else if (group.nc_group_missing) {
+                row.className = 'vo-group-nc-missing';
             } else if (group.deleted_in_vo) {
                 row.className = 'vo-group-deleted';
             } else if (group.is_managed && group.display_name_mismatch) {

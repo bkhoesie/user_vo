@@ -258,6 +258,14 @@ class GroupManagementService {
                     'vo_member_count' => (int)$group['vo_member_count'],
                     'non_vo_member_count' => (int)$group['non_vo_member_count'],
                     'is_managed' => true,  // All groups from this endpoint are managed
+                    // A tracking row whose NC group is gone - e.g. an admin
+                    // deleted it directly via NC's own UI and
+                    // GroupDeletedListener's cleanup didn't fire or was
+                    // missed. Info only, no action for now - just worth
+                    // highlighting for an admin to notice and decide what to
+                    // do (recreate under the same VO group ID, or drop the
+                    // stale tracking row).
+                    'nc_group_missing' => !$this->groupManager->groupExists($group['nc_group_id']),
                 ];
             }
 

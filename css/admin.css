@@ -1351,6 +1351,10 @@
     background: #fff3cd;
 }
 
+.vo-groups-table tr.vo-group-nc-missing {
+    background: #fef1f1;
+}
+
 .vo-groups-table tr:hover {
     background: #f5f5f5;
 }
@@ -1365,6 +1369,10 @@
 
 .vo-groups-table tr.vo-group-deleted:hover {
     background: #ffe8a8;
+}
+
+.vo-groups-table tr.vo-group-nc-missing:hover {
+    background: #fdd9d9;
 }
 
 /* Status badges for groups (extend existing badge styles) */
@@ -1473,6 +1481,10 @@
         background: #3a331e;
     }
 
+    .vo-groups-table tr.vo-group-nc-missing {
+        background: #3a1e1e;
+    }
+
     .vo-groups-table tr:hover {
         background: #2d323b;
     }
@@ -1487,6 +1499,10 @@
 
     .vo-groups-table tr.vo-group-deleted:hover {
         background: #4a4026;
+    }
+
+    .vo-groups-table tr.vo-group-nc-missing:hover {
+        background: #4a2626;
     }
 
     .vo-badge-error {
@@ -1576,6 +1592,10 @@
     background: #3a331e;
 }
 
+[data-theme-dark] .vo-groups-table tr.vo-group-nc-missing {
+    background: #3a1e1e;
+}
+
 [data-theme-dark] .vo-groups-table tr:hover {
     background: #2d323b;
 }
@@ -1590,6 +1610,10 @@
 
 [data-theme-dark] .vo-groups-table tr.vo-group-deleted:hover {
     background: #4a4026;
+}
+
+[data-theme-dark] .vo-groups-table tr.vo-group-nc-missing:hover {
+    background: #4a2626;
 }
 
 [data-theme-dark] .vo-badge-error {

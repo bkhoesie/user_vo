@@ -466,6 +466,50 @@ class GroupManagementServiceTest extends TestCase {
 	}
 
 	/**
+	 * A tracking row whose NC group is gone - e.g. deleted directly via NC's
+	 * own group management, missed by GroupDeletedListener's cleanup for some
+	 * reason. Info only, no action for now. createTestGroup() creates the
+	 * real NC group by default, so this test opts out via createNcGroup:
+	 * false to simulate the tracking row surviving alone.
+	 */
+	public function testFetchManagedGroupsFlagsGroupWithNoRealNcGroup(): void {
+		$this->createTestGroup('test_ncmissing', 'NC Missing Group', '1', createNcGroup: false);
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'test_ncmissing', 'name' => 'NC Missing Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->fetchManagedGroups($backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_ncmissing'));
+		$this->assertNotFalse($group);
+		$this->assertTrue($group['nc_group_missing']);
+	}
+
+	public function testFetchManagedGroupsDoesNotFlagGroupWithARealNcGroup(): void {
+		// createTestGroup() always creates the real NC group too.
+		$this->createTestGroup('test_ncpresent', 'NC Present Group', '1');
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'test_ncpresent', 'name' => 'NC Present Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->fetchManagedGroups($backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_ncpresent'));
+		$this->assertNotFalse($group);
+		$this->assertFalse($group['nc_group_missing']);
+	}
+
+	/**
 	 * Test bulkCreateGroups creates multiple groups efficiently
 	 */
 	public function testBulkCreateGroupsCreatesMultipleGroups(): void {
@@ -652,7 +696,7 @@ class GroupManagementServiceTest extends TestCase {
 	/**
 	 * Helper method to create test group in database
 	 */
-	private function createTestGroup(string $voGroupId, string $name, string $positionIndex): void {
+	private function createTestGroup(string $voGroupId, string $name, string $positionIndex, bool $createNcGroup = true): void {
 		$ncGroupId = 'uservo_' . $voGroupId;
 
 		// Insert into database with all required fields
@@ -673,7 +717,8 @@ class GroupManagementServiceTest extends TestCase {
 			])
 			->executeStatement();
 
-		// Create NC group
-		$this->groupManager->createGroup($ncGroupId);
+		if ($createNcGroup) {
+			$this->groupManager->createGroup($ncGroupId);
+		}
 	}
 }

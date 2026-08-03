@@ -149,6 +149,20 @@ describe('generatePhotoErrorsHTML', () => {
 });
 
 describe('renderGroupStatusBadge', () => {
+    test('flags a group whose NC group no longer exists', () => {
+        const html = renderGroupStatusBadge({ nc_group_missing: true, nc_group_id: 'uservo_test123' });
+        expect(html).toContain('vo-badge-error');
+        expect(html).toContain('NC group missing');
+    });
+
+    test('nc_group_missing takes priority over deleted_in_vo', () => {
+        // Both can theoretically be true at once - the underlying NC group
+        // being gone is the more severe/actionable state.
+        const html = renderGroupStatusBadge({ nc_group_missing: true, deleted_in_vo: true, vo_group_id: '1', vo_group_name: 'X', nc_group_id: 'uservo_1' });
+        expect(html).toContain('NC group missing');
+        expect(html).not.toContain('Deleted in VO');
+    });
+
     test('flags groups deleted in VO', () => {
         expect(renderGroupStatusBadge({ deleted_in_vo: true, vo_group_id: '1', vo_group_name: 'X' })).toContain('vo-badge-error');
     });
