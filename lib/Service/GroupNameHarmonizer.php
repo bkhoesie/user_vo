@@ -50,8 +50,11 @@ class GroupNameHarmonizer {
 		// Step 1: Trim leading/trailing whitespace
 		$name = trim($voName);
 
-		// Step 2: Handle empty names - use MD5-based fallback
-		if (empty($name)) {
+		// Step 2: Handle empty names - use MD5-based fallback.
+		// $name === '', not empty($name): a VO group literally named "0" is a
+		// real, valid name - PHP's empty() treats the string "0" as empty too,
+		// which would replace it with the fallback name instead.
+		if ($name === '') {
 			$name = 'group_' . substr(md5($voName ?: 'empty'), 0, 10);
 			return $name;
 		}

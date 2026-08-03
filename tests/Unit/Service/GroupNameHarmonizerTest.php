@@ -91,6 +91,20 @@ class GroupNameHarmonizerTest extends TestCase {
 	}
 
 	/**
+	 * Regression test: a VO group literally named "0" is a real, valid
+	 * name, not an empty one - PHP's empty("0") is true, so a truthy
+	 * empty() check here would replace it with the MD5-based fallback name
+	 * instead of keeping it, and needsHarmonization() would always
+	 * (incorrectly) report such a group as needing harmonization.
+	 */
+	public function testNameLiterallyZeroIsKeptNotTreatedAsEmpty(): void {
+		$result = $this->harmonizer->harmonize('0');
+
+		$this->assertSame('0', $result);
+		$this->assertFalse($this->harmonizer->needsHarmonization('0'));
+	}
+
+	/**
 	 * Test special characters in group name
 	 */
 	public function testSpecialCharactersInName(): void {
