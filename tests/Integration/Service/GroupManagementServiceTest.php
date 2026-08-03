@@ -6,6 +6,7 @@
 
 namespace OCA\UserVO\Tests\Integration\Service;
 
+use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\GroupManagementService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use OCA\UserVO\Service\GroupSyncService;
@@ -116,7 +117,8 @@ class GroupManagementServiceTest extends TestCase {
 			$mockGroupManager,
 			new GroupNameHarmonizer(),
 			$this->createMock(\Psr\Log\LoggerInterface::class),
-			$this->createMock(GroupSyncService::class)
+			$this->createMock(GroupSyncService::class),
+			\OC::$server->get(AuditLogService::class)
 		);
 
 		$backend = $this->getMockBuilder(UserVOAuth::class)
@@ -436,7 +438,8 @@ class GroupManagementServiceTest extends TestCase {
 			$mockGroupManager,
 			new GroupNameHarmonizer(),
 			$this->createMock(\Psr\Log\LoggerInterface::class),
-			$this->createMock(GroupSyncService::class)
+			$this->createMock(GroupSyncService::class),
+			\OC::$server->get(AuditLogService::class)
 		);
 
 		$backend = $this->getMockBuilder(UserVOAuth::class)

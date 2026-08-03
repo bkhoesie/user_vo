@@ -3,6 +3,7 @@ namespace OCA\UserVO\Tests\Integration\Cron;
 
 use OCA\UserVO\Cron\GroupSyncSweepJob;
 use OCA\UserVO\Service\ApiClient;
+use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use OCA\UserVO\Service\GroupSyncLedgerService;
@@ -52,7 +53,8 @@ class GroupSyncSweepJobTest extends TestCase {
 			$this->userManager,
 			new GroupNameHarmonizer(),
 			$this->lockService,
-			$this->ledgerService
+			$this->ledgerService,
+			\OC::$server->get(AuditLogService::class)
 		);
 
 		$configService = $this->createMock(ConfigService::class);

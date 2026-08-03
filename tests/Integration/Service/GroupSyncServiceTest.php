@@ -1,6 +1,7 @@
 <?php
 namespace OCA\UserVO\Tests\Integration\Service;
 
+use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use OCA\UserVO\Service\GroupSyncLedgerService;
@@ -43,7 +44,8 @@ class GroupSyncServiceTest extends TestCase {
 			$this->userManager,
 			$harmonizer,
 			$lockService,
-			$this->ledgerService
+			$this->ledgerService,
+			\OC::$server->get(AuditLogService::class)
 		);
 
 		// Clean up any test data
@@ -678,7 +680,8 @@ class GroupSyncServiceTest extends TestCase {
 			$this->userManager,
 			new GroupNameHarmonizer(),
 			new GroupSyncLockService($this->connection),
-			$this->ledgerService
+			$this->ledgerService,
+			\OC::$server->get(AuditLogService::class)
 		);
 
 		$backend = $this->createMock(UserVOAuth::class);
@@ -795,7 +798,8 @@ class GroupSyncServiceTest extends TestCase {
 			$this->userManager,
 			new GroupNameHarmonizer(),
 			new GroupSyncLockService($this->connection),
-			$this->ledgerService
+			$this->ledgerService,
+			\OC::$server->get(AuditLogService::class)
 		);
 
 		$backend = $this->createMock(UserVOAuth::class);
@@ -873,7 +877,8 @@ class GroupSyncServiceTest extends TestCase {
 			$this->userManager,
 			new GroupNameHarmonizer(),
 			$lockService,
-			$this->ledgerService
+			$this->ledgerService,
+			\OC::$server->get(AuditLogService::class)
 		);
 
 		$backend = $this->createMock(UserVOAuth::class);

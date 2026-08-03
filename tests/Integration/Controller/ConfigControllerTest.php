@@ -4,6 +4,7 @@ namespace OCA\UserVO\Tests\Integration\Controller;
 
 use OCA\UserVO\Controller\ConfigController;
 use OCA\UserVO\Service\ApiClient;
+use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\ConfigService;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\Http\Client\IClientService;
@@ -64,7 +65,8 @@ class ConfigControllerTest extends NextcloudTestCase {
 			$this->configService,
 			$this->apiClient,
 			$this->config,
-			$this->logger
+			$this->logger,
+			\OC::$server->get(AuditLogService::class)
 		);
 	}
 

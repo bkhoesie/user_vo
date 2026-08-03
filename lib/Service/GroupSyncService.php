@@ -70,6 +70,7 @@ class GroupSyncService {
     private GroupNameHarmonizer $groupNameHarmonizer;
     private GroupSyncLockService $lockService;
     private GroupSyncLedgerService $ledgerService;
+    private AuditLogService $auditLogService;
 
     public function __construct(
         IDBConnection $connection,
@@ -77,7 +78,8 @@ class GroupSyncService {
         IUserManager $userManager,
         GroupNameHarmonizer $groupNameHarmonizer,
         GroupSyncLockService $lockService,
-        GroupSyncLedgerService $ledgerService
+        GroupSyncLedgerService $ledgerService,
+        AuditLogService $auditLogService
     ) {
         $this->connection = $connection;
         $this->groupManager = $groupManager;
@@ -85,6 +87,7 @@ class GroupSyncService {
         $this->groupNameHarmonizer = $groupNameHarmonizer;
         $this->lockService = $lockService;
         $this->ledgerService = $ledgerService;
+        $this->auditLogService = $auditLogService;
     }
 
 
@@ -556,6 +559,9 @@ class GroupSyncService {
             // trustworthy evidence it was actually deleted in VO, so only a
             // guaranteed-live fetch (every other caller) may set deleted_in_vo.
             return $this->syncSingleGroupFullLocked($voGroupId, $ncGroupId, $storedVOName, $voGroupMap, $lockToken, mayDetectDeletion: !$nonBlocking);
+        } catch (\Throwable $e) {
+            $this->auditLogService->log('group_sync_failed', null, $voGroupId, 'Group sync failed: ' . $e->getMessage());
+            throw $e;
         } finally {
             $this->lockService->release($voGroupId, $lockToken);
         }
@@ -699,6 +705,20 @@ class GroupSyncService {
         } catch (\Throwable $e) {
             $this->ledgerService->markDirty([$voGroupId]);
             throw $e;
+        }
+
+        // Log only when membership actually changed - a no-op sync (the
+        // overwhelming majority, given how often this runs per group at
+        // production scale) isn't worth an audit entry.
+        if (!empty($added) || !empty($removed)) {
+            $parts = [];
+            if (!empty($added)) {
+                $parts[] = 'added: ' . implode(', ', $added);
+            }
+            if (!empty($removed)) {
+                $parts[] = 'removed: ' . implode(', ', $removed);
+            }
+            $this->auditLogService->log('group_membership_changed', null, $voGroupId, 'Group membership changed (' . implode('; ', $parts) . ')');
         }
 
         // Calculate member counts

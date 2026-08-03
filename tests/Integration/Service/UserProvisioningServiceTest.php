@@ -1,6 +1,7 @@
 <?php
 namespace OCA\UserVO\Tests\Integration\Service;
 
+use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\UserProvisioningService;
 use OCA\UserVO\UserVOAuth;
 use OCP\IDBConnection;
@@ -32,7 +33,8 @@ class UserProvisioningServiceTest extends TestCase {
 		$this->service = new UserProvisioningService(
 			$this->connection,
 			\OC::$server->get(IGroupManager::class),
-			\OC::$server->get(\Psr\Log\LoggerInterface::class)
+			\OC::$server->get(\Psr\Log\LoggerInterface::class),
+			\OC::$server->get(AuditLogService::class)
 		);
 
 		$this->cleanupTestData();

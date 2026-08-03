@@ -22,19 +22,22 @@ class GroupManagementService {
     private GroupNameHarmonizer $groupNameHarmonizer;
     private LoggerInterface $logger;
     private GroupSyncService $groupSyncService;
+    private AuditLogService $auditLogService;
 
     public function __construct(
         IDBConnection $connection,
         IGroupManager $groupManager,
         GroupNameHarmonizer $groupNameHarmonizer,
         LoggerInterface $logger,
-        GroupSyncService $groupSyncService
+        GroupSyncService $groupSyncService,
+        AuditLogService $auditLogService
     ) {
         $this->connection = $connection;
         $this->groupManager = $groupManager;
         $this->groupNameHarmonizer = $groupNameHarmonizer;
         $this->logger = $logger;
         $this->groupSyncService = $groupSyncService;
+        $this->auditLogService = $auditLogService;
     }
 
     /**
@@ -505,6 +508,7 @@ class GroupManagementService {
             $existingGroup = $this->groupManager->get($ncGroupId);
             $backendNames = $existingGroup ? $existingGroup->getBackendNames() : [];
             if ($backendNames !== ['Database']) {
+                $this->auditLogService->log('group_creation_blocked_backend_conflict', null, $voGroupId, "Group creation refused - NC group '$ncGroupId' already exists and is managed by a different backend (" . implode(', ', $backendNames) . ')');
                 return [
                     'success' => false,
                     'error' => "NC group '$ncGroupId' already exists and is managed by a different backend (" . implode(', ', $backendNames) . ') - it cannot be adopted by user_vo',
@@ -582,6 +586,8 @@ class GroupManagementService {
                 'status_code' => 409
             ];
         }
+
+        $this->auditLogService->log('group_created', null, $voGroupId, "Group '$voGroupName' created as NC group '$ncGroupId'");
 
         return [
             'success' => true,
@@ -849,6 +855,8 @@ class GroupManagementService {
         $deleteQb->delete('user_vo_groups')
             ->where($deleteQb->expr()->eq('vo_group_id', $deleteQb->createNamedParameter($voGroupId)));
         $deleteQb->executeStatement();
+
+        $this->auditLogService->log('group_deleted', null, $voGroupId, "Group '$voGroupName' (NC group '$ncGroupId') deleted");
 
         return [
             'success' => true,

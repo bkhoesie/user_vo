@@ -244,6 +244,7 @@ The plugin includes a multi-layer testing strategy:
 - `GroupSyncLedgerService`: dirty/clean sequence ledger mechanics, stale-lease redirty (the fencing-token analogue for the clean-advance)
 - `GroupSyncService`/`UserVOAuth`: the B1 interleaving scenarios (concurrent write during sync, lease-expired-mid-body, throw-before/after-mutation) and the writer-side symmetric-diff dirty-marking
 - `GroupSyncSweepJob`/`ForceInitialGroupSweep`: end-to-end repair of a dirty group through the real lease/sync machinery, upgrade backfill idempotency
+- `AuditLogService`/`AuditLogCleanupJob`: log/query/text-rendering behavior and retention-day cleanup (default + configured + non-positive-falls-back-to-default)
 
 **What gets tested:**
 - Real database operations (not mocked)
@@ -284,8 +285,8 @@ npm test
 Covers the functions in `js/admin.js` that don't depend on closure-captured DOM state:
 `renderExposeCheckbox`, `renderGroups`, `renderCreationDate`, `generateSyncSummaryHTML`,
 `generatePhotoErrorsHTML`, `renderGroupStatusBadge`, `renderGroupActions`,
-`addPlaceholdersForMissingParents`, `sortGroupsHierarchically`, plus `escapeHtml`/
-`formatDateTime`. Most of `admin.js` is still nested inside a single `DOMContentLoaded` closure
+`addPlaceholdersForMissingParents`, `sortGroupsHierarchically`, `renderAuditLogEntry`, plus
+`escapeHtml`/`formatDateTime`. Most of `admin.js` is still nested inside a single `DOMContentLoaded` closure
 and isn't reachable for unit testing - only functions with no closure-captured state get hoisted
 to module scope for this. `js/tests/setup.js` stubs the Nextcloud-provided `t()` and `moment`
 globals these functions rely on.
@@ -534,6 +535,36 @@ until the next full sync of that group.
 
 See `GroupSyncLedgerService`'s class doc-comment and the `Version1005Date20260803000000`
 migration for the full interleaving argument.
+
+## Audit Log
+
+A DB-backed audit trail (`user_vo_audit_log` table, `AuditLogService`) for state changes and
+failures this plugin is responsible for - not a general activity feed, and deliberately not a log
+file. Driving constraint: the production deployment has no direct `nextcloud.log` access without
+going through support, so anything worth debugging later needs to be queryable through the DB
+access this deployment does have (an admin-UI page here, or direct SQL/`occ`).
+
+**Scope - real state changes and failures, not routine successful no-ops:**
+- Login failures and backend-conflict-blocked logins (not successful logins/revalidations - NC's
+  periodic credential-token revalidation calls the exact same code path as a real login with no
+  way to tell them apart, so "login succeeded" isn't a meaningful discrete event and would mostly
+  be revalidation noise)
+- Account created (login or admin-provisioned - both funnel through `Base::insertUserRow()`) and
+  account-creation blocked by backend conflict
+- The `!duplicate`-marker safety-net firing in `storeUser()` (already logged as a bug signal)
+- Group created/deleted, group-creation blocked by backend conflict
+- Group membership actually changing (one entry per sync that changed something, not one per
+  no-op sync - see `GroupSyncService::syncSingleGroupFullLocked()`)
+- Sync failures (user data sync, group sync)
+- Config changes (which fields changed, never the password value)
+
+**Retention**: `AuditLogCleanupJob` runs nightly, deleting entries older than
+`audit_log_retention_days` (default 7, falls back to the default if set to 0 or negative).
+
+**Admin UI**: collapsed-by-default "Advanced: Audit Log" section (same pattern as "Advanced: User
+Account Management") - a "Load Recent Entries" button (up to 500, newest first) and a "Download
+Full Log (.txt)" link (`AuditLogController::download()`, full log, oldest first, unbounded aside
+from retention).
 
 ## API Integration
 

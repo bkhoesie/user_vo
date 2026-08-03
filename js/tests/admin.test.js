@@ -10,6 +10,7 @@ const {
     renderGroupActions,
     addPlaceholdersForMissingParents,
     sortGroupsHierarchically,
+    renderAuditLogEntry,
 } = require('../admin.js');
 
 describe('escapeHtml', () => {
@@ -308,6 +309,34 @@ describe('sortGroupsHierarchically', () => {
         const groups = [{ vo_group_id: 'grandchild', vo_group_name: 'GC', vo_position: 0, vo_position_index: '5.0' }];
         const sorted = sortGroupsHierarchically(groups, 'all');
         expect(sorted.some(g => g._is_placeholder)).toBe(false);
+    });
+});
+
+describe('renderAuditLogEntry', () => {
+    test('renders all fields of an entry', () => {
+        const html = renderAuditLogEntry({
+            created_at: '2026-08-03 12:00:00',
+            event_type: 'group_created',
+            uid: null,
+            group_id: '123',
+            message: "Group 'Test' created as NC group 'uservo_123'",
+        });
+        expect(html).toContain('group_created');
+        expect(html).toContain('123');
+        expect(html).toContain('created as NC group');
+    });
+
+    test('falls back to a dash for null uid/group_id', () => {
+        const html = renderAuditLogEntry({ created_at: '2026-08-03 12:00:00', event_type: 'config_changed', uid: null, group_id: null, message: 'Configuration updated' });
+        const cellMatches = html.match(/<td>(.*?)<\/td>/g);
+        expect(cellMatches[2]).toBe('<td>-</td>');
+        expect(cellMatches[3]).toBe('<td>-</td>');
+    });
+
+    test('escapes HTML in the message field', () => {
+        const html = renderAuditLogEntry({ created_at: '2026-08-03 12:00:00', event_type: 'login_failed', uid: '<script>alert(1)</script>', group_id: null, message: 'test' });
+        expect(html).not.toContain('<script>');
+        expect(html).toContain('&lt;script&gt;');
     });
 });
 

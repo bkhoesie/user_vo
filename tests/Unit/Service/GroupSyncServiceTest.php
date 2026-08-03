@@ -1,6 +1,7 @@
 <?php
 namespace OCA\UserVO\Tests\Unit\Service;
 
+use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use OCA\UserVO\Service\GroupSyncLedgerService;
@@ -22,6 +23,7 @@ class GroupSyncServiceTest extends TestCase {
 	private $harmonizer;
 	private $lockService;
 	private $ledgerService;
+	private $auditLogService;
 	private $service;
 
 	protected function setUp(): void {
@@ -35,6 +37,7 @@ class GroupSyncServiceTest extends TestCase {
 		$this->lockService->method('tryAcquire')->willReturn('test-token');
 		$this->lockService->method('acquireWithBoundedWait')->willReturn('test-token');
 		$this->ledgerService = $this->createMock(GroupSyncLedgerService::class);
+		$this->auditLogService = $this->createMock(AuditLogService::class);
 
 		$this->service = new GroupSyncService(
 			$this->connection,
@@ -42,7 +45,8 @@ class GroupSyncServiceTest extends TestCase {
 			$this->userManager,
 			$this->harmonizer,
 			$this->lockService,
-			$this->ledgerService
+			$this->ledgerService,
+			$this->auditLogService
 		);
 	}
 
@@ -265,7 +269,7 @@ class GroupSyncServiceTest extends TestCase {
 		$lockService = $this->createMock(GroupSyncLockService::class);
 		$lockService->method('tryAcquire')->willReturn(null);
 		$lockService->method('acquireWithBoundedWait')->willReturn(null);
-		$service = new GroupSyncService($this->connection, $this->groupManager, $this->userManager, $this->harmonizer, $lockService, $this->ledgerService);
+		$service = new GroupSyncService($this->connection, $this->groupManager, $this->userManager, $this->harmonizer, $lockService, $this->ledgerService, $this->auditLogService);
 
 		$result = $service->syncGroupsByIds(['123'], $backend, nonBlocking: true);
 

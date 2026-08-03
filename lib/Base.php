@@ -267,6 +267,7 @@ abstract class Base extends \OC\User\Backend {
 		// Check for !duplicate marker - this should never happen for any user
 		if (str_ends_with($uid, '!duplicate')) {
 			error_log("ERROR: storeUser() called with !duplicate marker '$uid'. This indicates a serious bug in the login flow. Stripping marker.");
+			\OC::$server->get(\OCA\UserVO\Service\AuditLogService::class)->log('duplicate_marker_bug', $uid, null, "storeUser() called with a !duplicate marker still attached - indicates a serious bug in the login flow, marker was stripped");
 			$uid = $this->stripDuplicateMarker($uid);
 		}
 
@@ -297,6 +298,7 @@ abstract class Base extends \OC\User\Backend {
 			]);
 		try {
 			$query->executeStatement();
+			\OC::$server->get(\OCA\UserVO\Service\AuditLogService::class)->log('account_created', $uid, null, "Account '$uid' provisioned via VO login");
 		} catch (\OCP\DB\Exception $e) {
 			if ($e->getReason() !== \OCP\DB\Exception::REASON_UNIQUE_CONSTRAINT_VIOLATION) {
 				throw $e;

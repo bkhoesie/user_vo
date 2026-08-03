@@ -34,6 +34,7 @@ The [documentation](https://github.com/bkhoesie/user_vo) describes how this plug
 	<background-jobs>
 		<job>OCA\UserVO\Cron\SyncUsersJob</job>
 		<job>OCA\UserVO\Cron\GroupSyncSweepJob</job>
+		<job>OCA\UserVO\Cron\AuditLogCleanupJob</job>
 	</background-jobs>
 	<repair-steps>
 		<post-migration>

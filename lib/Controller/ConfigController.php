@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\UserVO\Controller;
 
 use OCA\UserVO\Service\ApiClient;
+use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\UserVOAuth;
 use OCP\AppFramework\Controller;
@@ -22,6 +23,7 @@ class ConfigController extends Controller {
 	private ApiClient $apiClient;
 	private IConfig $config;
 	private LoggerInterface $logger;
+	private AuditLogService $auditLogService;
 
 	public function __construct(
 		string $appName,
@@ -29,13 +31,15 @@ class ConfigController extends Controller {
 		ConfigService $configService,
 		ApiClient $apiClient,
 		IConfig $config,
-		LoggerInterface $logger
+		LoggerInterface $logger,
+		AuditLogService $auditLogService
 	) {
 		parent::__construct($appName, $request);
 		$this->configService = $configService;
 		$this->apiClient = $apiClient;
 		$this->config = $config;
 		$this->logger = $logger;
+		$this->auditLogService = $auditLogService;
 	}
 
 	/**
@@ -93,6 +97,19 @@ class ConfigController extends Controller {
 		$this->configService->saveConfiguration($apiUrl, $apiUsername, $apiPassword);
 
 		$this->logger->info('UserVO configuration updated via admin interface');
+
+		// Never log the password value itself - only which fields changed.
+		$changedFields = [];
+		if ($apiUrl !== $existingUrl) {
+			$changedFields[] = 'api_url';
+		}
+		if ($apiUsername !== $existingUsername) {
+			$changedFields[] = 'api_username';
+		}
+		if (!empty($apiPassword)) {
+			$changedFields[] = 'api_password';
+		}
+		$this->auditLogService->log('config_changed', null, null, 'Configuration updated via admin interface - changed: ' . (empty($changedFields) ? 'nothing' : implode(', ', $changedFields)));
 
 		return new JSONResponse([
 			'success' => true,

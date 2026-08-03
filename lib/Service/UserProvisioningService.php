@@ -18,15 +18,18 @@ class UserProvisioningService {
     private IDBConnection $connection;
     private IGroupManager $groupManager;
     private LoggerInterface $logger;
+    private AuditLogService $auditLogService;
 
     public function __construct(
         IDBConnection $connection,
         IGroupManager $groupManager,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        AuditLogService $auditLogService
     ) {
         $this->connection = $connection;
         $this->groupManager = $groupManager;
         $this->logger = $logger;
+        $this->auditLogService = $auditLogService;
     }
 
     /**
@@ -220,6 +223,7 @@ class UserProvisioningService {
             if ($userManager->get($ncUsername)) {
                 if ($backend->hasBackendConflict($ncUsername)) {
                     $conflictingBackend = $backend->getConflictingBackendName($ncUsername);
+                    $this->auditLogService->log('account_creation_blocked_backend_conflict', $ncUsername, null, "Provisioning refused - account '$ncUsername' already exists under a different authentication backend" . ($conflictingBackend ? " ($conflictingBackend)" : ''));
                     return [
                         'success' => false,
                         'error' => "Account '$ncUsername' already exists and is managed by a different authentication backend" . ($conflictingBackend ? " ($conflictingBackend)" : '') . " - it cannot be provisioned via user_vo. Delete the conflicting NC account first if you want to provision this VO user.",

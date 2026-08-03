@@ -15,6 +15,7 @@ use function OCP\Log\logger;
 use OCA\UserVO\Base;
 use OCP\IConfig;
 use OCA\UserVO\Service\ApiClient;
+use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\Service\GroupSyncLedgerService;
 
@@ -31,6 +32,7 @@ class UserVOAuth extends Base {
     private $configService;
     private $apiClient;
     private GroupSyncLedgerService $ledgerService;
+    private AuditLogService $auditLogService;
     /** @var array|null Request-scoped memo for fetchAllGroups() - see that method. */
     private ?array $liveGroupsFetchMemo = null;
 
@@ -40,6 +42,7 @@ class UserVOAuth extends Base {
         $this->configService = new ConfigService($this->config);
         $this->apiClient = \OC::$server->get(ApiClient::class);
         $this->ledgerService = \OC::$server->get(GroupSyncLedgerService::class);
+        $this->auditLogService = \OC::$server->get(AuditLogService::class);
 
         if ($apiUrl !== null && $username !== null && $password !== null) {
             // Use constructor parameters (for backward compatibility / testing)
@@ -121,6 +124,7 @@ class UserVOAuth extends Base {
 
         if ($response === null) {
             logger('user_vo')->error('API request failed');
+            $this->auditLogService->log('login_failed', $uid, null, 'API request to VereinOnline failed');
             return false;
         } elseif (is_array($response) && isset($response[0]) && $response[0] !== '') {
             // VO credentials verified - but refuse to proceed if $uid already
@@ -131,7 +135,9 @@ class UserVOAuth extends Base {
             // own, and the login fails visibly instead of silently
             // succeeding into an ambiguous identity.
             if ($this->hasBackendConflict($uid)) {
+                $conflictingBackend = $this->getConflictingBackendName($uid);
                 logger('user_vo')->error("Refusing login: '$uid' already exists under a different authentication backend", ['uid' => $uid]);
+                $this->auditLogService->log('login_blocked_backend_conflict', $uid, null, "Login refused - '$uid' already exists under a different authentication backend" . ($conflictingBackend ? " ($conflictingBackend)" : ''));
                 return false;
             }
 
@@ -153,6 +159,7 @@ class UserVOAuth extends Base {
                     'uid' => $uid,
                     'vo_user_id' => $voUserId
                 ]);
+                $this->auditLogService->log('user_sync_failed', $uid, null, "Login succeeded but fetching user data from VereinOnline failed (vo_user_id=$voUserId) - display name/email/groups not updated this login");
                 // Continue login anyway - authentication was successful
             }
 
@@ -160,9 +167,11 @@ class UserVOAuth extends Base {
         } elseif (is_array($response) && isset($response['error'])) {
             $errorMessage = $response['error'];
             logger('user_vo')->error('User authentication error: ' . $errorMessage);
+            $this->auditLogService->log('login_failed', $uid, null, 'VereinOnline authentication error: ' . $errorMessage);
             return false;
         } else {
             logger('user_vo')->error('Invalid API response: ' . json_encode($response), ['app' => 'user_vo']);
+            $this->auditLogService->log('login_failed', $uid, null, 'Invalid API response from VereinOnline');
             return false;
         }
     }

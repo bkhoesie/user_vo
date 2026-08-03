@@ -415,4 +415,35 @@ style('user_vo', 'admin');
             </div>
         </div>
     </details>
+
+    <!-- Audit Log Section - collapsed by default: only useful when actively
+         debugging something, not general day-to-day use. -->
+    <details class="audit-log-section advanced-section">
+        <summary><?php p($l->t('Advanced: Audit Log')); ?></summary>
+
+        <div class="vo-notice">
+            <span class="icon icon-info"></span>
+            <?php p($l->t('Records logins, provisioning, group membership changes, sync failures, and config changes - not routine successful logins or no-op syncs. Entries older than the configured retention period (default 7 days) are cleaned up automatically every night.')); ?>
+        </div>
+
+        <p>
+            <button id="load-audit-log" class="button"><?php p($l->t('Load Recent Entries')); ?></button>
+            <a id="download-audit-log" class="button" href="#"><?php p($l->t('Download Full Log (.txt)')); ?></a>
+        </p>
+
+        <div id="audit-log-results" style="display: none;">
+            <table class="vo-groups-table">
+                <thead>
+                    <tr>
+                        <th><?php p($l->t('Time')); ?></th>
+                        <th><?php p($l->t('Event')); ?></th>
+                        <th><?php p($l->t('User')); ?></th>
+                        <th><?php p($l->t('Group')); ?></th>
+                        <th><?php p($l->t('Message')); ?></th>
+                    </tr>
+                </thead>
+                <tbody id="audit-log-list"></tbody>
+            </table>
+        </div>
+    </details>
 </div>

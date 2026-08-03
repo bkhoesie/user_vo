@@ -366,6 +366,17 @@ function sortGroupsHierarchically(groups, viewType) {
     return result;
 }
 
+// Helper function to render a single audit log entry as a table row
+function renderAuditLogEntry(entry) {
+    return '<tr>' +
+        '<td>' + escapeHtml(formatDateTime(entry.created_at)) + '</td>' +
+        '<td>' + escapeHtml(entry.event_type) + '</td>' +
+        '<td>' + escapeHtml(entry.uid || '-') + '</td>' +
+        '<td>' + escapeHtml(entry.group_id || '-') + '</td>' +
+        '<td>' + escapeHtml(entry.message) + '</td>' +
+        '</tr>';
+}
+
 // Exposed for Jest (Node's `module` global is undefined in the browser, so this is a no-op there)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -380,6 +391,7 @@ if (typeof module !== 'undefined' && module.exports) {
         renderGroupActions,
         addPlaceholdersForMissingParents,
         sortGroupsHierarchically,
+        renderAuditLogEntry,
     };
 }
 
@@ -2534,6 +2546,47 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 bulkDeleteGroupsButton.disabled = false;
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
+            });
+        });
+    }
+
+    // Audit Log section
+    const downloadAuditLogLink = document.getElementById('download-audit-log');
+    if (downloadAuditLogLink) {
+        downloadAuditLogLink.href = OC.generateUrl('/apps/user_vo/admin/audit-log/download');
+    }
+
+    const loadAuditLogButton = document.getElementById('load-audit-log');
+    const auditLogResults = document.getElementById('audit-log-results');
+    const auditLogList = document.getElementById('audit-log-list');
+    if (loadAuditLogButton) {
+        loadAuditLogButton.addEventListener('click', function() {
+            loadAuditLogButton.disabled = true;
+            loadAuditLogButton.textContent = t('user_vo', 'Loading...');
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/audit-log/recent'), {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadAuditLogButton.disabled = false;
+                loadAuditLogButton.textContent = t('user_vo', 'Load Recent Entries');
+
+                if (data.success) {
+                    auditLogList.innerHTML = data.entries.map(renderAuditLogEntry).join('');
+                    auditLogResults.style.display = 'block';
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + (data.error || 'Unknown error'), { type: 'error' });
+                }
+            })
+            .catch(error => {
+                loadAuditLogButton.disabled = false;
+                loadAuditLogButton.textContent = t('user_vo', 'Load Recent Entries');
                 OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
             });
         });
