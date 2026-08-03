@@ -266,6 +266,8 @@ class UserProvisioningServiceTest extends TestCase {
 
 		$this->assertFalse($result['success']);
 		$this->assertStringContainsString('different authentication backend', $result['error']);
+		$this->assertTrue($result['backend_conflict']);
+		$this->assertEquals('Database', $result['conflicting_backend']);
 	}
 
 	public function testCreateAccountFromVOSucceedsAndStoresUser(): void {

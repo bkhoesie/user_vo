@@ -7,9 +7,12 @@
 namespace OCA\UserVO\Tests\Integration\Service;
 
 use OCA\UserVO\Service\GroupManagementService;
+use OCA\UserVO\Service\GroupNameHarmonizer;
+use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\UserVOAuth;
 use OCP\AppFramework\App;
 use OCP\IDBConnection;
+use OCP\IGroup;
 use OCP\IGroupManager;
 use Test\TestCase;
 
@@ -90,6 +93,50 @@ class GroupManagementServiceTest extends TestCase {
 
 		// Verify NC group created
 		$this->assertTrue($this->groupManager->groupExists('uservo_test_123'), 'NC group should exist');
+	}
+
+	/**
+	 * Unlike users, an NC group isn't exclusively "owned" by one backend -
+	 * IGroupManager merges every backend that reports a given gid into one
+	 * IGroup. Adopting a group also backed by something else (e.g.
+	 * LDAP-synced) risks VO-driven membership writes not sticking, or
+	 * mutating a group this app doesn't actually fully control - must refuse
+	 * rather than silently adopt.
+	 */
+	public function testCreateGroupRefusesToAdoptAGroupManagedByADifferentBackend(): void {
+		$mockGroup = $this->createMock(IGroup::class);
+		$mockGroup->method('getBackendNames')->willReturn(['LDAP']);
+
+		$mockGroupManager = $this->createMock(IGroupManager::class);
+		$mockGroupManager->method('groupExists')->willReturn(true);
+		$mockGroupManager->method('get')->willReturn($mockGroup);
+
+		$service = new GroupManagementService(
+			$this->connection,
+			$mockGroupManager,
+			new GroupNameHarmonizer(),
+			$this->createMock(\Psr\Log\LoggerInterface::class),
+			$this->createMock(GroupSyncService::class)
+		);
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'test_ldap_conflict', 'name' => 'Test LDAP Conflict', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $service->createGroup('test_ldap_conflict', $backend);
+
+		$this->assertFalse($result['success']);
+		$this->assertStringContainsString('different backend', $result['error']);
+		$this->assertStringContainsString('LDAP', $result['error']);
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('vo_group_id')->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter('test_ldap_conflict')))
+			->executeQuery()->fetch();
+		$this->assertFalse($row, 'Must not create a tracking row for a group it refused to adopt');
 	}
 
 	/**

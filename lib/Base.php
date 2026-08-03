@@ -356,6 +356,29 @@ abstract class Base extends \OC\User\Backend {
 	}
 
 	/**
+	 * Human-readable name of whichever backend currently resolves $uid (e.g.
+	 * "Database", "LDAP") - only meaningful when hasBackendConflict() is
+	 * true. Purely informational, for display in conflict messages so an
+	 * admin knows what they're dealing with (e.g. a real production account
+	 * vs. an inert local test account) - resolving the conflict itself
+	 * always requires deleting the conflicting NC account first, then
+	 * provisioning normally; this app never overrides it automatically.
+	 * Falls back to the raw class name for a backend that doesn't implement
+	 * IUserBackend's getBackendName().
+	 */
+	public function getConflictingBackendName(string $uid): ?string {
+		$ncUser = \OC::$server->get(\OCP\IUserManager::class)->get($uid);
+		if ($ncUser === null) {
+			return null;
+		}
+		$backend = $ncUser->getBackend();
+		if ($backend instanceof \OCP\IUserBackend) {
+			return $backend->getBackendName();
+		}
+		return $ncUser->getBackendClassName();
+	}
+
+	/**
 	 * Count the number of users.
 	 *
 	 * @return int|bool The number of users on success false on failure

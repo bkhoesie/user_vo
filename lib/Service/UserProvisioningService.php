@@ -147,6 +147,7 @@ class UserProvisioningService {
                 // this app's own backend, or nc_account_exists above would
                 // already be showing it correctly.
                 $backendConflict = $ncUsername === null && $backend->hasBackendConflict(strtolower($voUsername));
+                $conflictingBackend = $backendConflict ? $backend->getConflictingBackendName(strtolower($voUsername)) : null;
 
                 $results[] = [
                     'vo_user_id' => $memberId,
@@ -157,6 +158,7 @@ class UserProvisioningService {
                     'nc_account_exists' => ($ncUser !== null),
                     'nc_username' => $ncUser ? $ncUser->getUID() : null,
                     'backend_conflict' => $backendConflict,
+                    'conflicting_backend' => $conflictingBackend,
                 ];
             }
 
@@ -217,11 +219,15 @@ class UserProvisioningService {
             $userManager = \OC::$server->get(\OCP\IUserManager::class);
             if ($userManager->get($ncUsername)) {
                 if ($backend->hasBackendConflict($ncUsername)) {
+                    $conflictingBackend = $backend->getConflictingBackendName($ncUsername);
                     return [
                         'success' => false,
-                        'error' => "Account '$ncUsername' already exists and is managed by a different authentication backend - it cannot be provisioned via user_vo"
+                        'error' => "Account '$ncUsername' already exists and is managed by a different authentication backend" . ($conflictingBackend ? " ($conflictingBackend)" : '') . " - it cannot be provisioned via user_vo. Delete the conflicting NC account first if you want to provision this VO user.",
+                        'backend_conflict' => true,
+                        'conflicting_backend' => $conflictingBackend,
                     ];
                 }
+
                 return [
                     'success' => false,
                     'error' => "Account '$ncUsername' already exists"

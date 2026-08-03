@@ -1356,9 +1356,11 @@ document.addEventListener('DOMContentLoaded', function() {
         response.users.forEach(user => {
             const row = document.createElement('tr');
 
+            const conflictingBackend = user.conflicting_backend || t('user_vo', 'a different backend');
+
             const statusBadge = user.backend_conflict
-                ? `<span class="vo-badge vo-badge-error" title="${escapeHtml(t('user_vo', 'A local account with this username already exists under a different authentication backend - user_vo cannot manage it'))}">⚠️ ` +
-                  t('user_vo', 'Backend conflict') + '</span>'
+                ? `<span class="vo-badge vo-badge-error" title="${escapeHtml(t('user_vo', 'A local account with this username already exists under {backend} - user_vo cannot manage it', { backend: conflictingBackend }))}">⚠️ ` +
+                  t('user_vo', 'Backend conflict') + ` (${escapeHtml(conflictingBackend)})</span>`
                 : user.nc_account_exists
                 ? `<span class="vo-badge vo-badge-success">✓ ${escapeHtml(user.nc_username)}</span>`
                 : '<span class="vo-badge vo-badge-warning">' + t('user_vo', 'Not created') + '</span>';

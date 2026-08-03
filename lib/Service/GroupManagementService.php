@@ -464,6 +464,22 @@ class GroupManagementService {
 
         // Check if NC group already exists
         if ($this->groupManager->groupExists($ncGroupId)) {
+            // Unlike users, a group isn't exclusively "owned" by one backend -
+            // IGroupManager merges every backend that reports a given gid into
+            // one IGroup. Adopting a group that's also backed by something
+            // else (e.g. LDAP-synced) risks VO-driven membership writes not
+            // sticking, or mutating a group this app doesn't actually fully
+            // control. Only adopt if "Database" (NC's own default backend) is
+            // the sole backend involved.
+            $existingGroup = $this->groupManager->get($ncGroupId);
+            $backendNames = $existingGroup ? $existingGroup->getBackendNames() : [];
+            if ($backendNames !== ['Database']) {
+                return [
+                    'success' => false,
+                    'error' => "NC group '$ncGroupId' already exists and is managed by a different backend (" . implode(', ', $backendNames) . ') - it cannot be adopted by user_vo'
+                ];
+            }
+
             // Group exists in NC but not in our database - we can still proceed to track it
             $this->logger->info("NC group already exists, adding to management", [
                 'app' => 'user_vo',

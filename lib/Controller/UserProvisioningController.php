@@ -131,7 +131,9 @@ class UserProvisioningController extends Controller {
 
 				return new JSONResponse([
 					'success' => false,
-					'error' => $result['error']
+					'error' => $result['error'],
+					'backend_conflict' => $result['backend_conflict'] ?? false,
+					'conflicting_backend' => $result['conflicting_backend'] ?? null
 				], $statusCode);
 			}
 
