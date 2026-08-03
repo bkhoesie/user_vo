@@ -545,8 +545,11 @@ class GroupManagementService {
             ]);
         }
 
-        // Calculate position index using the full VO groups data
-        $positionIndex = $this->calculatePositionIndex($voParentId, $voPosition, $allGroups);
+        // Calculate position index using the full VO groups data - delegates
+        // to GroupSyncService's canonical implementation so group creation
+        // and group sync always write the same index format (see that
+        // method's doc-comment for why this must not be duplicated here).
+        $positionIndex = $this->groupSyncService->calculatePositionIndex($voParentId, $voPosition, $allGroups);
 
         // Insert record into database
         $insertQb = $this->connection->getQueryBuilder();
@@ -867,90 +870,4 @@ class GroupManagementService {
         ];
     }
 
-    /**
-     * Calculate hierarchical position index for a group
-     *
-     * @param string|null $voParentId Parent group ID in VO
-     * @param int|null $voPosition Position within siblings
-     * @param array $allGroups All groups from VO API (for calculating full path when parent not in DB)
-     * @return string Position index (e.g., "2", "2.5", "2.5.1")
-     */
-    private function calculatePositionIndex(?string $voParentId, ?int $voPosition, array $allGroups = []): string {
-        // If no parent (root group), position index is just the position number
-        // (PHP's empty() already treats '0' as empty, so that's covered here too)
-        if (empty($voParentId)) {
-            return (string)($voPosition ?? 0);
-        }
-
-        // Try to get parent's position index from database first (most efficient)
-        $qb = $this->connection->getQueryBuilder();
-        $qb->select('vo_position_index')
-            ->from('user_vo_groups')
-            ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voParentId)));
-        $result = $qb->executeQuery();
-        $parentRow = $result->fetch();
-        $result->closeCursor();
-
-        if ($parentRow && !empty($parentRow['vo_position_index'])) {
-            // Parent exists in database, append our position to parent's index
-            return $parentRow['vo_position_index'] . '.' . ($voPosition ?? 0);
-        }
-
-        // Parent not in database - use VO data to calculate full hierarchical path
-        if (!empty($allGroups)) {
-            // Build index by walking up the parent chain using VO data
-            $parentChain = $this->buildParentChainFromVO($voParentId, $allGroups);
-            if (!empty($parentChain)) {
-                // Reverse to get root-to-current order
-                $parentChain = array_reverse($parentChain);
-                // Build position index from chain
-                $indexParts = array_map(fn($g) => (string)($g['pos'] ?? 0), $parentChain);
-                $indexParts[] = (string)($voPosition ?? 0);
-                return implode('.', $indexParts);
-            }
-        }
-
-        // Fallback: Parent not in database and no VO data available
-        // Just use position as index (best-effort for backward compatibility)
-        return (string)($voPosition ?? 0);
-    }
-
-    /**
-     * Build parent chain by walking up the VO group hierarchy
-     *
-     * @param string $groupId Starting group ID
-     * @param array $allGroups All groups from VO API
-     * @return array Array of parent groups from immediate parent to root
-     */
-    private function buildParentChainFromVO(string $groupId, array $allGroups): array {
-        // Build a map for quick lookup
-        $groupMap = [];
-        foreach ($allGroups as $group) {
-            if (isset($group['id'])) {
-                $groupMap[$group['id']] = $group;
-            }
-        }
-
-        $chain = [];
-        $currentId = $groupId;
-
-        // Walk up the parent chain (max 100 levels to prevent infinite loops)
-        $maxDepth = 100;
-        while ($maxDepth-- > 0 && !empty($currentId) && $currentId !== '0') {
-            if (!isset($groupMap[$currentId])) {
-                break; // Parent not found in VO data
-            }
-
-            $currentGroup = $groupMap[$currentId];
-            $chain[] = $currentGroup;
-
-            // Move to parent
-            $currentId = $currentGroup['parentid'] ?? null;
-            if (empty($currentId) || $currentId === '0') {
-                break; // Reached root
-            }
-        }
-
-        return $chain;
-    }
 }

@@ -265,10 +265,6 @@
       <code><![CDATA[UserVOAuth]]></code>
       <code><![CDATA[UserVOAuth]]></code>
     </MissingDependency>
-    <PossiblyNullArrayOffset>
-      <code><![CDATA[$childrenMap]]></code>
-      <code><![CDATA[$childrenMap]]></code>
-    </PossiblyNullArrayOffset>
     <UndefinedFunction>
       <code><![CDATA[logger('user_vo')]]></code>
     </UndefinedFunction>

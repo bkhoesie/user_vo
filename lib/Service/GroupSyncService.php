@@ -779,56 +779,97 @@ class GroupSyncService {
     }
 
     /**
-     * Calculate position index for hierarchical sorting
-     * This is extracted from AdminController for reusability
+     * Calculate hierarchical position index for a group (e.g. "2", "2.5",
+     * "2.5.1") - the single canonical implementation, also used by
+     * GroupManagementService (which holds a reference to this service) so
+     * both group-creation and group-sync write the same index format to the
+     * same vo_position_index column. A second, incompatible int-returning
+     * implementation used to live here and silently corrupt the dotted
+     * format written by GroupManagementService whenever a group's VO
+     * parent/position changed after creation - see git history if you're
+     * looking for it, it should not come back.
+     *
+     * @param string|null $voParentId Parent group ID in VO
+     * @param int|null $voPosition Position within siblings
+     * @param array $allGroups All groups from VO API (for calculating full path when parent not in DB)
+     * @return string Position index (e.g., "2", "2.5", "2.5.1")
      */
-    private function calculatePositionIndex(?string $parentId, ?int $position, array $allGroups): int {
-        // Build hierarchy map
-        $childrenMap = [];
-        foreach ($allGroups as $g) {
-            $pid = $g['parentid'] ?? null;
-            if (!isset($childrenMap[$pid])) {
-                $childrenMap[$pid] = [];
-            }
-            $childrenMap[$pid][] = $g;
+    public function calculatePositionIndex(?string $voParentId, ?int $voPosition, array $allGroups = []): string {
+        // If no parent (root group), position index is just the position number
+        // (PHP's empty() already treats '0' as empty, so that's covered here too)
+        if (empty($voParentId)) {
+            return (string)($voPosition ?? 0);
         }
 
-        // Sort children by position
-        foreach ($childrenMap as $pid => $children) {
-            usort($childrenMap[$pid], function($a, $b) {
-                $posA = $a['pos'] ?? 0;
-                $posB = $b['pos'] ?? 0;
-                return $posA <=> $posB;
-            });
+        // Try to get parent's position index from database first (most efficient)
+        $qb = $this->connection->getQueryBuilder();
+        $qb->select('vo_position_index')
+            ->from('user_vo_groups')
+            ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voParentId)));
+        $result = $qb->executeQuery();
+        $parentRow = $result->fetch();
+        $result->closeCursor();
+
+        if ($parentRow && $parentRow['vo_position_index'] !== null && $parentRow['vo_position_index'] !== '') {
+            // Parent exists in database, append our position to parent's index
+            return $parentRow['vo_position_index'] . '.' . ($voPosition ?? 0);
         }
 
-        // Calculate position index via depth-first traversal
-        $index = 0;
-        $targetId = null;
-        $targetIndex = 0;
+        // Parent not in database - use VO data to calculate full hierarchical path
+        if (!empty($allGroups)) {
+            // Build index by walking up the parent chain using VO data
+            $parentChain = $this->buildParentChainFromVO($voParentId, $allGroups);
+            if (!empty($parentChain)) {
+                // Reverse to get root-to-current order
+                $parentChain = array_reverse($parentChain);
+                // Build position index from chain
+                $indexParts = array_map(fn($g) => (string)($g['pos'] ?? 0), $parentChain);
+                $indexParts[] = (string)($voPosition ?? 0);
+                return implode('.', $indexParts);
+            }
+        }
 
-        $traverse = function($pid) use (&$traverse, &$index, $childrenMap, $parentId, $position, &$targetId, &$targetIndex) {
-            if (!isset($childrenMap[$pid])) {
-                return;
+        // Fallback: Parent not in database and no VO data available
+        // Just use position as index (best-effort for backward compatibility)
+        return (string)($voPosition ?? 0);
+    }
+
+    /**
+     * Build parent chain by walking up the VO group hierarchy
+     *
+     * @param string $groupId Starting group ID
+     * @param array $allGroups All groups from VO API
+     * @return array Array of parent groups from immediate parent to root
+     */
+    private function buildParentChainFromVO(string $groupId, array $allGroups): array {
+        // Build a map for quick lookup
+        $groupMap = [];
+        foreach ($allGroups as $group) {
+            if (isset($group['id'])) {
+                $groupMap[$group['id']] = $group;
+            }
+        }
+
+        $chain = [];
+        $currentId = $groupId;
+
+        // Walk up the parent chain (max 100 levels to prevent infinite loops)
+        $maxDepth = 100;
+        while ($maxDepth-- > 0 && !empty($currentId) && $currentId !== '0') {
+            if (!isset($groupMap[$currentId])) {
+                break; // Parent not found in VO data
             }
 
-            foreach ($childrenMap[$pid] as $child) {
-                $index++;
-                $childId = $child['id'] ?? null;
+            $currentGroup = $groupMap[$currentId];
+            $chain[] = $currentGroup;
 
-                // Check if this is our target position
-                if ($pid === $parentId && ($child['pos'] ?? 0) === $position) {
-                    $targetIndex = $index;
-                    $targetId = $childId;
-                }
-
-                // Recurse into children
-                $traverse($childId);
+            // Move to parent
+            $currentId = $currentGroup['parentid'] ?? null;
+            if (empty($currentId) || $currentId === '0') {
+                break; // Reached root
             }
-        };
+        }
 
-        $traverse(null); // Start from root
-
-        return $targetIndex;
+        return $chain;
     }
 }

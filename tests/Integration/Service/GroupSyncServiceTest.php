@@ -65,7 +65,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -182,6 +182,75 @@ class GroupSyncServiceTest extends TestCase {
 
 		$this->assertNotNull($row['last_synced']);
 		$this->assertEquals(0, $row['member_count']);
+	}
+
+	/**
+	 * Regression test: GroupManagementService::calculatePositionIndex() (used
+	 * on group creation) and this service's own calculatePositionIndex() (used
+	 * here, when a sync detects a parent/position change) used to be two
+	 * separate implementations writing incompatible formats to the same
+	 * vo_position_index column - a dotted hierarchical string like "3.2" vs. a
+	 * bare depth-first-traversal integer. Since both services now delegate to
+	 * the single copy living on this class, a position change picked up
+	 * during sync must still produce the same dotted format group creation
+	 * would have produced for the same position.
+	 */
+	public function testSyncRecalculatesPositionIndexInDottedFormatOnPositionChange(): void {
+		$parentVoId = 'test_pidx_parent';
+		$childVoId = 'test_pidx_child';
+		$childNcId = 'uservo_test_pidx_child';
+
+		// Parent already recorded with a root-level dotted index ("3").
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo_groups')->values([
+			'vo_group_id' => $qb->createNamedParameter($parentVoId),
+			'vo_group_name' => $qb->createNamedParameter('Pidx Parent'),
+			'nc_group_id' => $qb->createNamedParameter('uservo_test_pidx_parent'),
+			'nc_display_name' => $qb->createNamedParameter('Pidx Parent'),
+			'vo_parent_id' => $qb->createNamedParameter(null),
+			'vo_position' => $qb->createNamedParameter(3, \PDO::PARAM_INT),
+			'vo_position_index' => $qb->createNamedParameter('3'),
+			'deleted_in_vo' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			'member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			'vo_member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			'non_vo_member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+		])->executeStatement();
+
+		$ncGroup = $this->groupManager->createGroup($childNcId);
+		$this->assertNotNull($ncGroup);
+
+		// Child starts at position 1 under the parent ("3.1").
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo_groups')->values([
+			'vo_group_id' => $qb->createNamedParameter($childVoId),
+			'vo_group_name' => $qb->createNamedParameter('Pidx Child'),
+			'nc_group_id' => $qb->createNamedParameter($childNcId),
+			'nc_display_name' => $qb->createNamedParameter('Pidx Child'),
+			'vo_parent_id' => $qb->createNamedParameter($parentVoId),
+			'vo_position' => $qb->createNamedParameter(1, \PDO::PARAM_INT),
+			'vo_position_index' => $qb->createNamedParameter('3.1'),
+			'deleted_in_vo' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			'member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			'vo_member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			'non_vo_member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+		])->executeStatement();
+
+		// VO now reports the child moved to position 2 under the same parent.
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $parentVoId, 'name' => 'Pidx Parent', 'parentid' => null, 'pos' => 3],
+			['id' => $childVoId, 'name' => 'Pidx Child', 'parentid' => $parentVoId, 'pos' => 2],
+		]);
+
+		$result = $this->service->syncSingleGroupById($childVoId, $backend);
+		$this->assertTrue($result['success']);
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('vo_position_index')->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($childVoId)))
+			->executeQuery()->fetch();
+
+		$this->assertSame('3.2', $row['vo_position_index'], 'Position index must stay in the dotted hierarchical format GroupManagementService also writes, not a bare depth-first integer');
 	}
 
 	public function testSyncAllManagedGroupsWithMultipleGroups() {
