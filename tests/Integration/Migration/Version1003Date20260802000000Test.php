@@ -57,18 +57,37 @@ class Version1003Date20260802000000Test extends TestCase {
 		return fn () => new \OC\DB\SchemaWrapper($adapter->getInner());
 	}
 
+	/**
+	 * Applies a schema mutation via the same Doctrine schema-diff mechanism
+	 * MigrationService uses for real migrations (get wrapper, mutate table,
+	 * migrateToSchema), instead of raw SQL - raw `ALTER TABLE ... ADD/DROP
+	 * INDEX` is MySQL/MariaDB syntax and doesn't parse on SQLite, which CI
+	 * runs against.
+	 */
+	private function applySchemaChange(\Closure $mutateTable): void {
+		/** @var \OC\DB\ConnectionAdapter $adapter */
+		$adapter = $this->connection;
+		$schema = ($this->schemaClosure())();
+		$mutateTable($schema->getTable('user_vo_groups'));
+		$adapter->getInner()->migrateToSchema($schema->getWrappedSchema());
+	}
+
 	private function dropUniqueIndexes(): void {
-		$this->connection->executeStatement('ALTER TABLE `*PREFIX*user_vo_groups` DROP INDEX `user_vo_groups_vo_gid_u`');
-		$this->connection->executeStatement('ALTER TABLE `*PREFIX*user_vo_groups` ADD INDEX `user_vo_groups_vo_gid` (`vo_group_id`)');
-		$this->connection->executeStatement('ALTER TABLE `*PREFIX*user_vo_groups` DROP INDEX `user_vo_groups_nc_gid_u`');
-		$this->connection->executeStatement('ALTER TABLE `*PREFIX*user_vo_groups` ADD INDEX `user_vo_groups_nc_gid` (`nc_group_id`)');
+		$this->applySchemaChange(function ($table) {
+			$table->dropIndex('user_vo_groups_vo_gid_u');
+			$table->addIndex(['vo_group_id'], 'user_vo_groups_vo_gid');
+			$table->dropIndex('user_vo_groups_nc_gid_u');
+			$table->addIndex(['nc_group_id'], 'user_vo_groups_nc_gid');
+		});
 	}
 
 	private function restoreUniqueIndexes(): void {
-		$this->connection->executeStatement('ALTER TABLE `*PREFIX*user_vo_groups` DROP INDEX `user_vo_groups_vo_gid`');
-		$this->connection->executeStatement('ALTER TABLE `*PREFIX*user_vo_groups` ADD UNIQUE INDEX `user_vo_groups_vo_gid_u` (`vo_group_id`)');
-		$this->connection->executeStatement('ALTER TABLE `*PREFIX*user_vo_groups` DROP INDEX `user_vo_groups_nc_gid`');
-		$this->connection->executeStatement('ALTER TABLE `*PREFIX*user_vo_groups` ADD UNIQUE INDEX `user_vo_groups_nc_gid_u` (`nc_group_id`)');
+		$this->applySchemaChange(function ($table) {
+			$table->dropIndex('user_vo_groups_vo_gid');
+			$table->addUniqueIndex(['vo_group_id'], 'user_vo_groups_vo_gid_u');
+			$table->dropIndex('user_vo_groups_nc_gid');
+			$table->addUniqueIndex(['nc_group_id'], 'user_vo_groups_nc_gid_u');
+		});
 	}
 
 	public function testPreSchemaChangeRemovesDuplicatesKeepingTheOldestRow(): void {
