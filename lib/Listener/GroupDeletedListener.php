@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\UserVO\Listener;
 
+use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\GroupSyncLockService;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
@@ -23,15 +24,18 @@ class GroupDeletedListener implements IEventListener {
     private $connection;
     private $logger;
     private GroupSyncLockService $lockService;
+    private AuditLogService $auditLogService;
 
     public function __construct(
         IDBConnection $connection,
         LoggerInterface $logger,
-        GroupSyncLockService $lockService
+        GroupSyncLockService $lockService,
+        AuditLogService $auditLogService
     ) {
         $this->connection = $connection;
         $this->logger = $logger;
         $this->lockService = $lockService;
+        $this->auditLogService = $auditLogService;
     }
 
     public function handle(Event $event): void {
@@ -99,5 +103,11 @@ class GroupDeletedListener implements IEventListener {
             'vo_group_id' => $voGroupId,
             'vo_group_name' => $row['vo_group_name']
         ]);
+
+        // Same event GroupManagementService::deleteGroup() logs for its own
+        // deletion path - without this, the same logical event (a managed
+        // group disappearing) would be invisible in the audit log whenever
+        // it happens via NC's native group admin UI instead.
+        $this->auditLogService->log('group_deleted', null, $voGroupId, "Group '{$row['vo_group_name']}' (NC group '$groupId') deleted via Nextcloud's own group management");
     }
 }

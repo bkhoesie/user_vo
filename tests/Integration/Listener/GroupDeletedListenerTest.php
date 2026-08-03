@@ -2,6 +2,7 @@
 namespace OCA\UserVO\Tests\Integration\Listener;
 
 use OCA\UserVO\Listener\GroupDeletedListener;
+use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\GroupSyncLockService;
 use OCP\EventDispatcher\Event;
 use OCP\Group\Events\GroupDeletedEvent;
@@ -31,7 +32,8 @@ class GroupDeletedListenerTest extends TestCase {
 		$this->listener = new GroupDeletedListener(
 			$this->connection,
 			\OC::$server->get(LoggerInterface::class),
-			$this->lockService
+			$this->lockService,
+			\OC::$server->get(AuditLogService::class)
 		);
 
 		$this->cleanupTestData();
@@ -96,6 +98,30 @@ class GroupDeletedListenerTest extends TestCase {
 		$this->listener->handle($event);
 
 		$this->assertFalse($this->groupExistsInDb($ncGroupId));
+	}
+
+	/**
+	 * Regression test: this listener had no AuditLogService call at all,
+	 * unlike GroupManagementService::deleteGroup()'s own deletion path
+	 * (which logs 'group_deleted') - the same logical event (a managed
+	 * group disappearing) was visible in the audit log through one deletion
+	 * path but invisible through the other (NC's native group admin UI).
+	 */
+	public function testLogsAuditEntryWhenTrackingRowIsRemoved(): void {
+		$ncGroupId = self::NC_GROUP_ID_PREFIX . 'audited';
+		$voGroupId = 'vo_gdl_audited';
+		$this->insertManagedGroup($ncGroupId, $voGroupId);
+
+		$group = $this->createMock(IGroup::class);
+		$group->method('getGID')->willReturn($ncGroupId);
+		$event = new GroupDeletedEvent($group);
+
+		$this->listener->handle($event);
+
+		$auditLogService = \OC::$server->get(AuditLogService::class);
+		$entries = $auditLogService->getRecentEntries(50);
+		$match = array_filter($entries, fn ($e) => $e['event_type'] === 'group_deleted' && $e['group_id'] === $voGroupId);
+		$this->assertNotEmpty($match, 'Must record an audit log entry for the group deletion');
 	}
 
 	/**
