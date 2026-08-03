@@ -1,11 +1,17 @@
 name: JS tests
 
+# push is main-only: feature work goes through PRs now, and pull_request
+# already covers CI for every push to an open PR's branch - a push trigger
+# on feature/** as well would just double-run CI for the same commit once a
+# PR exists. Nightly against main catches drift with no code push at all
+# (e.g. a Jest/jsdom dependency update).
 on:
   pull_request:
   push:
     branches:
       - main
-      - 'feature/**'
+  schedule:
+    - cron: '15 3 * * *' # nightly, off-peak, arbitrary minute to avoid the exact-hour stampede
 
 permissions:
   contents: read

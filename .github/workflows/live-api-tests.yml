@@ -1,16 +1,28 @@
 name: Live VO API contract tests
 
-# Deliberately NOT on push/pull_request: these tests hit the real VereinOnline
-# API (a dedicated test account, but real production infrastructure - no VO
-# sandbox org exists) rather than a mock. Running them on every push would
-# hammer production VO far more than the contract actually changes. Manual
-# trigger covers "check this now"; nightly catches drift without doing that.
+# These tests hit the real VereinOnline API (a dedicated test account, but
+# real production infrastructure - no VO sandbox org exists) rather than a
+# mock. Now that feature work goes through PRs rather than direct pushes,
+# development is infrequent enough (and a single contract-test run light
+# enough on the API) that running on every PR and on push to main is fine -
+# push is deliberately main-only, not feature/**, so it only fires once per
+# PR-merge rather than on every intermediate push. workflow_dispatch covers
+# "check this now"; nightly catches drift with no code change at all (VO's
+# API behavior shifting server-side).
+#
+# Note: pull_request (not pull_request_target) means a fork-originated PR
+# won't have access to the VO_TEST_* secrets and this job will fail for it -
+# acceptable for a single-maintainer repo, revisit if that ever changes.
 #
 # (Briefly ran with a push trigger too, commit 4fd5fab, to get one real
 # CI-runner verification in - workflow_dispatch can't be invoked via API/CLI
 # for a workflow that only exists on a non-default branch. Confirmed passing
 # there - 4 tests, 19 assertions, run 30747729688 - then reverted here.)
 on:
+  pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch: {}
   schedule:
     - cron: '17 3 * * *' # nightly, off-peak, arbitrary minute to avoid the exact-hour stampede
