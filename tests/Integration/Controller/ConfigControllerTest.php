@@ -269,6 +269,27 @@ class ConfigControllerTest extends NextcloudTestCase {
 		$this->assertEquals('', $this->config->getAppValue('user_vo', 'api_password', ''));
 	}
 
+	/**
+	 * Regression test: clearConfiguration() had no AuditLogService call at
+	 * all, unlike saveConfiguration() (which logs 'config_changed') - an
+	 * admin wiping the entire VO API configuration is at least as
+	 * destructive an action, and left no trace in the audit log meant to
+	 * make exactly this kind of thing debuggable without server log access.
+	 */
+	public function testClearConfigurationLogsAuditEntry() {
+		$this->config->setAppValue('user_vo', 'api_url', 'https://example.com');
+		$this->config->setAppValue('user_vo', 'api_username', 'test');
+		$this->config->setAppValue('user_vo', 'api_password', 'pass');
+
+		$response = $this->controller->clearConfiguration();
+		$this->assertEquals(200, $response->getStatus());
+
+		$auditLogService = \OC::$server->get(AuditLogService::class);
+		$entries = $auditLogService->getRecentEntries(50);
+		$match = array_filter($entries, fn ($e) => $e['event_type'] === 'config_changed' && str_contains($e['message'], 'cleared via admin interface'));
+		$this->assertNotEmpty($match, 'clearConfiguration() must record an audit log entry');
+	}
+
 	public function testSaveUserSyncSettingsSucceeds() {
 		$this->request->method('getParam')
 			->willReturnCallback(function($key, $default) {

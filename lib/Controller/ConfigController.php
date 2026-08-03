@@ -260,6 +260,7 @@ class ConfigController extends Controller {
 		$this->configService->clearConfiguration();
 
 		$this->logger->info('UserVO admin interface configuration cleared');
+		$this->auditLogService->log('config_changed', null, null, 'Configuration cleared via admin interface');
 
 		if ($configSource === 'config.php') {
 			return new JSONResponse([
