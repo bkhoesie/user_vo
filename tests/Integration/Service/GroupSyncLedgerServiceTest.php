@@ -134,6 +134,54 @@ class GroupSyncLedgerServiceTest extends TestCase {
 		$this->assertSame(9, $clean, 'clean_seq must never move backwards');
 	}
 
+	/**
+	 * Under correct operation, dirty_seq >= clean_seq should always hold -
+	 * clean_seq is only ever set to a value that was itself once a valid
+	 * dirty_seq snapshot, and dirty_seq only increases. dirty_seq < clean_seq
+	 * can only mean the ledger was corrupted by something outside the normal
+	 * sync path (e.g. a past repair-step bug - see ForceInitialGroupSweep's
+	 * history). This must be repaired the moment any sync completes and
+	 * notices it, not left for enough further markDirty() calls to
+	 * organically grow dirty_seq back past clean_seq on their own.
+	 */
+	public function testMarkCleanSelfHealsAnInvertedLedgerState(): void {
+		$this->insertTestGroupRow(self::GROUP_A);
+		$this->setLockToken(self::GROUP_A, 'token-a');
+		// Simulate the corrupted state directly: clean_seq ahead of dirty_seq.
+		$qb = $this->connection->getQueryBuilder();
+		$qb->update('user_vo_groups')
+			->set('dirty_seq', $qb->createNamedParameter(1, \PDO::PARAM_INT))
+			->set('clean_seq', $qb->createNamedParameter(7, \PDO::PARAM_INT))
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter(self::GROUP_A)))
+			->executeStatement();
+
+		// A normal sync captures the (still-broken) dirty_seq=1 as its seqAtStart.
+		$this->service->markCleanIfStillOwned(self::GROUP_A, 'token-a', 1);
+
+		[$dirty, $clean] = $this->readSeqs(self::GROUP_A);
+		$this->assertSame(7, $clean, 'clean_seq must be untouched by the self-heal');
+		$this->assertGreaterThan($clean, $dirty, 'An inverted ledger must be repaired by the very next sync to complete, not left waiting for organic writes to catch up');
+	}
+
+	/**
+	 * Negative control for the self-heal above: a redundant sync where
+	 * nothing changed since the last one completed (clean_seq == seqAtStart,
+	 * not >) is completely normal and must not be perturbed.
+	 */
+	public function testMarkCleanDoesNotPerturbALegitimatelyRedundantSync(): void {
+		$this->insertTestGroupRow(self::GROUP_A);
+		$this->setLockToken(self::GROUP_A, 'token-a');
+		$this->service->markDirty([self::GROUP_A]);
+		$this->service->markCleanIfStillOwned(self::GROUP_A, 'token-a', 1);
+
+		// A second, redundant sync captures the same already-clean seq.
+		$this->service->markCleanIfStillOwned(self::GROUP_A, 'token-a', 1);
+
+		[$dirty, $clean] = $this->readSeqs(self::GROUP_A);
+		$this->assertSame(1, $dirty, 'A legitimate dirty_seq == clean_seq state must not be touched by the self-heal check');
+		$this->assertSame(1, $clean);
+	}
+
 	public function testMarkCleanIsRejectedAndRedirtiesWhenTheLeaseWasReassigned(): void {
 		$this->insertTestGroupRow(self::GROUP_A);
 		$this->setLockToken(self::GROUP_A, 'token-a');

@@ -77,6 +77,24 @@ class GroupSyncLedgerService {
      * If the token no longer matches, this call re-dirties the group instead
      * of silently doing nothing: this sync may have just applied membership
      * computed from a stale snapshot, so the sweep must revisit it.
+     *
+     * If the token still matches but clean_seq is already >= $seqAtStart,
+     * that has exactly two possible causes, both handled here:
+     *  - clean_seq == seqAtStart: a redundant sync (nothing changed since the
+     *    last one completed) - genuinely benign, no action needed.
+     *  - clean_seq > seqAtStart: under correct operation this cannot happen
+     *    on its own - mutual exclusion means nothing else could have
+     *    advanced clean_seq past our own seqAtStart while we still hold the
+     *    one lease unbroken, and clean_seq is only ever set to a value that
+     *    was itself once a valid dirty_seq snapshot, so dirty_seq >=
+     *    clean_seq should always hold. Reaching this case therefore means
+     *    dirty_seq was reset by something outside the normal sync path
+     *    (e.g. a past repair-step bug directly resetting it without
+     *    justification - see ForceInitialGroupSweep's history). Rather than
+     *    silently tolerating that and waiting for enough further markDirty()
+     *    calls to organically grow dirty_seq back past clean_seq, self-heal
+     *    it immediately: any successful sync completion is exactly the right
+     *    moment to notice and repair this, not just the next app upgrade.
      */
     public function markCleanIfStillOwned(string $voGroupId, string $lockToken, int $seqAtStart): void {
         $qb = $this->connection->getQueryBuilder();
@@ -99,12 +117,29 @@ class GroupSyncLedgerService {
         $result->closeCursor();
 
         // No row: the group was deleted mid-sync, nothing left to mark.
-        // Token still matches ours: clean_seq is already >= seqAtStart via a
-        // concurrent sync that captured a later snapshot - a benign race,
-        // not a staleness event.
-        if ($row !== false && $row['sync_lock_token'] !== $lockToken) {
+        if ($row === false) {
+            return;
+        }
+
+        if ($row['sync_lock_token'] !== $lockToken) {
             $this->markDirty([$voGroupId]);
             $this->logger->warning('Group sync lease expired before completion - marking dirty for the sweep to repair', [
+                'vo_group_id' => $voGroupId,
+            ]);
+            return;
+        }
+
+        // Token still ours, clean_seq already >= seqAtStart: only worth
+        // acting on if dirty_seq is *behind* clean_seq (see the doc-comment
+        // above) - a normal redundant sync (clean_seq == seqAtStart) must not
+        // be perturbed.
+        $healQb = $this->connection->getQueryBuilder();
+        $healQb->update('user_vo_groups')
+            ->set('dirty_seq', $healQb->createFunction('clean_seq + 1'))
+            ->where($healQb->expr()->eq('vo_group_id', $healQb->createNamedParameter($voGroupId)))
+            ->andWhere($healQb->expr()->lt('dirty_seq', 'clean_seq'));
+        if ($healQb->executeStatement() > 0) {
+            $this->logger->warning('Detected and repaired an inverted dirty/clean ledger state (dirty_seq was behind clean_seq)', [
                 'vo_group_id' => $voGroupId,
             ]);
         }

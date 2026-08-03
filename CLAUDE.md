@@ -482,13 +482,23 @@ Background job settings (in admin interface):
 - **Execution tracking**: Stores last run time, status, error messages, sync summary
 - **Admin visibility**: Shows Last run → Status → Summary with color-coded badges
 
-**Division of labor with the group sync sweep (below):** the nightly sync is what keeps
-VO-side changes flowing to users who don't log in - group sync depends on user sync having
-refreshed `vo_group_ids` first, so enabling only the group toggle has limited value. The sweep
-job guarantees local convergence within one sweep interval for changes that *did* already reach
-`user_vo` via a login/user-sync write; it has no way to detect membership changes for a user who
-never logs in again (no local write ever happens, so nothing gets marked dirty). Enable both for
-full coverage.
+**Division of labor with the group sync sweep (below):** `enable_nightly_group_sync` only gates
+an *unconditional* full resync of every managed group. It does NOT gate whether real, incremental
+membership changes propagate: any write to `vo_group_ids` (login or nightly user sync) marks
+exactly the groups that actually changed dirty via the symmetric-diff logic in
+`UserVOAuth::updateVOMetadata()`, and `GroupSyncSweepJob` resyncs those regardless of this flag -
+intentional, since that's propagating a change VO itself already reported, not the periodic blind
+check this toggle controls.
+
+What the toggle is still needed for: coverage from the ledger + login-triggered sync is inherently
+partial, not a superset of what nightly group sync does. The ledger only sees a group whose
+membership actually changed for *someone*; login-triggered sync only touches groups the
+currently-logging-in user belongs to. A group with no active members, or whose membership simply
+hasn't changed even though its members log in constantly, is invisible to both - its metadata
+(display name, VO hierarchy/position) and membership would drift indefinitely without this
+periodic, unconditional resync of every managed group. Group sync also depends on user sync having
+refreshed `vo_group_ids` first, so enabling only the group toggle has limited value on its own.
+Enable both for full coverage.
 
 ### Background Job Management
 

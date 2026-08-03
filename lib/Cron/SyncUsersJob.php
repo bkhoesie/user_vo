@@ -53,6 +53,25 @@ class SyncUsersJob extends TimedJob {
 
     protected function run($argument): void {
         $userSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', 'true') === 'true';
+        // Reminder: this only gates the unconditional full resync of every
+        // managed group below. Disabling it does NOT stop group membership
+        // from staying current for groups some user's own activity actually
+        // touches - the user-sync step above (when enabled) still marks
+        // exactly the groups whose membership changed dirty
+        // (UserVOAuth::updateVOMetadata()'s symmetric-diff marking), and
+        // GroupSyncSweepJob still repairs those regardless of this flag.
+        // That's intentional: it's propagating a change VO itself already
+        // reported, not the periodic blind check this toggle controls.
+        //
+        // What this flag is still needed for: coverage is inherently partial
+        // without it. The ledger only sees a group whose membership actually
+        // changed for someone; ordinary login-triggered sync only touches
+        // groups a currently-logging-in user belongs to. A group with no
+        // active members, or whose membership simply hasn't changed (even if
+        // its members log in constantly), is invisible to both - its
+        // metadata (display name, VO hierarchy/position) and membership
+        // would drift indefinitely without this periodic, unconditional
+        // resync of every managed group.
         $groupSyncEnabled = $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', 'true') === 'true';
 
         if (!$userSyncEnabled && !$groupSyncEnabled) {
