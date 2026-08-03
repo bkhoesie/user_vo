@@ -93,6 +93,29 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 	}
 
+	/**
+	 * Direct group_user table read, deliberately bypassing IGroup::getUsers()
+	 * and IGroupManager::isInGroup() - both cache membership in-process (the
+	 * cached Group object's user list, resp. IGroupManager's per-uid group
+	 * list) and stable28's Group::addUser() has a cache-staleness quirk
+	 * (`if ($this->users)` treats a freshly-created group's empty array as
+	 * falsy and skips updating the cache) that a getUsers() call can observe
+	 * as a stale empty membership list despite the row already being
+	 * written. A raw read of the actual persisted state avoids both caches
+	 * and works the same whether checked once or, as in the lock-race test
+	 * below, twice for the same uid/group.
+	 */
+	private function isUserInNcGroup(string $uid, string $gid): bool {
+		$qb = $this->connection->getQueryBuilder();
+		$qb->select('uid')->from('group_user')
+			->where($qb->expr()->eq('uid', $qb->createNamedParameter($uid)))
+			->andWhere($qb->expr()->eq('gid', $qb->createNamedParameter($gid)));
+		$result = $qb->executeQuery();
+		$row = $result->fetch();
+		$result->closeCursor();
+		return $row !== false;
+	}
+
 	/** @return array{0: int, 1: int} [dirty_seq, clean_seq] */
 	private function readSeqs(string $voGroupId): array {
 		$qb = $this->connection->getQueryBuilder();
@@ -339,9 +362,7 @@ class GroupSyncServiceTest extends TestCase {
 		$this->assertEquals(1, $result['synced']);
 		$this->assertContains($uid, $result['results'][0]['added']);
 
-		$ncGroup = $this->groupManager->get($ncGroupId);
-		$members = array_map(fn ($u) => $u->getUID(), $ncGroup->getUsers());
-		$this->assertContains($uid, $members, 'User should actually be added to the NC group');
+		$this->assertTrue($this->isUserInNcGroup($uid, $ncGroupId), 'User should actually be added to the NC group');
 
 		$this->userManager->get($uid)?->delete();
 	}
@@ -398,9 +419,7 @@ class GroupSyncServiceTest extends TestCase {
 			$this->assertEquals(0, $result['synced']);
 			$this->assertEquals('skipped', $result['results'][0]['status'], 'Must be reported distinctly from a real success - not indistinguishable from an empty sync');
 
-			$ncGroup = $this->groupManager->get($ncGroupId);
-			$members = array_map(fn ($u) => $u->getUID(), $ncGroup->getUsers());
-			$this->assertNotContains($uid, $members, 'User must NOT have been added while the group was locked');
+			$this->assertFalse($this->isUserInNcGroup($uid, $ncGroupId), 'User must NOT have been added while the group was locked');
 		} finally {
 			$lockService->release($voGroupId, $lockToken);
 		}
@@ -410,9 +429,7 @@ class GroupSyncServiceTest extends TestCase {
 		$this->assertTrue($result['success']);
 		$this->assertContains($uid, $result['results'][0]['added']);
 
-		$ncGroup = $this->groupManager->get($ncGroupId);
-		$members = array_map(fn ($u) => $u->getUID(), $ncGroup->getUsers());
-		$this->assertContains($uid, $members, 'User should be added once the lease is available');
+		$this->assertTrue($this->isUserInNcGroup($uid, $ncGroupId), 'User should be added once the lease is available');
 
 		$this->userManager->get($uid)?->delete();
 	}

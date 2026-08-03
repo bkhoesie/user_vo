@@ -147,6 +147,25 @@ class GroupSyncSweepJobTest extends TestCase {
 	}
 
 	/**
+	 * Direct group_user table read, deliberately bypassing IGroup::getUsers()
+	 * - it caches membership in-process on the Group object, and stable28's
+	 * Group::addUser() has a cache-staleness quirk (`if ($this->users)`
+	 * treats a freshly-created group's empty array as falsy and skips
+	 * updating the cache) that a getUsers() call can observe as a stale
+	 * empty membership list despite the row already being written.
+	 */
+	private function isUserInNcGroup(string $uid, string $gid): bool {
+		$qb = $this->connection->getQueryBuilder();
+		$qb->select('uid')->from('group_user')
+			->where($qb->expr()->eq('uid', $qb->createNamedParameter($uid)))
+			->andWhere($qb->expr()->eq('gid', $qb->createNamedParameter($gid)));
+		$result = $qb->executeQuery();
+		$row = $result->fetch();
+		$result->closeCursor();
+		return $row !== false;
+	}
+
+	/**
 	 * The whole point of the sweep, in one test: a group left dirty (e.g. by
 	 * a login-triggered sync that was skipped due to lock contention) is
 	 * actually converged - membership ends correct, and the ledger ends
@@ -177,9 +196,7 @@ class GroupSyncSweepJobTest extends TestCase {
 
 		$this->runJob();
 
-		$ncGroup = $this->groupManager->get(self::NC_GROUP_ID);
-		$members = array_map(fn ($u) => $u->getUID(), $ncGroup->getUsers());
-		$this->assertContains(self::UID, $members, 'The sweep must actually apply the missed membership change');
+		$this->assertTrue($this->isUserInNcGroup(self::UID, self::NC_GROUP_ID), 'The sweep must actually apply the missed membership change');
 
 		[$dirty, $clean] = $this->readSeqs();
 		$this->assertSame($dirty, $clean, 'A successfully repaired group must end up clean, not still flagged');
