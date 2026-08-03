@@ -242,7 +242,7 @@ The plugin includes a multi-layer testing strategy:
 - `UserProvisioningService`, `UserSyncService`, `UserAccountService`: real-DB coverage of search, sync, and duplicate-scan logic
 - `GroupDeletedListener`: managed-group cleanup on NC group deletion
 - `GroupSyncLedgerService`: dirty/clean sequence ledger mechanics, stale-lease redirty (the fencing-token analogue for the clean-advance)
-- `GroupSyncService`/`UserVOAuth`: the B1 interleaving scenarios (concurrent write during sync, lease-expired-mid-body, throw-before/after-mutation) and the writer-side union dirty-marking
+- `GroupSyncService`/`UserVOAuth`: the B1 interleaving scenarios (concurrent write during sync, lease-expired-mid-body, throw-before/after-mutation) and the writer-side symmetric-diff dirty-marking
 - `GroupSyncSweepJob`/`ForceInitialGroupSweep`: end-to-end repair of a dirty group through the real lease/sync machinery, upgrade backfill idempotency
 
 **What gets tested:**
@@ -507,8 +507,9 @@ user's own VO-metadata write isn't synchronized with a concurrent full group syn
 membership for that group, so a write landing in that window could otherwise be silently lost
 until the next full sync of that group.
 
-- **Writer side**: `UserVOAuth::updateVOMetadata()` marks the union of a user's old and new VO
-  group IDs dirty, in the same transaction as the metadata write itself.
+- **Writer side**: `UserVOAuth::updateVOMetadata()` marks the symmetric difference of a user's old
+  and new VO group IDs dirty, in the same transaction as the metadata write itself - only groups
+  whose membership actually changed, not every group the user belongs to.
 - **Reader side**: `GroupSyncService::syncSingleGroupFullLocked()` captures `dirty_seq` right
   after acquiring the group's sync lease (before reading VO membership), and advances
   `clean_seq` to that value on successful completion - but only if the lease is still held by

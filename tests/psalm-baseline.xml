@@ -75,6 +75,8 @@
       <code><![CDATA[logger('user_vo')]]></code>
       <code><![CDATA[logger('user_vo')]]></code>
       <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
     </UndefinedFunction>
   </file>
   <file src="lib/Cron/SyncUsersJob.php">

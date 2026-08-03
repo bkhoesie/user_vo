@@ -36,14 +36,27 @@ use OCP\Migration\IRepairStep;
  * starts every row at 0/0 (clean) for schema-migration simplicity, but an
  * install upgrading to this fix may already carry real membership drift
  * caused by the very B1 gap the ledger closes going forward - 0/0 would
- * silently assert there is none. Setting dirty_seq = 1 here means
+ * silently assert there is none. Bumping dirty_seq here means
  * GroupSyncSweepJob picks up every group on its next few ticks and repairs
  * whatever drift already existed, rather than only catching drift from here on.
  *
- * `WHERE dirty_seq = clean_seq` makes this idempotent: a group already
- * legitimately dirty (e.g. from a write that landed between the schema
- * migration and this repair step) is left alone rather than having its real
- * dirty_seq clobbered back down to 1.
+ * `SET dirty_seq = clean_seq + 1 WHERE dirty_seq <= clean_seq` (not a literal
+ * 1, and not `= clean_seq`): post-migration repair steps run on *every* app
+ * version bump, not just the one that introduces them (NC's
+ * AppManager::upgradeApp() calls them unconditionally after migrate()). A
+ * literal `dirty_seq = 1` only makes sense for a genuinely untouched (0,0)
+ * row; on any later upgrade, a healthy *converged* group can legitimately be
+ * at (N,N) for N > 0 from ordinary traffic, and setting dirty_seq back down
+ * to 1 there wouldn't just no-op the backfill (dirty_seq stays <= clean_seq,
+ * so findDirtyGroups() still ignores it) - it would leave dirty_seq trailing
+ * N-1 increments behind clean_seq, meaning the group can't register as dirty
+ * again until N more writes land. That's B1 silently reintroduced for
+ * whatever real-world window it takes to accumulate N further writes -
+ * exactly what this repair step exists to prevent, not cause. `clean_seq + 1`
+ * always produces a value strictly greater than clean_seq regardless of N,
+ * and `<=` (not `=`) makes this idempotent even if it already ran incorrectly
+ * once: dirty_seq <= clean_seq is true for both a genuinely untouched row and
+ * an already-inverted one, so either self-heals to the same correct shape.
  */
 class ForceInitialGroupSweep implements IRepairStep {
 	private IDBConnection $connection;
@@ -64,8 +77,8 @@ class ForceInitialGroupSweep implements IRepairStep {
 
 		$qb = $this->connection->getQueryBuilder();
 		$qb->update('user_vo_groups')
-			->set('dirty_seq', $qb->createNamedParameter(1, \PDO::PARAM_INT))
-			->where($qb->expr()->eq('dirty_seq', 'clean_seq'));
+			->set('dirty_seq', $qb->createFunction('clean_seq + 1'))
+			->where($qb->expr()->lte('dirty_seq', 'clean_seq'));
 		$affected = $qb->executeStatement();
 
 		if ($affected > 0) {

@@ -109,7 +109,38 @@ class UserVOAuthDirtyMarkingTest extends TestCase {
 		[$dirtyC, $cleanC] = $this->readSeqs($groupC);
 		$this->assertGreaterThan($cleanA, $dirtyA, 'Group removed from membership must be marked dirty');
 		$this->assertGreaterThan($cleanC, $dirtyC, 'Group added to membership must be marked dirty');
-		$this->assertGreaterThan($cleanB, $dirtyB, 'Group present in both old and new is still marked dirty - the union is marked unconditionally, not a diff');
+		$this->assertSame($dirtyB, $cleanB, 'Group present in both old and new is NOT marked - only the symmetric diff is marked, since this group\'s membership predicate is unaffected by the write');
+	}
+
+	/**
+	 * Negative control for the test above and the headline reason the diff
+	 * (not the union originally used here) is correct: a write that changes
+	 * nothing about a user's group membership must not dirty any group at
+	 * all. Otherwise every metadata write (e.g. the nightly job's per-user
+	 * sync step, or ordinary multi-device login revalidation) would keep
+	 * dirtying a user's entire group set regardless of whether membership
+	 * actually changed - defeating the sweep's "only resync what needs it"
+	 * design and, via the nightly job, silently overriding
+	 * enable_nightly_group_sync=false.
+	 */
+	public function testMetadataWriteWithUnchangedMembershipMarksNothingDirty(): void {
+		$groupA = self::GROUP_PREFIX . 'unchanged_a';
+		$groupB = self::GROUP_PREFIX . 'unchanged_b';
+		foreach ([$groupA, $groupB] as $g) {
+			$this->createManagedGroupRow($g);
+		}
+
+		$uid = self::UID_PREFIX . 'unchanged';
+		$this->createUserVoRow($uid, "$groupA,$groupB");
+
+		$auth = new UserVOAuth('https://vo.test/org', 'apiuser', 'apipass');
+		// Same group_ids as already stored - nothing actually changed.
+		$this->invokeUpdateVOMetadata($auth, $uid, ['id' => '1', 'username' => $uid, 'group_ids' => "$groupA,$groupB"]);
+
+		[$dirtyA, $cleanA] = $this->readSeqs($groupA);
+		[$dirtyB, $cleanB] = $this->readSeqs($groupB);
+		$this->assertSame($dirtyA, $cleanA, 'Unchanged membership must not dirty a group the user was already, and still is, a member of');
+		$this->assertSame($dirtyB, $cleanB);
 	}
 
 	public function testMetadataWriteIgnoresUnmanagedVoGroupIds(): void {

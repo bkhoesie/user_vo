@@ -104,4 +104,39 @@ class ForceInitialGroupSweepTest extends TestCase {
 		$this->assertSame(1, $dirtyAfterSecond);
 		$this->assertSame(0, $cleanAfterSecond);
 	}
+
+	/**
+	 * This is what every real install actually looks like by the time a
+	 * *second* release runs this repair step - post-migration repair steps
+	 * run on every version bump, not just the one that introduces them, and
+	 * ordinary traffic converges healthy groups to (N,N) for N > 0 within
+	 * days under NC's ~5-minute session revalidation. A literal `dirty_seq =
+	 * 1` here would leave the group trailing N-1 increments behind
+	 * clean_seq, unable to register as dirty again until N more writes land -
+	 * silently reintroducing B1 for that entire window.
+	 */
+	public function testConvergedGroupWithRealTrafficIsMarkedDirtyNotClobbered(): void {
+		$this->insertRow('test_forcesweep_e', 7, 7);
+
+		$this->runRepairStep();
+
+		[$dirty, $clean] = $this->readSeqs('test_forcesweep_e');
+		$this->assertSame(7, $clean, 'clean_seq must be untouched');
+		$this->assertGreaterThan($clean, $dirty, 'A converged group must end up dirty again for the sweep to reconfirm it, not stuck below clean_seq');
+	}
+
+	/**
+	 * Self-heals any install that already hit the bug this fix replaces (a
+	 * prior buggy run that set dirty_seq to a literal 1 on a group that was
+	 * actually at (N,N) for N > 1, leaving it inverted below clean_seq).
+	 */
+	public function testSelfHealsAnAlreadyInvertedGroup(): void {
+		$this->insertRow('test_forcesweep_f', 1, 7);
+
+		$this->runRepairStep();
+
+		[$dirty, $clean] = $this->readSeqs('test_forcesweep_f');
+		$this->assertSame(7, $clean);
+		$this->assertGreaterThan($clean, $dirty, 'An already-inverted group must be repaired, not left stuck dirty_seq < clean_seq');
+	}
 }

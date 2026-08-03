@@ -122,4 +122,48 @@ class GroupSyncSweepJobTest extends TestCase {
 		$this->assertCount(2, $seenBackends);
 		$this->assertSame($seenBackends[0], $seenBackends[1], 'The same backend instance must be reused across the whole batch - fetchAllGroups() memoizes per-instance, so reuse is what keeps this to one live GetGroups call per run');
 	}
+
+	/**
+	 * syncSingleGroupById() only catches \Exception internally, not
+	 * \Throwable - an \Error for one group must not abort the rest of this
+	 * run's batch and leave every remaining dirty group untouched.
+	 */
+	public function testOneGroupThrowingDoesNotAbortTheRestOfTheBatch(): void {
+		$this->ledgerService->method('findDirtyGroups')->willReturn(['g1', 'g2', 'g3']);
+
+		$seenGroupIds = [];
+		$this->groupSyncService->method('syncSingleGroupById')
+			->willReturnCallback(function ($voGroupId) use (&$seenGroupIds) {
+				$seenGroupIds[] = $voGroupId;
+				if ($voGroupId === 'g2') {
+					throw new \Error('simulated fatal error for g2');
+				}
+				return ['success' => true];
+			});
+
+		$this->runJob();
+
+		$this->assertEquals(['g1', 'g2', 'g3'], $seenGroupIds, 'g3 must still be attempted despite g2 throwing');
+	}
+
+	/**
+	 * All groups in a batch share one backend instance - if fetchAllGroups()
+	 * fails for one, it will fail identically for every remaining group in
+	 * the same run. Must stop instead of burning one failed VO API call per
+	 * remaining dirty group, every tick, for the duration of an outage.
+	 */
+	public function testStopsEarlyWhenVoApiAppearsDown(): void {
+		$this->ledgerService->method('findDirtyGroups')->willReturn(['g1', 'g2', 'g3']);
+
+		$seenGroupIds = [];
+		$this->groupSyncService->method('syncSingleGroupById')
+			->willReturnCallback(function ($voGroupId) use (&$seenGroupIds) {
+				$seenGroupIds[] = $voGroupId;
+				return ['success' => false, 'error' => 'Failed to fetch groups from VereinOnline', 'status_code' => 500];
+			});
+
+		$this->runJob();
+
+		$this->assertEquals(['g1'], $seenGroupIds, 'Must stop after the first VO-fetch failure rather than retrying identically for every remaining group');
+	}
 }

@@ -115,7 +115,22 @@ class GroupSyncSweepJob extends TimedJob {
         $failed = 0;
 
         foreach ($dirtyGroupIds as $voGroupId) {
-            $result = $this->groupSyncService->syncSingleGroupById($voGroupId, $backend);
+            try {
+                $result = $this->groupSyncService->syncSingleGroupById($voGroupId, $backend);
+            } catch (\Throwable $e) {
+                // One group's failure must not abort the rest of this run's
+                // batch - syncSingleGroupById() only catches \Exception
+                // internally, so an \Error here would otherwise propagate out
+                // of the loop and leave every remaining dirty group untouched
+                // for this tick.
+                $failed++;
+                logger('user_vo')->warning('Group sync sweep failed to repair a dirty group', [
+                    'vo_group_id' => $voGroupId,
+                    'error' => $e->getMessage(),
+                ]);
+                continue;
+            }
+
             if ($result['success']) {
                 $repaired++;
             } elseif (($result['status_code'] ?? null) === 409) {
@@ -128,6 +143,17 @@ class GroupSyncSweepJob extends TimedJob {
                     'vo_group_id' => $voGroupId,
                     'error' => $result['error'] ?? 'unknown error',
                 ]);
+
+                if (($result['error'] ?? null) === 'Failed to fetch groups from VereinOnline') {
+                    // Every remaining group in this batch shares the same
+                    // backend instance and would fail identically - stop
+                    // instead of burning one failed VO API call per
+                    // remaining dirty group on every tick of an outage.
+                    logger('user_vo')->warning('Group sync sweep stopping early - VO API appears to be down', [
+                        'remaining' => count($dirtyGroupIds) - $repaired - $stillContended - $failed,
+                    ]);
+                    break;
+                }
             }
         }
 

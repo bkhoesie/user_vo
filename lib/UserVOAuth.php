@@ -724,17 +724,24 @@ class UserVOAuth extends Base {
     /**
      * Update VO metadata in user_vo table
      *
-     * Runs as one transaction, and marks the union of the old and new VO
-     * group IDs dirty in the same transaction - this is the writer side of
-     * the B1 fix (see GroupSyncLedgerService and the
-     * Version1005Date20260803000000 migration for the full design). The
-     * union (not a diff) is used deliberately: it's a strict superset of the
-     * groups whose membership predicate could have changed, so it can never
-     * under-mark, and syncUserGroupsOnLogin() immediately syncs that same
-     * union right after this call anyway - the extra marks are cleared
-     * microseconds later in the common case, and matter only when that
-     * follow-up sync is itself skipped (lock contention), which is exactly
-     * when a sweep repair is wanted.
+     * Runs as one transaction, and marks the symmetric difference of the old
+     * and new VO group IDs dirty in the same transaction - this is the
+     * writer side of the B1 fix (see GroupSyncLedgerService and the
+     * Version1005Date20260803000000 migration for the full design). The sync
+     * side's membership predicate for a group G is exactly `G in
+     * user.vo_group_ids` (GroupSyncService::syncSingleGroupFullLocked()) -
+     * nothing else about this row participates. If G is in both OLD and NEW,
+     * that predicate evaluates identically whichever snapshot a racing sync
+     * read, so this write cannot make any racing sync compute a wrong answer
+     * for G; only a group whose presence actually changed can be affected.
+     * The diff is therefore provably sufficient, not merely an optimization -
+     * marking OLD union NEW (every group this user belongs to, changed or
+     * not) was tried first and reverted: since OLD == NEW in steady state,
+     * the union dirties a user's entire group set on every metadata write,
+     * which - via the nightly job's per-user sync step, or any lock-skipped
+     * login-time sync - caused GroupSyncSweepJob to keep resyncing groups
+     * with no actual membership change, including full resyncs of every
+     * managed group nightly regardless of enable_nightly_group_sync.
      *
      * The touch-update-then-read (rather than a plain SELECT) takes an
      * exclusive lock on this uid's row before reading OLD: this app can't
@@ -815,9 +822,11 @@ class UserVOAuth extends Base {
                 $qb->executeStatement();
             }
 
+            $oldGroupIds = self::splitGroupIds($oldVoGroupIds);
+            $newGroupIds = self::splitGroupIds($voGroupIds);
             $this->ledgerService->markDirty(array_merge(
-                self::splitGroupIds($oldVoGroupIds),
-                self::splitGroupIds($voGroupIds)
+                array_diff($oldGroupIds, $newGroupIds),
+                array_diff($newGroupIds, $oldGroupIds)
             ));
 
             if ($ownsTransaction) {

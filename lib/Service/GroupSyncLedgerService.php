@@ -40,10 +40,12 @@ class GroupSyncLedgerService {
     /**
      * Marks the given groups dirty via a single atomic SQL-level increment
      * (never a PHP read-modify-write - two concurrent callers must each
-     * apply their own increment, not clobber one another). IDs are sorted
-     * so concurrent callers touching overlapping sets always take row locks
-     * in the same order, making writer-vs-writer deadlock on this table
-     * structurally impossible.
+     * apply their own increment, not clobber one another). A single UPDATE
+     * against a unique index locks in a deterministic order for all callers
+     * regardless of the IDs' input order, so writer-vs-writer deadlock on
+     * this table is structurally impossible; IDs are still deduplicated and
+     * sorted for a stable, readable statement, not because sorting itself is
+     * what prevents deadlock.
      *
      * @param string[] $voGroupIds Managed VO group IDs; unmanaged IDs simply
      *   match no row and are silently ignored.
