@@ -2591,4 +2591,43 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
+    const clearAuditLogButton = document.getElementById('clear-audit-log');
+    if (clearAuditLogButton) {
+        clearAuditLogButton.addEventListener('click', function() {
+            if (!confirm(t('user_vo', 'Are you sure you want to clear the entire audit log? This cannot be undone.'))) {
+                return;
+            }
+
+            clearAuditLogButton.disabled = true;
+            clearAuditLogButton.textContent = t('user_vo', 'Clearing...');
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/audit-log/clear'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                clearAuditLogButton.disabled = false;
+                clearAuditLogButton.textContent = t('user_vo', 'Clear Log');
+
+                if (data.success) {
+                    OC.Notification.showTemporary(t('user_vo', 'Audit log cleared ({count} entries removed)', { count: data.deleted }));
+                    if (auditLogResults && auditLogResults.style.display !== 'none') {
+                        loadAuditLogButton.click();
+                    }
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + (data.error || 'Unknown error'), { type: 'error' });
+                }
+            })
+            .catch(error => {
+                clearAuditLogButton.disabled = false;
+                clearAuditLogButton.textContent = t('user_vo', 'Clear Log');
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
+            });
+        });
+    }
 });

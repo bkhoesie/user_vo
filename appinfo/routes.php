@@ -44,5 +44,6 @@ return [
         // Audit Log (AuditLogController)
         ['name' => 'audit_log#fetchRecent', 'url' => '/admin/audit-log/recent', 'verb' => 'GET'],
         ['name' => 'audit_log#download', 'url' => '/admin/audit-log/download', 'verb' => 'GET'],
+        ['name' => 'audit_log#clear', 'url' => '/admin/audit-log/clear', 'verb' => 'POST'],
     ]
 ]; 

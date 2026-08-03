@@ -114,4 +114,20 @@ class AuditLogService {
 
         return $qb->executeStatement();
     }
+
+    /**
+     * Deletes every entry (an explicit admin action, not retention policy) -
+     * then logs a single fresh entry recording the clear itself, so the log
+     * isn't just silently empty with no explanation of why. Returns the
+     * number of rows deleted (not counting the new entry).
+     */
+    public function clearAll(): int {
+        $qb = $this->connection->getQueryBuilder();
+        $qb->delete('user_vo_audit_log');
+        $deleted = $qb->executeStatement();
+
+        $this->log('audit_log_cleared', null, null, "Audit log cleared manually via admin interface ($deleted entries removed)");
+
+        return $deleted;
+    }
 }

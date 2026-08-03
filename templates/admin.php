@@ -429,6 +429,7 @@ style('user_vo', 'admin');
         <p>
             <button id="load-audit-log" class="button"><?php p($l->t('Load Recent Entries')); ?></button>
             <a id="download-audit-log" class="button" href="#"><?php p($l->t('Download Full Log (.txt)')); ?></a>
+            <button id="clear-audit-log" class="button button-danger"><?php p($l->t('Clear Log')); ?></button>
         </p>
 
         <div id="audit-log-results" style="display: none;">

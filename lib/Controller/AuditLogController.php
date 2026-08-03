@@ -11,8 +11,9 @@ use OCP\IRequest;
 
 /**
  * Controller for the admin-facing audit log view (see AuditLogService for
- * what gets logged and why). Read-only - there is no delete/edit action
- * here, only AuditLogCleanupJob's own retention policy removes entries.
+ * what gets logged and why). Mostly read-only - the only mutation is the
+ * explicit clear() action; entries otherwise only expire via
+ * AuditLogCleanupJob's own retention policy.
  */
 class AuditLogController extends Controller {
 	private AuditLogService $auditLogService;
@@ -50,5 +51,19 @@ class AuditLogController extends Controller {
 		$filename = 'user_vo_audit_log_' . date('Y-m-d_His') . '.txt';
 
 		return new DataDownloadResponse($text, $filename, 'text/plain');
+	}
+
+	/**
+	 * Clear the entire audit log - an explicit, irreversible admin action
+	 *
+	 * @return JSONResponse
+	 */
+	public function clear(): JSONResponse {
+		$deleted = $this->auditLogService->clearAll();
+
+		return new JSONResponse([
+			'success' => true,
+			'deleted' => $deleted,
+		]);
 	}
 }

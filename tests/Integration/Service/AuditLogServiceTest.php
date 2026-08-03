@@ -121,4 +121,23 @@ class AuditLogServiceTest extends TestCase {
 		$this->assertNotContains('test_cleanup_old', $remainingTypes);
 		$this->assertContains('test_cleanup_recent', $remainingTypes);
 	}
+
+	/**
+	 * clearAll() genuinely wipes the entire shared table by design - it's
+	 * the backing action for the admin UI's "Clear Log" button, which really
+	 * does mean "everything". Unlike this file's other tests, its own
+	 * cleanupTestData() (which only ever deletes test_% rows) can't restore
+	 * whatever else was in the table before this test ran - accepted, since
+	 * that's exactly the real behavior being verified.
+	 */
+	public function testClearAllDeletesEveryEntryAndLogsTheClearItself(): void {
+		$this->insertEntryAt('test_clear_before', new \DateTime());
+
+		$deleted = $this->service->clearAll();
+		$this->assertGreaterThanOrEqual(1, $deleted);
+
+		$remaining = $this->service->getRecentEntries(1000);
+		$this->assertCount(1, $remaining, 'Only the single fresh "cleared" entry should remain');
+		$this->assertEquals('audit_log_cleared', $remaining[0]['event_type']);
+	}
 }
