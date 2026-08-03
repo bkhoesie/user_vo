@@ -294,6 +294,16 @@ class UserProvisioningServiceTest extends TestCase {
 
 	// --- bulkCreateAccounts() ---
 
+	/**
+	 * "existing" here is a real different-backend account (created via
+	 * IUserManager::createUser(), the Database backend) - through this
+	 * partial-mock harness there's no way to fabricate a genuine same-backend
+	 * "already exists, no conflict" account (that requires a prior real VO
+	 * provisioning/login), so this is unavoidably a backend_conflict and
+	 * belongs in 'errors', not 'skipped'. See
+	 * testBulkCreateAccountsReportsBackendConflictAsAnErrorNotASkip below for
+	 * the dedicated regression coverage of that distinction.
+	 */
 	public function testBulkCreateAccountsCategorizesResults(): void {
 		$existingUid = self::UID_PREFIX . 'existing_bulk';
 		$this->userManager->createUser($existingUid, 'irrelevant-password-123!');
@@ -311,7 +321,30 @@ class UserProvisioningServiceTest extends TestCase {
 		$results = $this->service->bulkCreateAccounts(['new', 'existing', 'nologin'], $backend);
 
 		$this->assertCount(1, $results['created']);
-		$this->assertCount(1, $results['skipped']);
+		$this->assertCount(0, $results['skipped']);
+		$this->assertCount(2, $results['errors']);
+	}
+
+	/**
+	 * Regression test: a backend_conflict result (a VO username colliding
+	 * with an existing non-VO NC account) must be reported as a distinctly
+	 * flagged 'errors' entry, not silently bucketed into 'skipped' -
+	 * bulkCreateAccounts()'s "already exists" string match used to catch this
+	 * too, hiding exactly the identity conflict this release's conflict
+	 * detection was built to surface from an admin bulk-provisioning users.
+	 */
+	public function testBulkCreateAccountsReportsBackendConflictAsAnErrorNotASkip(): void {
+		$conflictUid = self::UID_PREFIX . 'conflict_bulk';
+		$this->userManager->createUser($conflictUid, 'irrelevant-password-123!');
+
+		$backend = $this->backendMock();
+		$backend->method('fetchUserDataFromVO')->willReturn(['id' => '1', 'username' => $conflictUid]);
+
+		$results = $this->service->bulkCreateAccounts(['1'], $backend);
+
+		$this->assertCount(0, $results['skipped'], 'Must not be silently bucketed as a benign skip');
 		$this->assertCount(1, $results['errors']);
+		$this->assertTrue($results['errors'][0]['backend_conflict']);
+		$this->assertStringContainsString('different authentication backend', $results['errors'][0]['error']);
 	}
 }

@@ -337,6 +337,17 @@ class UserProvisioningService {
                     'vo_user_id' => $voUserId,
                     'nc_username' => $result['username']
                 ];
+            } elseif (!empty($result['backend_conflict'])) {
+                // Must be checked before the generic "already exists" match below -
+                // createAccountFromVO()'s backend-conflict error also contains that
+                // phrase, and this is exactly the identity conflict that check would
+                // otherwise silently bucket as a benign "skipped", hiding it from an
+                // admin who bulk-provisions users.
+                $results['errors'][] = [
+                    'vo_user_id' => $voUserId,
+                    'error' => $result['error'] ?? 'Account already exists under a different authentication backend',
+                    'backend_conflict' => true,
+                ];
             } elseif (isset($result['error']) && str_contains($result['error'], 'already exists')) {
                 $results['skipped'][] = [
                     'vo_user_id' => $voUserId,
