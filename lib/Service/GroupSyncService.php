@@ -555,6 +555,17 @@ class GroupSyncService {
 
             $lockToken = $this->lockService->acquireWithBoundedWait($voGroupId, self::LOCK_WAIT_SECONDS);
             if ($lockToken === null) {
+                // The upfront check above doesn't fully close the race - the
+                // group could just as well have been deleted at any point
+                // during the wait itself, not only before it started. One
+                // more check here narrows that window from "the whole wait"
+                // down to next to nothing, for the same reason the upfront
+                // check exists: both failure modes look identical (0 affected
+                // rows) to the conditional UPDATE, and a contention error for
+                // a group that was actually deleted is misleading.
+                if (!$this->lockService->groupExists($voGroupId)) {
+                    throw new \Exception('Group no longer exists');
+                }
                 throw new GroupSyncLockContentionException('Group sync already in progress, please try again shortly');
             }
         }

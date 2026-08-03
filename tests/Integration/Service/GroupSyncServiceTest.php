@@ -65,7 +65,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child', 'uservo_test_pos_zero_unchanged', 'uservo_test_throwable_good', 'uservo_test_throwable_bad'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child', 'uservo_test_pos_zero_unchanged', 'uservo_test_throwable_good', 'uservo_test_throwable_bad', 'uservo_test_toctou_deleted_during_wait'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -143,6 +143,48 @@ class GroupSyncServiceTest extends TestCase {
 				'non_vo_member_count' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
 			])
 			->executeStatement();
+	}
+
+	/**
+	 * Regression test for the TOCTOU narrowing in syncSingleGroupFull()'s
+	 * blocking path: the upfront groupExists() check only rules out the
+	 * group having been deleted *before* the bounded wait started - if it's
+	 * deleted *during* the wait itself (a concurrent deleteGroup() call, say),
+	 * a failed acquire afterward must still be reported as "no longer
+	 * exists" (500), not misleadingly as lock contention (409), since both
+	 * look identical (0 affected rows) to the conditional UPDATE.
+	 */
+	public function testSyncSingleGroupByIdReportsGroupGoneWhenDeletedDuringTheWait(): void {
+		$voGroupId = 'test_toctou_deleted_during_wait';
+		$ncGroupId = 'uservo_test_toctou_deleted_during_wait';
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'TOCTOU Test');
+
+		// Simulates: exists at the upfront check, gone by the time the wait
+		// gives up (a concurrent delete happened in between).
+		$mockLockService = $this->createMock(GroupSyncLockService::class);
+		$mockLockService->method('groupExists')->willReturnOnConsecutiveCalls(true, false);
+		$mockLockService->method('acquireWithBoundedWait')->willReturn(null);
+
+		$service = new GroupSyncService(
+			$this->connection,
+			$this->groupManager,
+			$this->userManager,
+			new GroupNameHarmonizer(),
+			$mockLockService,
+			$this->ledgerService,
+			\OC::$server->get(AuditLogService::class)
+		);
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'TOCTOU Test', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $service->syncSingleGroupById($voGroupId, $backend);
+
+		$this->assertFalse($result['success']);
+		$this->assertEquals('Group no longer exists', $result['error']);
+		$this->assertEquals(500, $result['status_code'], 'Must be distinguishable from a 409 lock-contention response');
 	}
 
 	public function testSyncSingleGroupByIdWithRealDatabase() {
