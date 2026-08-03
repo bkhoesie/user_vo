@@ -4,6 +4,7 @@ namespace OCA\UserVO\Tests\Integration;
 use OCA\UserVO\Service\ApiClient;
 use OCA\UserVO\UserVOAuth;
 use OCP\IDBConnection;
+use OCP\IUserManager;
 use Test\TestCase;
 
 /**
@@ -19,10 +20,12 @@ class UserVOAuthTest extends TestCase {
 	private const UID_PREFIX = 'zzz_test_uservoauth_';
 
 	private IDBConnection $connection;
+	private IUserManager $userManager;
 
 	protected function setUp(): void {
 		parent::setUp();
 		$this->connection = \OC::$server->get(IDBConnection::class);
+		$this->userManager = \OC::$server->get(IUserManager::class);
 		$this->cleanupTestData();
 	}
 
@@ -37,6 +40,10 @@ class UserVOAuthTest extends TestCase {
 			->where($qb->expr()->eq('backend', $qb->createNamedParameter('user_vo')))
 			->andWhere($qb->expr()->like('uid', $qb->createNamedParameter(self::UID_PREFIX . '%')))
 			->executeStatement();
+
+		foreach ($this->userManager->search(self::UID_PREFIX) as $user) {
+			$user->delete();
+		}
 	}
 
 	private function authWithMockedApiClient(callable $makeRequestCallback): UserVOAuth {
@@ -129,6 +136,72 @@ class UserVOAuthTest extends TestCase {
 		$result = $auth->checkPassword($uid, 'anypassword');
 
 		$this->assertEquals($uid, $result, 'A successful VerifyLogin must succeed even if the follow-up GetMember call fails');
+		$this->assertTrue($this->userExistsInDb($uid));
+	}
+
+	// --- hasBackendConflict() ---
+
+	public function testHasBackendConflictFalseWhenNoAccountExistsAtAll(): void {
+		$auth = new UserVOAuth('https://vo.test/org', 'apiuser', 'apipass');
+		$this->assertFalse($auth->hasBackendConflict(self::UID_PREFIX . 'nobody'));
+	}
+
+	public function testHasBackendConflictFalseForAnAlreadyProvisionedUserVoAccount(): void {
+		$uid = self::UID_PREFIX . 'ownaccount';
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo')->values([
+			'uid' => $qb->createNamedParameter($uid),
+			'backend' => $qb->createNamedParameter('user_vo'),
+		])->executeStatement();
+
+		$auth = new UserVOAuth('https://vo.test/org', 'apiuser', 'apipass');
+		$this->assertFalse($auth->hasBackendConflict($uid), 'A uid this app\'s own backend already owns is not a conflict');
+	}
+
+	public function testHasBackendConflictTrueForARealAccountUnderADifferentBackend(): void {
+		$uid = self::UID_PREFIX . 'otherbackend';
+		$this->userManager->createUser($uid, 'irrelevant-password-123!');
+
+		$auth = new UserVOAuth('https://vo.test/org', 'apiuser', 'apipass');
+		$this->assertTrue($auth->hasBackendConflict($uid));
+	}
+
+	// --- login-time conflict guard (checkCanonicalPassword) ---
+
+	/**
+	 * VerifyLogin succeeding must not be enough to proceed if $uid already
+	 * belongs to a different backend's real account - see
+	 * hasBackendConflict()'s doc-comment for why this is more than cosmetic
+	 * (NC core tries every registered backend's checkPassword() regardless
+	 * of which one already "owns" a uid).
+	 */
+	public function testLoginFailsWhenUidBelongsToADifferentBackend(): void {
+		$uid = self::UID_PREFIX . 'loginconflict';
+		$this->userManager->createUser($uid, 'irrelevant-password-123!');
+
+		$auth = $this->authWithMockedApiClient(fn() => ['999']); // VerifyLogin succeeds
+
+		$result = $auth->checkPassword($uid, 'anypassword');
+
+		$this->assertFalse($result, 'Login must be refused despite valid VO credentials');
+		$this->assertFalse($this->userExistsInDb($uid), 'Must not create a user_vo row for a uid this app does not own');
+	}
+
+	public function testLoginStillSucceedsForANonConflictingUid(): void {
+		// Negative control for the test above - a uid with no pre-existing
+		// account at all must still be able to log in normally.
+		$uid = self::UID_PREFIX . 'nonconflict';
+
+		$auth = $this->authWithMockedApiClient(function ($url) {
+			if (str_contains($url, 'VerifyLogin')) {
+				return ['999'];
+			}
+			return null;
+		});
+
+		$result = $auth->checkPassword($uid, 'anypassword');
+
+		$this->assertEquals($uid, $result);
 		$this->assertTrue($this->userExistsInDb($uid));
 	}
 }

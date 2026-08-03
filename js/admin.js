@@ -1356,16 +1356,19 @@ document.addEventListener('DOMContentLoaded', function() {
         response.users.forEach(user => {
             const row = document.createElement('tr');
 
-            const statusBadge = user.nc_account_exists
+            const statusBadge = user.backend_conflict
+                ? `<span class="vo-badge vo-badge-error" title="${escapeHtml(t('user_vo', 'A local account with this username already exists under a different authentication backend - user_vo cannot manage it'))}">⚠️ ` +
+                  t('user_vo', 'Backend conflict') + '</span>'
+                : user.nc_account_exists
                 ? `<span class="vo-badge vo-badge-success">✓ ${escapeHtml(user.nc_username)}</span>`
                 : '<span class="vo-badge vo-badge-warning">' + t('user_vo', 'Not created') + '</span>';
 
-            const actionButton = user.nc_account_exists
+            const actionButton = (user.nc_account_exists || user.backend_conflict)
                 ? '<span class="vo-text-muted">—</span>'
                 : `<button class="button create-account-btn" data-vo-user-id="${escapeHtml(user.vo_user_id)}">` +
                   t('user_vo', 'Create Account') + '</button>';
 
-            const checkbox = user.nc_account_exists
+            const checkbox = (user.nc_account_exists || user.backend_conflict)
                 ? '<span class="vo-text-muted">—</span>'
                 : `<input type="checkbox" class="vo-user-checkbox" data-vo-user-id="${escapeHtml(user.vo_user_id)}" />`;
 

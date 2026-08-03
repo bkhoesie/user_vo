@@ -154,6 +154,54 @@ class UserProvisioningServiceTest extends TestCase {
 		$this->assertEquals($uid, $result['users'][0]['nc_username']);
 	}
 
+	public function testSearchVOUsersReportsBackendConflictForUnprovisionedCollidingUsername(): void {
+		$uid = self::UID_PREFIX . 'conflict_search';
+		// A real local account under a different backend, never touched by user_vo.
+		$this->userManager->createUser($uid, 'irrelevant-password-123!');
+
+		$backend = $this->backendMock();
+		$backend->method('fetchAllMembers')->willReturn([['id' => '1', 'name' => 'Conflict, User']]);
+		$backend->method('fetchUserDataFromVO')->willReturn(['id' => '1', 'username' => $uid]);
+
+		$result = $this->service->searchVOUsers('', $backend);
+
+		$this->assertFalse($result['users'][0]['nc_account_exists'], 'Not a user_vo account - must not be reported as one');
+		$this->assertTrue($result['users'][0]['backend_conflict']);
+	}
+
+	public function testSearchVOUsersDoesNotReportConflictForANeverProvisionedNonCollidingUser(): void {
+		$backend = $this->backendMock();
+		$backend->method('fetchAllMembers')->willReturn([['id' => '1', 'name' => 'Fresh, User']]);
+		$backend->method('fetchUserDataFromVO')->willReturn(['id' => '1', 'username' => self::UID_PREFIX . 'fresh_nocollision']);
+
+		$result = $this->service->searchVOUsers('', $backend);
+
+		$this->assertFalse($result['users'][0]['nc_account_exists']);
+		$this->assertFalse($result['users'][0]['backend_conflict']);
+	}
+
+	public function testSearchVOUsersDoesNotReportConflictForAnAlreadyProvisionedUser(): void {
+		// Same setup as testSearchVOUsersReportsExistingNcAccount - an
+		// already-provisioned user_vo account resolves via user_vo's own
+		// backend, so it can never itself be a "different backend" conflict.
+		$uid = self::UID_PREFIX . 'existing_no_conflict';
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo')->values([
+			'uid' => $qb->createNamedParameter($uid),
+			'backend' => $qb->createNamedParameter('user_vo'),
+			'vo_username' => $qb->createNamedParameter('vo.existingnoconflict'),
+		])->executeStatement();
+
+		$backend = $this->backendMock();
+		$backend->method('fetchAllMembers')->willReturn([['id' => '1', 'name' => 'Existing, NoConflict']]);
+		$backend->method('fetchUserDataFromVO')->willReturn(['id' => '1', 'username' => 'vo.existingnoconflict']);
+
+		$result = $this->service->searchVOUsers('', $backend);
+
+		$this->assertTrue($result['users'][0]['nc_account_exists']);
+		$this->assertFalse($result['users'][0]['backend_conflict']);
+	}
+
 	// --- createAccountFromVO() ---
 
 	public function testCreateAccountFromVOFailsWhenMemberFetchFails(): void {
@@ -198,6 +246,26 @@ class UserProvisioningServiceTest extends TestCase {
 
 		$this->assertFalse($result['success']);
 		$this->assertStringContainsString('already exists', $result['error']);
+	}
+
+	/**
+	 * A username colliding with a real account under a *different* backend
+	 * (the Database backend here, via createUser()) is a distinct, more
+	 * specific situation than "already exists" - the error should say so,
+	 * since it's not recoverable by choosing a different VO account (this VO
+	 * user genuinely cannot be provisioned under this username at all).
+	 */
+	public function testCreateAccountFromVOReportsBackendConflictDistinctly(): void {
+		$uid = self::UID_PREFIX . 'conflict_create';
+		$this->userManager->createUser($uid, 'irrelevant-password-123!');
+
+		$backend = $this->backendMock();
+		$backend->method('fetchUserDataFromVO')->willReturn(['id' => '1', 'username' => $uid]);
+
+		$result = $this->service->createAccountFromVO('1', $backend);
+
+		$this->assertFalse($result['success']);
+		$this->assertStringContainsString('different authentication backend', $result['error']);
 	}
 
 	public function testCreateAccountFromVOSucceedsAndStoresUser(): void {

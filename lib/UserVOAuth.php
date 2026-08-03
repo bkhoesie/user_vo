@@ -123,6 +123,18 @@ class UserVOAuth extends Base {
             logger('user_vo')->error('API request failed');
             return false;
         } elseif (is_array($response) && isset($response[0]) && $response[0] !== '') {
+            // VO credentials verified - but refuse to proceed if $uid already
+            // belongs to a different backend's local account (see
+            // hasBackendConflict()'s doc-comment for why this matters beyond
+            // cosmetics). Checked before storeUser() so this app never
+            // creates its own bookkeeping row for a uid it doesn't actually
+            // own, and the login fails visibly instead of silently
+            // succeeding into an ambiguous identity.
+            if ($this->hasBackendConflict($uid)) {
+                logger('user_vo')->error("Refusing login: '$uid' already exists under a different authentication backend", ['uid' => $uid]);
+                return false;
+            }
+
             // Authentication successful - store user first
             $this->storeUser($uid);
 

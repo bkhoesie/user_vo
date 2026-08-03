@@ -326,6 +326,36 @@ abstract class Base extends \OC\User\Backend {
 	}
 
 	/**
+	 * Whether $uid already belongs to a *different* backend - a local NC
+	 * account (created via NC core, another app, or a prior admin action)
+	 * that happens to share a username with a VO user, but isn't managed by
+	 * this app.
+	 *
+	 * IUserManager::get() resolves a uid across every registered backend
+	 * system-wide, returning whichever one first reports the uid as
+	 * existing - NC has no concept of "this uid is reserved for backend X",
+	 * so nothing stops two backends from both claiming the same uid. NC
+	 * core's own login dispatch (Manager::checkPasswordNoLogging()) tries
+	 * every registered backend's checkPassword() in turn regardless of which
+	 * one already "owns" a uid, so a VO login attempt for a uid that
+	 * collides with a different backend's real account isn't just a
+	 * cosmetic problem - if VO's credentials happen to verify, the login
+	 * would otherwise proceed as an ambiguous, backend-crossing identity.
+	 * This app can't fix that NC-wide, but it can refuse to compound it in
+	 * its own code paths: creating this app's own bookkeeping row for a uid
+	 * a different backend already owns, or silently treating pre-provisioning
+	 * as available when it isn't.
+	 *
+	 * Returns false both when no account exists at all, and when the
+	 * existing account is already this app's own (i.e. genuinely no
+	 * conflict) - only true when a *different* backend owns it.
+	 */
+	public function hasBackendConflict(string $uid): bool {
+		$ncUser = \OC::$server->get(\OCP\IUserManager::class)->get($uid);
+		return $ncUser !== null && $ncUser->getBackendClassName() !== static::class;
+	}
+
+	/**
 	 * Count the number of users.
 	 *
 	 * @return int|bool The number of users on success false on failure

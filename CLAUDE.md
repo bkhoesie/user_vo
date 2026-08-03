@@ -238,8 +238,8 @@ The plugin includes a multi-layer testing strategy:
 - `GroupSyncController`: Group member synchronization
 - `UserSyncController`: User data synchronization
 - All controllers have comprehensive integration test coverage
-- `Base`/`UserVOAuth`: login flow (`checkCanonicalPassword()`), case-insensitive matching, duplicate-marker safety net
-- `UserProvisioningService`, `UserSyncService`, `UserAccountService`: real-DB coverage of search, sync, and duplicate-scan logic
+- `Base`/`UserVOAuth`: login flow (`checkCanonicalPassword()`), case-insensitive matching, duplicate-marker safety net, `hasBackendConflict()` and the login-time conflict guard (a VO login for a uid a different backend already owns must fail, not silently create ambiguous identity)
+- `UserProvisioningService`, `UserSyncService`, `UserAccountService`: real-DB coverage of search, sync, and duplicate-scan logic, incl. `backend_conflict` reporting in `searchVOUsers()` and the backend-aware error in `createAccountFromVO()`
 - `GroupDeletedListener`: managed-group cleanup on NC group deletion
 - `GroupSyncLedgerService`: dirty/clean sequence ledger mechanics, stale-lease redirty (the fencing-token analogue for the clean-advance)
 - `GroupSyncService`/`UserVOAuth`: the B1 interleaving scenarios (concurrent write during sync, lease-expired-mid-body, throw-before/after-mutation) and the writer-side symmetric-diff dirty-marking

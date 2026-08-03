@@ -139,6 +139,15 @@ class UserProvisioningService {
                 $ncUsername = $row ? $row['uid'] : null;
                 $ncUser = $ncUsername ? $userManager->get($ncUsername) : null;
 
+                // Not yet provisioned via user_vo - only then does it matter
+                // whether the username createAccountFromVO() would actually
+                // try to create (lowercased VO username) already belongs to a
+                // different backend. An already-provisioned user_vo account
+                // can't have this conflict: it necessarily resolves back to
+                // this app's own backend, or nc_account_exists above would
+                // already be showing it correctly.
+                $backendConflict = $ncUsername === null && $backend->hasBackendConflict(strtolower($voUsername));
+
                 $results[] = [
                     'vo_user_id' => $memberId,
                     'vo_username' => $voUsername,
@@ -147,6 +156,7 @@ class UserProvisioningService {
                     'email' => $memberData['email'] ?? '', // Normalized field
                     'nc_account_exists' => ($ncUser !== null),
                     'nc_username' => $ncUser ? $ncUser->getUID() : null,
+                    'backend_conflict' => $backendConflict,
                 ];
             }
 
@@ -206,6 +216,12 @@ class UserProvisioningService {
             // Check if account already exists
             $userManager = \OC::$server->get(\OCP\IUserManager::class);
             if ($userManager->get($ncUsername)) {
+                if ($backend->hasBackendConflict($ncUsername)) {
+                    return [
+                        'success' => false,
+                        'error' => "Account '$ncUsername' already exists and is managed by a different authentication backend - it cannot be provisioned via user_vo"
+                    ];
+                }
                 return [
                     'success' => false,
                     'error' => "Account '$ncUsername' already exists"

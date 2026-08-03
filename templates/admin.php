@@ -195,8 +195,8 @@ style('user_vo', 'admin');
         </p>
         <p>
             <input type="checkbox" id="sync-photo" name="sync_photo" class="checkbox"
-                   <?php if (($_['sync_settings']['sync_photo'] ?? 'false') === 'true'): ?>checked<?php endif; ?> />
-            <label for="sync-photo"><?php p($l->t('Sync profile pictures from VO (disabled by default)')); ?></label>
+                   <?php if (($_['sync_settings']['sync_photo'] ?? 'true') === 'true'): ?>checked<?php endif; ?> />
+            <label for="sync-photo"><?php p($l->t('Sync profile pictures from VO (enabled by default)')); ?></label>
         </p>
 
         <h4><?php p($l->t('Nightly Sync')); ?></h4>
