@@ -184,6 +184,18 @@ describe('renderGroupStatusBadge', () => {
     test('shows not-created for unmanaged groups', () => {
         expect(renderGroupStatusBadge({ is_managed: false })).toContain('vo-badge-warning');
     });
+
+    test('flags a backend conflict on an unmanaged group', () => {
+        const html = renderGroupStatusBadge({ is_managed: false, backend_conflict: true, conflicting_backends: ['LDAP'], vo_group_id: '1' });
+        expect(html).toContain('vo-badge-error');
+        expect(html).toContain('Backend conflict');
+        expect(html).toContain('LDAP');
+    });
+
+    test('backend_conflict takes priority over the plain not-created badge', () => {
+        const html = renderGroupStatusBadge({ is_managed: false, backend_conflict: true, conflicting_backends: ['LDAP'], vo_group_id: '1' });
+        expect(html).not.toContain('Not created');
+    });
 });
 
 describe('renderGroupActions', () => {
@@ -205,6 +217,20 @@ describe('renderGroupActions', () => {
         expect(html).toContain('create-group-btn');
         expect(html).not.toContain('sync-group-btn');
         expect(html).not.toContain('delete-group-btn');
+    });
+
+    test('offers no action for an unmanaged group with a backend conflict', () => {
+        const html = renderGroupActions({ is_managed: false, backend_conflict: true, vo_group_id: '1' });
+        expect(html).not.toContain('create-group-btn');
+        expect(html).toContain('vo-text-muted');
+    });
+
+    test('offers recreate + delete (not sync) for a group whose NC group is missing', () => {
+        const html = renderGroupActions({ nc_group_missing: true, vo_group_id: '1', nc_group_id: '2', vo_group_name: 'X' });
+        expect(html).toContain('recreate-group-btn');
+        expect(html).toContain('delete-group-btn');
+        expect(html).not.toContain('sync-group-btn');
+        expect(html).not.toContain('class="button create-group-btn"');
     });
 });
 

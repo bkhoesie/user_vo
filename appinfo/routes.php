@@ -31,6 +31,7 @@ return [
         ['name' => 'group#fetchAllVOGroups', 'url' => '/admin/fetch-all-vo-groups', 'verb' => 'GET'],
         ['name' => 'group#fetchManagedGroups', 'url' => '/admin/fetch-managed-groups', 'verb' => 'GET'],
         ['name' => 'group#createGroup', 'url' => '/admin/create-group', 'verb' => 'POST'],
+        ['name' => 'group#recreateGroup', 'url' => '/admin/recreate-group', 'verb' => 'POST'],
         ['name' => 'group#deleteGroup', 'url' => '/admin/delete-group', 'verb' => 'POST'],
         ['name' => 'group#bulkCreateGroups', 'url' => '/admin/bulk-create-groups', 'verb' => 'POST'],
         ['name' => 'group#bulkDeleteGroups', 'url' => '/admin/bulk-delete-groups', 'verb' => 'POST'],

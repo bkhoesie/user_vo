@@ -131,6 +131,8 @@ class GroupManagementServiceTest extends TestCase {
 		$this->assertFalse($result['success']);
 		$this->assertStringContainsString('different backend', $result['error']);
 		$this->assertStringContainsString('LDAP', $result['error']);
+		$this->assertTrue($result['backend_conflict']);
+		$this->assertEquals(['LDAP'], $result['conflicting_backends']);
 
 		$qb = $this->connection->getQueryBuilder();
 		$row = $qb->select('vo_group_id')->from('user_vo_groups')
@@ -416,6 +418,61 @@ class GroupManagementServiceTest extends TestCase {
 	}
 
 	/**
+	 * Same backend-adoption reasoning as
+	 * testCreateGroupRefusesToAdoptAGroupManagedByADifferentBackend(), but
+	 * checked ahead of time in the "all VO groups" listing (before the admin
+	 * ever clicks Create) rather than only discovered when creation fails.
+	 */
+	public function testFetchAllVOGroupsFlagsBackendConflictForAnUnmanagedGroup(): void {
+		$mockGroup = $this->createMock(IGroup::class);
+		$mockGroup->method('getBackendNames')->willReturn(['LDAP']);
+
+		$mockGroupManager = $this->createMock(IGroupManager::class);
+		$mockGroupManager->method('groupExists')->willReturn(true);
+		$mockGroupManager->method('get')->willReturn($mockGroup);
+
+		$service = new GroupManagementService(
+			$this->connection,
+			$mockGroupManager,
+			new GroupNameHarmonizer(),
+			$this->createMock(\Psr\Log\LoggerInterface::class),
+			$this->createMock(GroupSyncService::class)
+		);
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'test_ldap_conflict', 'name' => 'Test LDAP Conflict', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $service->fetchAllVOGroups($backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_ldap_conflict'));
+		$this->assertNotFalse($group);
+		$this->assertTrue($group['backend_conflict']);
+		$this->assertEquals(['LDAP'], $group['conflicting_backends']);
+	}
+
+	public function testFetchAllVOGroupsDoesNotFlagBackendConflictWhenNcGroupIsFreeToAdopt(): void {
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'test_no_conflict', 'name' => 'Test No Conflict', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->fetchAllVOGroups($backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_no_conflict'));
+		$this->assertNotFalse($group);
+		$this->assertFalse($group['backend_conflict']);
+		$this->assertEquals([], $group['conflicting_backends']);
+	}
+
+	/**
 	 * Test fetchManagedGroups returns managed groups with VO data
 	 */
 	public function testFetchManagedGroupsReturnsManagedGroups(): void {
@@ -507,6 +564,76 @@ class GroupManagementServiceTest extends TestCase {
 		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_ncpresent'));
 		$this->assertNotFalse($group);
 		$this->assertFalse($group['nc_group_missing']);
+	}
+
+	/**
+	 * The recreate path for a nc_group_missing row - restores the NC group
+	 * under the exact same nc_group_id already recorded in the tracking row.
+	 */
+	public function testRecreateGroupRecreatesTheNcGroupAndSyncsMembers(): void {
+		$this->createTestGroup('test_recreate', 'Test Recreate Group', '1', createNcGroup: false);
+		$this->assertFalse($this->groupManager->groupExists('uservo_test_recreate'));
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'test_recreate', 'name' => 'Test Recreate Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->recreateGroup('test_recreate', $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+		$this->assertEquals('uservo_test_recreate', $result['nc_group_id']);
+
+		$this->assertTrue($this->groupManager->groupExists('uservo_test_recreate'));
+	}
+
+	/**
+	 * The auto-sync also fixes display-name drift as part of its normal job
+	 * (see the "display name mismatch... will be fixed on next sync" badge),
+	 * so a test that lets sync succeed can't tell apart recreateGroup()'s own
+	 * setDisplayName() call from the sync fixing it anyway. Force the
+	 * follow-up sync to fail (same technique as
+	 * testCreateGroupStaysDirtyWhenTheAutoSyncFails()) to isolate it: NC's
+	 * default display name on bare creation is the raw gid itself, so if
+	 * this passes only because of the explicit call, not sync.
+	 */
+	public function testRecreateGroupSetsTheDisplayNameEvenWhenTheFollowUpSyncFails(): void {
+		$this->createTestGroup('test_recreate_nosync', 'Test Recreate No Sync', '1', createNcGroup: false);
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn(null);
+
+		$result = $this->service->recreateGroup('test_recreate_nosync', $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+		$this->assertFalse($result['synced']);
+
+		$ncGroup = $this->groupManager->get('uservo_test_recreate_nosync');
+		$this->assertEquals('Test Recreate No Sync', $ncGroup->getDisplayName());
+	}
+
+	public function testRecreateGroupFailsWhenTheNcGroupStillExists(): void {
+		$this->createTestGroup('test_recreate_present', 'Test Recreate Present', '1');
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+
+		$result = $this->service->recreateGroup('test_recreate_present', $backend);
+		$this->assertFalse($result['success']);
+		$this->assertStringContainsString('still exists', $result['error']);
+	}
+
+	public function testRecreateGroupFailsWhenTheRowIsNotManaged(): void {
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+
+		$result = $this->service->recreateGroup('test_never_tracked', $backend);
+		$this->assertFalse($result['success']);
+		$this->assertEquals('Group is not managed', $result['error']);
 	}
 
 	/**

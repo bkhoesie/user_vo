@@ -140,7 +140,9 @@ class GroupController extends Controller {
 				$statusCode = $result['status_code'] ?? 500;
 				return new JSONResponse([
 					'success' => false,
-					'error' => $result['error']
+					'error' => $result['error'],
+					'backend_conflict' => $result['backend_conflict'] ?? false,
+					'conflicting_backends' => $result['conflicting_backends'] ?? []
 				], $statusCode);
 			}
 
@@ -148,6 +150,49 @@ class GroupController extends Controller {
 
 		} catch (\Exception $e) {
 			$this->logger->error('Failed to create group', [
+				'app' => 'user_vo',
+				'vo_group_id' => $voGroupId ?? 'unknown',
+				'error' => $e->getMessage()
+			]);
+
+			return new JSONResponse([
+				'success' => false,
+				'error' => $e->getMessage()
+			], 500);
+		}
+	}
+
+	/**
+	 * Recreate the NC group for a managed row whose NC group is gone
+	 *
+	 * @return JSONResponse
+	 */
+	public function recreateGroup(): JSONResponse {
+		try {
+			$voGroupId = $this->request->getParam('vo_group_id', '');
+
+			if (empty($voGroupId)) {
+				return new JSONResponse([
+					'success' => false,
+					'error' => 'VO group ID is required'
+				], 400);
+			}
+
+			$backend = $this->createBackend();
+			$result = $this->groupManagementService->recreateGroup($voGroupId, $backend);
+
+			if (!$result['success']) {
+				$statusCode = $result['status_code'] ?? 500;
+				return new JSONResponse([
+					'success' => false,
+					'error' => $result['error']
+				], $statusCode);
+			}
+
+			return new JSONResponse($result);
+
+		} catch (\Exception $e) {
+			$this->logger->error('Failed to recreate group', [
 				'app' => 'user_vo',
 				'vo_group_id' => $voGroupId ?? 'unknown',
 				'error' => $e->getMessage()

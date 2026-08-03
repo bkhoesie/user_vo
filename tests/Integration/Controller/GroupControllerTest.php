@@ -205,6 +205,36 @@ class GroupControllerTest extends TestCase {
 		$this->assertEquals(1, $data['summary']['errors']);
 	}
 
+	// --- recreateGroup: its failure paths return before ever touching VO, so
+	// they're fully testable here; the success path also auto-syncs via VO
+	// and so is left to GroupManagementServiceTest's mocked-backend coverage ---
+
+	public function testRecreateGroupMissingIdReturns400(): void {
+		$response = $this->controller->recreateGroup();
+		$this->assertEquals(400, $response->getStatus());
+		$this->assertFalse($response->getData()['success']);
+	}
+
+	public function testRecreateGroupNonExistentReturns404(): void {
+		$controller = $this->controllerWithParams(['vo_group_id' => 'test_never_tracked']);
+		$response = $controller->recreateGroup();
+
+		$this->assertEquals(404, $response->getStatus());
+		$this->assertFalse($response->getData()['success']);
+	}
+
+	public function testRecreateGroupStillExistingReturns409(): void {
+		// createTestGroup() creates the real NC group too, so it's not
+		// actually missing - recreateGroup() must refuse rather than no-op.
+		$this->createTestGroup('test_recreate_present', 'Still Here');
+
+		$controller = $this->controllerWithParams(['vo_group_id' => 'test_recreate_present']);
+		$response = $controller->recreateGroup();
+
+		$this->assertEquals(409, $response->getStatus());
+		$this->assertFalse($response->getData()['success']);
+	}
+
 	// --- createGroup / bulkCreateGroups: need VO, only failure paths testable here ---
 
 	public function testCreateGroupReturnsErrorStatusWhenVOUnreachable(): void {

@@ -130,6 +130,25 @@ class GroupManagementService {
                 $isManaged = ($dbRow !== false);
                 $deletedInVO = $isManaged && $dbRow['deleted_in_vo'];
 
+                // If not yet managed, check whether creating it would collide
+                // with an existing NC group owned by another backend (e.g.
+                // LDAP-synced) - same reasoning as createGroupFromData()'s
+                // adopt-check, checked ahead of time here so the admin sees
+                // it before clicking Create rather than after it fails.
+                $backendConflict = false;
+                $conflictingBackends = [];
+                if (!$isManaged) {
+                    $candidateNcGroupId = 'uservo_' . $voGroupId;
+                    if ($this->groupManager->groupExists($candidateNcGroupId)) {
+                        $existingGroup = $this->groupManager->get($candidateNcGroupId);
+                        $backendNames = $existingGroup ? $existingGroup->getBackendNames() : [];
+                        if ($backendNames !== ['Database']) {
+                            $backendConflict = true;
+                            $conflictingBackends = $backendNames;
+                        }
+                    }
+                }
+
                 // Update stored VO name if changed in VO
                 if ($isManaged && $dbRow['vo_group_name'] !== $voGroupName) {
                     $updateQb = $this->connection->getQueryBuilder();
@@ -159,6 +178,8 @@ class GroupManagementService {
                     'member_count' => $isManaged ? (int)$dbRow['member_count'] : null,
                     'vo_member_count' => $isManaged ? (int)$dbRow['vo_member_count'] : null,
                     'non_vo_member_count' => $isManaged ? (int)$dbRow['non_vo_member_count'] : null,
+                    'backend_conflict' => $backendConflict,
+                    'conflicting_backends' => $conflictingBackends,
                 ];
             }
 
@@ -397,7 +418,9 @@ class GroupManagementService {
                 } else {
                     $results['errors'][] = [
                         'vo_group_id' => $voGroupId,
-                        'error' => $createResult['error']
+                        'error' => $createResult['error'],
+                        'backend_conflict' => $createResult['backend_conflict'] ?? false,
+                        'conflicting_backends' => $createResult['conflicting_backends'] ?? []
                     ];
                 }
 
@@ -484,7 +507,10 @@ class GroupManagementService {
             if ($backendNames !== ['Database']) {
                 return [
                     'success' => false,
-                    'error' => "NC group '$ncGroupId' already exists and is managed by a different backend (" . implode(', ', $backendNames) . ') - it cannot be adopted by user_vo'
+                    'error' => "NC group '$ncGroupId' already exists and is managed by a different backend (" . implode(', ', $backendNames) . ') - it cannot be adopted by user_vo',
+                    'status_code' => 409,
+                    'backend_conflict' => true,
+                    'conflicting_backends' => $backendNames,
                 ];
             }
 
@@ -675,6 +701,103 @@ class GroupManagementService {
                 $result['sync_error'] = $e->getMessage();
                 $result['message'] = "Group created successfully, but member sync encountered an error";
             }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Recreate the NC group for a managed row whose NC group is gone (see
+     * fetchManagedGroups()'s nc_group_missing flag) - restores it under the
+     * exact same nc_group_id already recorded in the tracking row, then
+     * re-syncs membership. The alternative resolution is deleteGroup(),
+     * which drops the tracking row instead so the VO group can be created
+     * fresh via the normal flow.
+     *
+     * @param string $voGroupId VO group ID
+     * @return array Result with success, nc_group_id, vo_group_name, or error
+     */
+    public function recreateGroup(string $voGroupId, UserVOAuth $backend): array {
+        $qb = $this->connection->getQueryBuilder();
+        $qb->select('nc_group_id', 'nc_display_name', 'vo_group_name')
+            ->from('user_vo_groups')
+            ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
+        $result = $qb->executeQuery();
+        $groupRow = $result->fetch();
+        $result->closeCursor();
+
+        if (!$groupRow) {
+            return [
+                'success' => false,
+                'error' => 'Group is not managed',
+                'status_code' => 404
+            ];
+        }
+
+        $ncGroupId = $groupRow['nc_group_id'];
+
+        if ($this->groupManager->groupExists($ncGroupId)) {
+            return [
+                'success' => false,
+                'error' => "NC group '$ncGroupId' still exists - nothing to recreate",
+                'status_code' => 409
+            ];
+        }
+
+        $ncGroup = $this->groupManager->createGroup($ncGroupId);
+        if (!$ncGroup) {
+            return [
+                'success' => false,
+                'error' => 'Failed to recreate Nextcloud group',
+                'status_code' => 500
+            ];
+        }
+        $ncGroup->setDisplayName((string)($groupRow['nc_display_name'] ?? $groupRow['vo_group_name']));
+
+        $this->logger->info('Recreated missing NC group', [
+            'app' => 'user_vo',
+            'nc_group_id' => $ncGroupId,
+            'vo_group_id' => $voGroupId
+        ]);
+
+        $result = [
+            'success' => true,
+            'message' => 'Group recreated successfully',
+            'nc_group_id' => $ncGroupId,
+            'vo_group_id' => $voGroupId,
+            'vo_group_name' => $groupRow['vo_group_name']
+        ];
+
+        // Auto-sync group members after recreation, matching single createGroup()
+        try {
+            $syncResult = $this->groupSyncService->syncSingleGroupById($voGroupId, $backend);
+
+            if ($syncResult['success']) {
+                /** @var GroupSyncSingleSuccess $syncResult */
+                $result['synced'] = true;
+                $result['sync_summary'] = $syncResult['summary'];
+                $result['message'] = 'Group recreated and synced successfully';
+            } else {
+                $this->logger->warning('Group recreated but auto-sync failed', [
+                    'app' => 'user_vo',
+                    'vo_group_id' => $voGroupId,
+                    'sync_error' => $syncResult['error'] ?? 'Unknown error'
+                ]);
+
+                $result['synced'] = false;
+                $result['sync_error'] = $syncResult['error'] ?? 'Unknown sync error';
+                $result['message'] = 'Group recreated successfully, but member sync failed';
+            }
+        } catch (\Exception $e) {
+            $this->logger->error('Exception during group auto-sync after recreate', [
+                'app' => 'user_vo',
+                'vo_group_id' => $voGroupId,
+                'error' => $e->getMessage()
+            ]);
+
+            $result['synced'] = false;
+            $result['sync_error'] = $e->getMessage();
+            $result['message'] = 'Group recreated successfully, but member sync encountered an error';
         }
 
         return $result;

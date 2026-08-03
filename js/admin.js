@@ -119,11 +119,36 @@ function renderGroupStatusBadge(group) {
         return '<span class="vo-badge vo-badge-success">✓ ' + escapeHtml(t('user_vo', 'Created')) + '</span>';
     }
 
+    if (group.backend_conflict) {
+        const conflictingBackends = (group.conflicting_backends && group.conflicting_backends.length)
+            ? group.conflicting_backends.join(', ')
+            : t('user_vo', 'a different backend');
+        const tooltipText = 'NC group uservo_' + group.vo_group_id + ' already exists and is managed by ' + conflictingBackends + ' - user_vo cannot adopt it';
+        return '<span class="vo-badge vo-badge-error" title="' + escapeHtml(tooltipText) + '">⚠ ' +
+            escapeHtml(t('user_vo', 'Backend conflict')) + ' (' + escapeHtml(conflictingBackends) + ')</span>';
+    }
+
     return '<span class="vo-badge vo-badge-warning">' + escapeHtml(t('user_vo', 'Not created')) + '</span>';
 }
 
 // Helper function to render group actions
 function renderGroupActions(group) {
+    if (group.nc_group_missing) {
+        // NC group is gone but the tracking row remains - offer to either
+        // recreate it under the same nc_group_id, or drop the stale row so
+        // it can be created fresh via the normal "all groups" flow. Sync
+        // isn't offered here since it would just fail against a group that
+        // doesn't exist.
+        return `
+            <button class="button recreate-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}">
+                ${escapeHtml(t('user_vo', 'Recreate'))}
+            </button>
+            <button class="button button-danger delete-group-btn" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-nc-group-id="${escapeHtml(group.nc_group_id)}" data-vo-group-name="${escapeHtml(group.vo_group_name)}">
+                ${escapeHtml(t('user_vo', 'Delete'))}
+            </button>
+        `;
+    }
+
     if (group.deleted_in_vo) {
         // Deleted groups - show Sync (to update member counts) and Delete buttons
         return `
@@ -146,6 +171,10 @@ function renderGroupActions(group) {
                 ${escapeHtml(t('user_vo', 'Delete'))}
             </button>
         `;
+    } else if (group.backend_conflict) {
+        // Creating would collide with an NC group owned by another backend -
+        // no action possible until an admin resolves that conflict directly.
+        return '<span class="vo-text-muted">—</span>';
     } else {
         // Not created groups - show Create button
         return `
@@ -1736,8 +1765,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 row.className = 'vo-group-managed';
             }
 
-            // Show checkbox for all real groups (both managed and unmanaged), but not for placeholders or deleted groups
-            const checkbox = (isPlaceholder || group.deleted_in_vo)
+            // Show checkbox for all real groups (both managed and unmanaged), but not for
+            // placeholders, deleted groups, or groups that can't be created due to a backend conflict
+            const checkbox = (isPlaceholder || group.deleted_in_vo || group.backend_conflict)
                 ? '<span class="vo-text-muted">—</span>'
                 : `<input type="checkbox" class="vo-group-checkbox" value="${escapeHtml(group.vo_group_id)}" data-vo-group-id="${escapeHtml(group.vo_group_id)}" data-is-managed="${group.is_managed ? 'true' : 'false'}" />`;
 
@@ -2192,6 +2222,47 @@ document.addEventListener('DOMContentLoaded', function() {
                     } else if (currentViewType === 'managed') {
                         loadManagedGroupsButton.click();
                     }
+                } else {
+                    OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + data.error, { type: 'error' });
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }
+            })
+            .catch(error => {
+                OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
+                button.disabled = false;
+                button.textContent = originalText;
+            });
+        }
+    });
+
+    // Recreate a group whose NC group is gone (event delegation for dynamically created buttons)
+    document.addEventListener('click', function(e) {
+        if (e.target && e.target.classList.contains('recreate-group-btn')) {
+            const voGroupId = e.target.getAttribute('data-vo-group-id');
+            const button = e.target;
+            const originalText = button.textContent;
+
+            button.disabled = true;
+            button.textContent = t('user_vo', 'Recreating...');
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/recreate-group'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                },
+                body: JSON.stringify({ vo_group_id: voGroupId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    OC.Notification.showTemporary(
+                        t('user_vo', "Group '{name}' recreated successfully", { name: data.vo_group_name || data.nc_group_id })
+                    );
+
+                    // nc_group_missing rows only appear in the managed view
+                    loadManagedGroupsButton.click();
                 } else {
                     OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + data.error, { type: 'error' });
                     button.disabled = false;
