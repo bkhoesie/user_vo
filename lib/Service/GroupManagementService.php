@@ -17,12 +17,18 @@ use Psr\Log\LoggerInterface;
  * @psalm-import-type GroupSyncSingleSuccess from GroupSyncService
  */
 class GroupManagementService {
+    // Same bound GroupSyncService's blocking sync callers use (LOCK_WAIT_SECONDS) -
+    // long enough to ride out a normal in-flight sync, short enough that an admin
+    // action doesn't hang.
+    private const LOCK_WAIT_SECONDS = 3.0;
+
     private IDBConnection $connection;
     private IGroupManager $groupManager;
     private GroupNameHarmonizer $groupNameHarmonizer;
     private LoggerInterface $logger;
     private GroupSyncService $groupSyncService;
     private AuditLogService $auditLogService;
+    private GroupSyncLockService $lockService;
 
     public function __construct(
         IDBConnection $connection,
@@ -30,7 +36,8 @@ class GroupManagementService {
         GroupNameHarmonizer $groupNameHarmonizer,
         LoggerInterface $logger,
         GroupSyncService $groupSyncService,
-        AuditLogService $auditLogService
+        AuditLogService $auditLogService,
+        GroupSyncLockService $lockService
     ) {
         $this->connection = $connection;
         $this->groupManager = $groupManager;
@@ -38,6 +45,7 @@ class GroupManagementService {
         $this->logger = $logger;
         $this->groupSyncService = $groupSyncService;
         $this->auditLogService = $auditLogService;
+        $this->lockService = $lockService;
     }
 
     /**
@@ -745,23 +753,41 @@ class GroupManagementService {
 
         $ncGroupId = $groupRow['nc_group_id'];
 
-        if ($this->groupManager->groupExists($ncGroupId)) {
+        // Hold the group's sync lease across the existence-check + create, not
+        // across the auto-sync call below - that call acquires (and releases)
+        // its own lease for the same vo_group_id, and this same lease isn't
+        // reentrant, so holding it across both would make that inner acquire
+        // spuriously fail every time.
+        $lockToken = $this->lockService->acquireWithBoundedWait($voGroupId, self::LOCK_WAIT_SECONDS);
+        if ($lockToken === null) {
             return [
                 'success' => false,
-                'error' => "NC group '$ncGroupId' still exists - nothing to recreate",
+                'error' => 'Group sync already in progress, please try again shortly',
                 'status_code' => 409
             ];
         }
 
-        $ncGroup = $this->groupManager->createGroup($ncGroupId);
-        if (!$ncGroup) {
-            return [
-                'success' => false,
-                'error' => 'Failed to recreate Nextcloud group',
-                'status_code' => 500
-            ];
+        try {
+            if ($this->groupManager->groupExists($ncGroupId)) {
+                return [
+                    'success' => false,
+                    'error' => "NC group '$ncGroupId' still exists - nothing to recreate",
+                    'status_code' => 409
+                ];
+            }
+
+            $ncGroup = $this->groupManager->createGroup($ncGroupId);
+            if (!$ncGroup) {
+                return [
+                    'success' => false,
+                    'error' => 'Failed to recreate Nextcloud group',
+                    'status_code' => 500
+                ];
+            }
+            $ncGroup->setDisplayName((string)($groupRow['nc_display_name'] ?? $groupRow['vo_group_name']));
+        } finally {
+            $this->lockService->release($voGroupId, $lockToken);
         }
-        $ncGroup->setDisplayName((string)($groupRow['nc_display_name'] ?? $groupRow['vo_group_name']));
 
         $this->logger->info('Recreated missing NC group', [
             'app' => 'user_vo',
@@ -839,25 +865,42 @@ class GroupManagementService {
         $ncGroupId = $groupRow['nc_group_id'];
         $voGroupName = $groupRow['vo_group_name'];
 
-        // Delete the NC group (if it exists)
-        if ($this->groupManager->groupExists($ncGroupId)) {
-            $ncGroup = $this->groupManager->get($ncGroupId);
-            if ($ncGroup) {
-                $ncGroup->delete();
-                $this->logger->info("Deleted NC group", [
-                    'app' => 'user_vo',
-                    'nc_group_id' => $ncGroupId,
-                    'vo_group_id' => $voGroupId
-                ]);
-            }
+        // Hold the group's sync lease across the deletion, so a concurrent
+        // sync of this same group can't mutate NC membership on it (or write
+        // a trailing metadata update) mid-delete. release() below is a safe
+        // no-op if the tracking row is already gone by then.
+        $lockToken = $this->lockService->acquireWithBoundedWait($voGroupId, self::LOCK_WAIT_SECONDS);
+        if ($lockToken === null) {
+            return [
+                'success' => false,
+                'error' => 'Group sync already in progress, please try again shortly',
+                'status_code' => 409
+            ];
         }
 
-        // Remove from tracking table (GroupDeletedListener will handle this,
-        // but we do it explicitly here in case the event doesn't fire)
-        $deleteQb = $this->connection->getQueryBuilder();
-        $deleteQb->delete('user_vo_groups')
-            ->where($deleteQb->expr()->eq('vo_group_id', $deleteQb->createNamedParameter($voGroupId)));
-        $deleteQb->executeStatement();
+        try {
+            // Delete the NC group (if it exists)
+            if ($this->groupManager->groupExists($ncGroupId)) {
+                $ncGroup = $this->groupManager->get($ncGroupId);
+                if ($ncGroup) {
+                    $ncGroup->delete();
+                    $this->logger->info("Deleted NC group", [
+                        'app' => 'user_vo',
+                        'nc_group_id' => $ncGroupId,
+                        'vo_group_id' => $voGroupId
+                    ]);
+                }
+            }
+
+            // Remove from tracking table (GroupDeletedListener will handle this,
+            // but we do it explicitly here in case the event doesn't fire)
+            $deleteQb = $this->connection->getQueryBuilder();
+            $deleteQb->delete('user_vo_groups')
+                ->where($deleteQb->expr()->eq('vo_group_id', $deleteQb->createNamedParameter($voGroupId)));
+            $deleteQb->executeStatement();
+        } finally {
+            $this->lockService->release($voGroupId, $lockToken);
+        }
 
         $this->auditLogService->log('group_deleted', null, $voGroupId, "Group '$voGroupName' (NC group '$ncGroupId') deleted");
 

@@ -9,6 +9,7 @@ namespace OCA\UserVO\Tests\Integration\Service;
 use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\GroupManagementService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
+use OCA\UserVO\Service\GroupSyncLockService;
 use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\UserVOAuth;
 use OCP\AppFramework\App;
@@ -118,7 +119,8 @@ class GroupManagementServiceTest extends TestCase {
 			new GroupNameHarmonizer(),
 			$this->createMock(\Psr\Log\LoggerInterface::class),
 			$this->createMock(GroupSyncService::class),
-			\OC::$server->get(AuditLogService::class)
+			\OC::$server->get(AuditLogService::class),
+			new GroupSyncLockService($this->connection)
 		);
 
 		$backend = $this->getMockBuilder(UserVOAuth::class)
@@ -332,6 +334,36 @@ class GroupManagementServiceTest extends TestCase {
 	}
 
 	/**
+	 * Regression test: deleteGroup() must not mutate NC group state (or the
+	 * tracking row) while a sync for the same group still holds its lease -
+	 * otherwise the sync could mutate membership on a group mid-deletion, or
+	 * its trailing write could target a row that's already gone.
+	 */
+	public function testDeleteGroupFailsWithConflictWhenSyncLeaseIsHeld(): void {
+		$this->createTestGroup('test_delete_locked', 'Test Delete Locked', '1');
+
+		$lockService = new GroupSyncLockService($this->connection);
+		$lockToken = $lockService->tryAcquire('test_delete_locked');
+		$this->assertNotNull($lockToken);
+
+		try {
+			$result = $this->service->deleteGroup('test_delete_locked');
+
+			$this->assertFalse($result['success']);
+			$this->assertEquals(409, $result['status_code']);
+			$this->assertTrue($this->groupManager->groupExists('uservo_test_delete_locked'), 'NC group must be untouched while the lease is held');
+
+			$qb = $this->connection->getQueryBuilder();
+			$row = $qb->select('vo_group_id')->from('user_vo_groups')
+				->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter('test_delete_locked')))
+				->executeQuery()->fetch();
+			$this->assertNotFalse($row, 'Tracking row must be untouched while the lease is held');
+		} finally {
+			$lockService->release('test_delete_locked', $lockToken);
+		}
+	}
+
+	/**
 	 * Test deleting non-existent group returns error
 	 */
 	public function testDeleteNonExistentGroupReturnsError(): void {
@@ -439,7 +471,8 @@ class GroupManagementServiceTest extends TestCase {
 			new GroupNameHarmonizer(),
 			$this->createMock(\Psr\Log\LoggerInterface::class),
 			$this->createMock(GroupSyncService::class),
-			\OC::$server->get(AuditLogService::class)
+			\OC::$server->get(AuditLogService::class),
+			new GroupSyncLockService($this->connection)
 		);
 
 		$backend = $this->getMockBuilder(UserVOAuth::class)
@@ -615,6 +648,35 @@ class GroupManagementServiceTest extends TestCase {
 
 		$ncGroup = $this->groupManager->get('uservo_test_recreate_nosync');
 		$this->assertEquals('Test Recreate No Sync', $ncGroup->getDisplayName());
+	}
+
+	/**
+	 * Regression test: the existence-check + create step must not race a
+	 * concurrent sync of the same group - held for that step only, not
+	 * across the follow-up auto-sync call (which acquires its own lease for
+	 * the same vo_group_id and would spuriously fail if this one were still
+	 * held over it).
+	 */
+	public function testRecreateGroupFailsWithConflictWhenSyncLeaseIsHeld(): void {
+		$this->createTestGroup('test_recreate_locked', 'Test Recreate Locked', '1', createNcGroup: false);
+
+		$lockService = new GroupSyncLockService($this->connection);
+		$lockToken = $lockService->tryAcquire('test_recreate_locked');
+		$this->assertNotNull($lockToken);
+
+		try {
+			$backend = $this->getMockBuilder(UserVOAuth::class)
+				->disableOriginalConstructor()
+				->getMock();
+
+			$result = $this->service->recreateGroup('test_recreate_locked', $backend);
+
+			$this->assertFalse($result['success']);
+			$this->assertEquals(409, $result['status_code']);
+			$this->assertFalse($this->groupManager->groupExists('uservo_test_recreate_locked'), 'NC group must not have been created while the lease is held');
+		} finally {
+			$lockService->release('test_recreate_locked', $lockToken);
+		}
 	}
 
 	public function testRecreateGroupFailsWhenTheNcGroupStillExists(): void {

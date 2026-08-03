@@ -2,6 +2,7 @@
 namespace OCA\UserVO\Tests\Integration\Listener;
 
 use OCA\UserVO\Listener\GroupDeletedListener;
+use OCA\UserVO\Service\GroupSyncLockService;
 use OCP\EventDispatcher\Event;
 use OCP\Group\Events\GroupDeletedEvent;
 use OCP\IDBConnection;
@@ -20,14 +21,17 @@ class GroupDeletedListenerTest extends TestCase {
 
 	private GroupDeletedListener $listener;
 	private IDBConnection $connection;
+	private GroupSyncLockService $lockService;
 
 	protected function setUp(): void {
 		parent::setUp();
 
 		$this->connection = \OC::$server->get(IDBConnection::class);
+		$this->lockService = new GroupSyncLockService($this->connection);
 		$this->listener = new GroupDeletedListener(
 			$this->connection,
-			\OC::$server->get(LoggerInterface::class)
+			\OC::$server->get(LoggerInterface::class),
+			$this->lockService
 		);
 
 		$this->cleanupTestData();
@@ -92,5 +96,34 @@ class GroupDeletedListenerTest extends TestCase {
 		$this->listener->handle($event);
 
 		$this->assertFalse($this->groupExistsInDb($ncGroupId));
+	}
+
+	/**
+	 * Regression test: this listener must not remove the tracking row while a
+	 * sync for the same group still holds the lease - otherwise the sync's
+	 * own trailing writes (metadata update, ledger advance) could silently
+	 * target a row that's already gone. Leaving the row in place instead
+	 * relies on the existing "NC group no longer exists" detection to
+	 * surface it for an admin to resolve.
+	 */
+	public function testLeavesTrackingRowInPlaceWhileGroupSyncIsInProgress(): void {
+		$ncGroupId = self::NC_GROUP_ID_PREFIX . 'locked';
+		$voGroupId = 'vo_gdl_locked';
+		$this->insertManagedGroup($ncGroupId, $voGroupId);
+
+		$lockToken = $this->lockService->tryAcquire($voGroupId);
+		$this->assertNotNull($lockToken);
+
+		try {
+			$group = $this->createMock(IGroup::class);
+			$group->method('getGID')->willReturn($ncGroupId);
+			$event = new GroupDeletedEvent($group);
+
+			$this->listener->handle($event);
+
+			$this->assertTrue($this->groupExistsInDb($ncGroupId), 'Row must be left in place while the sync lease is held');
+		} finally {
+			$this->lockService->release($voGroupId, $lockToken);
+		}
 	}
 }

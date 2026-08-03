@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\UserVO\Listener;
 
+use OCA\UserVO\Service\GroupSyncLockService;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
 use OCP\Group\Events\GroupDeletedEvent;
@@ -15,16 +16,22 @@ use Psr\Log\LoggerInterface;
  * Cleans up user_vo_groups table when a managed group is deleted
  */
 class GroupDeletedListener implements IEventListener {
+    // Same bound GroupManagementService::deleteGroup() and GroupSyncService's
+    // blocking sync callers use.
+    private const LOCK_WAIT_SECONDS = 3.0;
 
     private $connection;
     private $logger;
+    private GroupSyncLockService $lockService;
 
     public function __construct(
         IDBConnection $connection,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        GroupSyncLockService $lockService
     ) {
         $this->connection = $connection;
         $this->logger = $logger;
+        $this->lockService = $lockService;
     }
 
     public function handle(Event $event): void {
@@ -49,16 +56,47 @@ class GroupDeletedListener implements IEventListener {
             return;
         }
 
-        // Remove from our tracking table
-        $deleteQb = $this->connection->getQueryBuilder();
-        $deleteQb->delete('user_vo_groups')
-            ->where($deleteQb->expr()->eq('nc_group_id', $deleteQb->createNamedParameter($groupId)));
-        $deleteQb->executeStatement();
+        $voGroupId = $row['vo_group_id'];
+
+        // The NC group is already gone by the time this event fires (it fires
+        // post-deletion), so this can't prevent a sync that's already mutating
+        // its membership from racing a deletion triggered outside our own
+        // GroupManagementService::deleteGroup() (e.g. via NC's native group
+        // admin UI) - that's a structural limit of hooking a post-deletion
+        // event, not something closeable here. What holding the lease before
+        // removing the tracking row *does* close: if a sync is still holding
+        // it, that sync's own release() (in its finally block) only happens
+        // after all of its writes/ledger updates for this group are done, so
+        // waiting for the lease first guarantees this cleanup can't race a
+        // sync's trailing write and pull the row out from under it.
+        $lockToken = $this->lockService->acquireWithBoundedWait($voGroupId, self::LOCK_WAIT_SECONDS);
+        if ($lockToken === null) {
+            // Leave the row in place rather than force a cleanup mid-sync -
+            // the existing "NC group no longer exists" detection (admin UI /
+            // group_sync_failed audit entries) surfaces this until an admin
+            // resolves it via recreateGroup()/deleteGroup().
+            $this->logger->warning('Skipped tracking-row cleanup after group deletion - sync in progress', [
+                'app' => 'user_vo',
+                'nc_group_id' => $groupId,
+                'vo_group_id' => $voGroupId
+            ]);
+            return;
+        }
+
+        try {
+            // Remove from our tracking table
+            $deleteQb = $this->connection->getQueryBuilder();
+            $deleteQb->delete('user_vo_groups')
+                ->where($deleteQb->expr()->eq('nc_group_id', $deleteQb->createNamedParameter($groupId)));
+            $deleteQb->executeStatement();
+        } finally {
+            $this->lockService->release($voGroupId, $lockToken);
+        }
 
         $this->logger->info('Cleaned up managed group after deletion', [
             'app' => 'user_vo',
             'nc_group_id' => $groupId,
-            'vo_group_id' => $row['vo_group_id'],
+            'vo_group_id' => $voGroupId,
             'vo_group_name' => $row['vo_group_name']
         ]);
     }
