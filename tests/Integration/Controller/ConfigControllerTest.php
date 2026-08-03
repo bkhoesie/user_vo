@@ -354,6 +354,32 @@ class ConfigControllerTest extends NextcloudTestCase {
 		$this->assertEquals('true', $this->config->getAppValue('user_vo', 'enable_nightly_group_sync', ''));
 	}
 
+	/**
+	 * Regression test: a literal string "false" for the 'enabled' param must
+	 * disable the setting, not enable it - PHP's plain truthy check treats
+	 * any non-empty string (including the string "false") as true. The
+	 * admin UI always sends a native JSON boolean today, which NC's Request
+	 * class decodes preserving the real type, so this specific string value
+	 * isn't reachable via the current UI - but a future non-UI caller
+	 * (script, alternate frontend, API consumer) sending form-encoded or
+	 * query-string "false" would otherwise have it inverted.
+	 */
+	public function testSaveNightlySyncSettingTreatsStringFalseAsDisabled() {
+		$this->request->method('getParam')
+			->willReturnCallback(function($key, $default) {
+				$params = [
+					'enabled' => 'false',
+					'sync_type' => 'user'
+				];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $this->controller->saveNightlySyncSetting();
+		$this->assertEquals(200, $response->getStatus());
+
+		$this->assertEquals('false', $this->config->getAppValue('user_vo', 'enable_nightly_user_sync', ''));
+	}
+
 	public function testGetNightlySyncStatusWithNoHistory() {
 		// Clear sync history for this test
 		$this->config->deleteAppValue('user_vo', 'enable_nightly_user_sync');

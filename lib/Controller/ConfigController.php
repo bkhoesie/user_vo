@@ -309,7 +309,13 @@ class ConfigController extends Controller {
 	 * @return JSONResponse
 	 */
 	public function saveNightlySyncSetting(): JSONResponse {
-		$enabled = $this->request->getParam('enabled', false);
+		// FILTER_VALIDATE_BOOLEAN, not a plain truthy check - the JSON-sending
+		// admin UI always passes a native boolean (decoded as-is by NC's
+		// Request class, so this doesn't change today's behavior), but a
+		// future non-UI caller (script, alternate frontend, API consumer)
+		// sending form-encoded or query-string "false" would otherwise have
+		// it treated as enabled, since a non-empty string is truthy in PHP.
+		$enabled = filter_var($this->request->getParam('enabled', false), FILTER_VALIDATE_BOOLEAN);
 		$syncType = $this->request->getParam('sync_type', 'user'); // 'user' or 'group'
 
 		if ($syncType === 'group') {
