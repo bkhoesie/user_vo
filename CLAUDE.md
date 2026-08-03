@@ -205,7 +205,8 @@ The plugin includes a multi-layer testing strategy:
 - `UserSyncService`: Validation logic, input sanitization
 - `UserVOAuth`: `fetchUserDataFromVO()` parsing, `fetchMembersMapForUsers()` fuzzy matching
 - `ApiClient`: token creation, connection-failure handling
-- `SyncUsersJob`: enable/disable flag logic (incl. legacy `enable_nightly_sync`), sync ordering rules
+- `SyncUsersJob`: enable/disable flag logic, sync ordering rules
+- `GroupSyncSweepJob`: no-op-when-nothing-dirty contract, kill switch, batch cap, single-backend-per-run reuse
 - Additional service unit tests as needed
 
 **What gets tested:**
@@ -240,6 +241,9 @@ The plugin includes a multi-layer testing strategy:
 - `Base`/`UserVOAuth`: login flow (`checkCanonicalPassword()`), case-insensitive matching, duplicate-marker safety net
 - `UserProvisioningService`, `UserSyncService`, `UserAccountService`: real-DB coverage of search, sync, and duplicate-scan logic
 - `GroupDeletedListener`: managed-group cleanup on NC group deletion
+- `GroupSyncLedgerService`: dirty/clean sequence ledger mechanics, stale-lease redirty (the fencing-token analogue for the clean-advance)
+- `GroupSyncService`/`UserVOAuth`: the B1 interleaving scenarios (concurrent write during sync, lease-expired-mid-body, throw-before/after-mutation) and the writer-side union dirty-marking
+- `GroupSyncSweepJob`/`ForceInitialGroupSweep`: end-to-end repair of a dirty group through the real lease/sync machinery, upgrade backfill idempotency
 
 **What gets tested:**
 - Real database operations (not mocked)
@@ -475,6 +479,14 @@ Background job settings (in admin interface):
 - **Execution tracking**: Stores last run time, status, error messages, sync summary
 - **Admin visibility**: Shows Last run → Status → Summary with color-coded badges
 
+**Division of labor with the group sync sweep (below):** the nightly sync is what keeps
+VO-side changes flowing to users who don't log in - group sync depends on user sync having
+refreshed `vo_group_ids` first, so enabling only the group toggle has limited value. The sweep
+job guarantees local convergence within one sweep interval for changes that *did* already reach
+`user_vo` via a login/user-sync write; it has no way to detect membership changes for a user who
+never logs in again (no local write ever happens, so nothing gets marked dirty). Enable both for
+full coverage.
+
 ### Background Job Management
 
 The nightly sync is implemented as a Nextcloud background job (`lib/Cron/SyncUsersJob.php`). It:
@@ -483,6 +495,31 @@ The nightly sync is implemented as a Nextcloud background job (`lib/Cron/SyncUse
 - Ensures consistency between manual and automatic syncs
 - Stores execution tracking in app config (no additional database tables)
 - Handles errors gracefully and logs detailed information
+
+### Group Sync Ledger and Sweep
+
+A per-group dirty/clean sequence ledger (`dirty_seq`/`clean_seq` columns on `user_vo_groups`,
+managed by `GroupSyncLedgerService`) closes a race the per-group sync lease alone doesn't: a
+user's own VO-metadata write isn't synchronized with a concurrent full group sync's read of VO
+membership for that group, so a write landing in that window could otherwise be silently lost
+until the next full sync of that group.
+
+- **Writer side**: `UserVOAuth::updateVOMetadata()` marks the union of a user's old and new VO
+  group IDs dirty, in the same transaction as the metadata write itself.
+- **Reader side**: `GroupSyncService::syncSingleGroupFullLocked()` captures `dirty_seq` right
+  after acquiring the group's sync lease (before reading VO membership), and advances
+  `clean_seq` to that value on successful completion - but only if the lease is still held by
+  the same token, so a sync whose lease was reassigned mid-body can't falsely claim clean.
+- **Sweep job**: `lib/Cron/GroupSyncSweepJob.php` runs every 5 minutes (`enable_group_sync_sweep`
+  config key, default enabled), resyncing any group where `dirty_seq > clean_seq` through the
+  same lease-protected `syncSingleGroupById()` entry point every other caller uses. Costs one
+  indexed query and nothing else when nothing is dirty - no backend built, no VO API call.
+- **Backfill**: `Migration/ForceInitialGroupSweep` (a post-migration repair step) marks every
+  pre-existing managed group dirty once on upgrade, so drift that predates the ledger gets
+  repaired too, not just drift from then on.
+
+See `GroupSyncLedgerService`'s class doc-comment and the `Version1005Date20260803000000`
+migration for the full interleaving argument.
 
 ## API Integration
 

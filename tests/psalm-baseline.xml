@@ -63,6 +63,20 @@
       <code><![CDATA[UserVOAuth]]></code>
     </MissingDependency>
   </file>
+  <file src="lib/Cron/GroupSyncSweepJob.php">
+    <DeprecatedMethod>
+      <code><![CDATA[getAppValue]]></code>
+    </DeprecatedMethod>
+    <MissingDependency>
+      <code><![CDATA[UserVOAuth]]></code>
+    </MissingDependency>
+    <UndefinedFunction>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
+    </UndefinedFunction>
+  </file>
   <file src="lib/Cron/SyncUsersJob.php">
     <DeprecatedMethod>
       <code><![CDATA[getAppValue]]></code>
@@ -128,6 +142,7 @@
   </file>
   <file src="lib/Migration/Version1002Date20251013000000.php">
     <UndefinedDocblockClass>
+      <code><![CDATA[$schema->createTable('user_vo_groups')]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
@@ -148,6 +163,7 @@
   </file>
   <file src="lib/Migration/Version1003Date20260802000000.php">
     <UndefinedDocblockClass>
+      <code><![CDATA[$schema->getTable('user_vo_groups')]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
@@ -160,6 +176,16 @@
   </file>
   <file src="lib/Migration/Version1004Date20260802000000.php">
     <UndefinedDocblockClass>
+      <code><![CDATA[$schema->getTable('user_vo_groups')]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+    </UndefinedDocblockClass>
+  </file>
+  <file src="lib/Migration/Version1005Date20260803000000.php">
+    <UndefinedDocblockClass>
+      <code><![CDATA[$schema->getTable('user_vo_groups')]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
@@ -202,6 +228,11 @@
       <code><![CDATA[UserVOAuth]]></code>
       <code><![CDATA[UserVOAuth]]></code>
     </MissingDependency>
+  </file>
+  <file src="lib/Service/GroupSyncLedgerService.php">
+    <UndefinedClass>
+      <code><![CDATA[\Doctrine\DBAL\Connection]]></code>
+    </UndefinedClass>
   </file>
   <file src="lib/Service/GroupSyncService.php">
     <MissingDependency>

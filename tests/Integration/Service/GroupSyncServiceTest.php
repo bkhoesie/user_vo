@@ -3,11 +3,13 @@ namespace OCA\UserVO\Tests\Integration\Service;
 
 use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
+use OCA\UserVO\Service\GroupSyncLedgerService;
 use OCA\UserVO\Service\GroupSyncLockService;
 use OCA\UserVO\UserVOAuth;
 use OCP\IDBConnection;
 use OCP\IGroupManager;
 use OCP\IUserManager;
+use Psr\Log\LoggerInterface;
 use Test\TestCase;
 
 /**
@@ -23,6 +25,7 @@ class GroupSyncServiceTest extends TestCase {
 	private IDBConnection $connection;
 	private IGroupManager $groupManager;
 	private IUserManager $userManager;
+	private GroupSyncLedgerService $ledgerService;
 
 	protected function setUp(): void {
 		parent::setUp();
@@ -32,13 +35,15 @@ class GroupSyncServiceTest extends TestCase {
 		$this->userManager = \OC::$server->get(\OCP\IUserManager::class);
 		$harmonizer = new GroupNameHarmonizer();
 		$lockService = new GroupSyncLockService($this->connection);
+		$this->ledgerService = new GroupSyncLedgerService($this->connection, $this->createMock(LoggerInterface::class));
 
 		$this->service = new GroupSyncService(
 			$this->connection,
 			$this->groupManager,
 			$this->userManager,
 			$harmonizer,
-			$lockService
+			$lockService,
+			$this->ledgerService
 		);
 
 		// Clean up any test data
@@ -58,7 +63,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -69,7 +74,7 @@ class GroupSyncServiceTest extends TestCase {
 		}
 
 		// Delete test users
-		$testUsers = ['testuser1', 'testuser2', 'testuser3', 'testuser_lockrace', 'testuser_nonblocking_api_down'];
+		$testUsers = ['testuser1', 'testuser2', 'testuser3', 'testuser_lockrace', 'testuser_nonblocking_api_down', 'testuser_concurrent_write', 'testuser_throw_a', 'testuser_throw_b'];
 		foreach ($testUsers as $userId) {
 			if ($this->userManager->userExists($userId)) {
 				$user = $this->userManager->get($userId);
@@ -84,6 +89,16 @@ class GroupSyncServiceTest extends TestCase {
 		$qb->delete('user_vo')
 			->where($qb->expr()->like('uid', $qb->createNamedParameter('testuser%')))
 			->executeStatement();
+	}
+
+	/** @return array{0: int, 1: int} [dirty_seq, clean_seq] */
+	private function readSeqs(string $voGroupId): array {
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('dirty_seq', 'clean_seq')
+			->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetch();
+		return [(int)$row['dirty_seq'], (int)$row['clean_seq']];
 	}
 
 	private function createTestGroupInDB(string $voGroupId, string $ncGroupId, string $voGroupName): void {
@@ -605,5 +620,309 @@ class GroupSyncServiceTest extends TestCase {
 			$lockService->release($firstVoGroupId, $tokenA);
 			$lockService->release($secondVoGroupId, $tokenB);
 		}
+	}
+
+	/**
+	 * Headline regression test for B1: syncSingleGroupFullLocked() reads
+	 * user_vo *before* calling IGroup::getUsers() and mutating NC membership.
+	 * If a user's own metadata write lands in that window, this sync's own
+	 * snapshot is already stale by the time it mutates - previously there was
+	 * no way to detect that, and the write could be silently lost until the
+	 * next full sync. The ledger must catch it: the group must end dirty, not
+	 * falsely clean, so the sweep repairs it.
+	 *
+	 * PHPUnit can't run genuinely concurrent syncs (same caveat as
+	 * testNonBlockingSyncNeverMutatesMembershipWhileGroupIsLocked above), so
+	 * this drives the actual race window directly via a mocked IGroup::getUsers()
+	 * callback - called at exactly the point a concurrent write would land -
+	 * which performs the write's real-world effect (updating user_vo and
+	 * marking the group dirty, same as UserVOAuth::updateVOMetadata() will
+	 * once wired up) before returning control to the sync.
+	 */
+	public function testConcurrentUserWriteDuringSyncLeavesGroupDirtyRatherThanFalselyClean(): void {
+		$voGroupId = 'test_concurrent_write';
+		$ncGroupId = 'uservo_test_concurrent_write';
+		$uid = 'testuser_concurrent_write';
+
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Concurrent Write Group');
+		if (!$this->userManager->userExists($uid)) {
+			$this->userManager->createUser($uid, 'ATestPassword123!');
+		}
+		// Not (yet) a member as far as this sync's own read of user_vo is
+		// concerned - the concurrent write below adds it, but only after
+		// that read has already happened.
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo')->values([
+			'uid' => $qb->createNamedParameter($uid),
+			'backend' => $qb->createNamedParameter('user_vo'),
+			'vo_group_ids' => $qb->createNamedParameter(''),
+		])->executeStatement();
+
+		$mockGroup = $this->createMock(\OCP\IGroup::class);
+		$mockGroup->method('getUsers')->willReturnCallback(function () use ($uid, $voGroupId) {
+			$updateQb = $this->connection->getQueryBuilder();
+			$updateQb->update('user_vo')
+				->set('vo_group_ids', $updateQb->createNamedParameter($voGroupId))
+				->where($updateQb->expr()->eq('uid', $updateQb->createNamedParameter($uid)))
+				->executeStatement();
+			$this->ledgerService->markDirty([$voGroupId]);
+			return [];
+		});
+
+		$mockGroupManager = $this->createMock(IGroupManager::class);
+		$mockGroupManager->method('get')->willReturn($mockGroup);
+
+		$service = new GroupSyncService(
+			$this->connection,
+			$mockGroupManager,
+			$this->userManager,
+			new GroupNameHarmonizer(),
+			new GroupSyncLockService($this->connection),
+			$this->ledgerService
+		);
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Concurrent Write Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		[$dirty, $clean] = $this->readSeqs($voGroupId);
+		$this->assertGreaterThan($clean, $dirty, 'A write landing during the sync window must leave the group dirty, not falsely clean');
+	}
+
+	/**
+	 * Negative control for the test above: without it, an implementation that
+	 * never advances clean_seq at all would also "pass" - always dirty is not
+	 * the same as correctly tracking dirt.
+	 */
+	public function testSyncMarksGroupCleanWhenNoWriteLandsDuringTheWindow(): void {
+		$voGroupId = 'test_no_concurrent_write';
+		$ncGroupId = 'uservo_test_no_concurrent_write';
+
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test No Concurrent Write Group');
+		$this->ledgerService->markDirty([$voGroupId]); // something for the sync to actually clear
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test No Concurrent Write Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		[$dirty, $clean] = $this->readSeqs($voGroupId);
+		$this->assertSame($dirty, $clean, 'A sync with no concurrent write must actually advance clean_seq to match');
+	}
+
+	/**
+	 * A group skipped entirely due to lock contention (login path) must not
+	 * have its ledger touched at all - it never captured a seq or reached the
+	 * clean-advance, so it must stay exactly as dirty as it was, for the
+	 * sweep to pick up later.
+	 */
+	public function testLockContendedLoginSyncLeavesGroupDirtyForTheSweep(): void {
+		$voGroupId = 'test_contended_ledger';
+		$ncGroupId = 'uservo_test_contended_ledger';
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Contended Ledger Group');
+		$this->ledgerService->markDirty([$voGroupId]);
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Contended Ledger Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$lockService = new GroupSyncLockService($this->connection);
+		$token = $lockService->tryAcquire($voGroupId);
+		$this->assertNotNull($token);
+
+		try {
+			$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
+			$this->assertEquals(1, $result['skipped']);
+		} finally {
+			$lockService->release($voGroupId, $token);
+		}
+
+		[$dirty, $clean] = $this->readSeqs($voGroupId);
+		$this->assertGreaterThan($clean, $dirty, 'A skipped (lock-contended) sync must not advance clean_seq - the group must stay dirty for the sweep');
+	}
+
+	/**
+	 * A sync that fails partway through applying membership (some
+	 * add/removeUser calls already took effect) must leave the group dirty -
+	 * otherwise a half-applied sync could masquerade as clean if a later
+	 * caller swallows the exception (as most callers here do, to keep other
+	 * groups in a batch unaffected).
+	 */
+	public function testSyncThatThrowsAfterMutatingMembershipLeavesGroupDirty(): void {
+		$voGroupId = 'test_throws_adduser';
+		$ncGroupId = 'uservo_test_throws_adduser';
+		$uidA = 'testuser_throw_a';
+		$uidB = 'testuser_throw_b';
+
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Throws AddUser Group');
+		foreach ([$uidA, $uidB] as $uid) {
+			if (!$this->userManager->userExists($uid)) {
+				$this->userManager->createUser($uid, 'ATestPassword123!');
+			}
+			$qb = $this->connection->getQueryBuilder();
+			$qb->insert('user_vo')->values([
+				'uid' => $qb->createNamedParameter($uid),
+				'backend' => $qb->createNamedParameter('user_vo'),
+				'vo_group_ids' => $qb->createNamedParameter($voGroupId),
+			])->executeStatement();
+		}
+
+		$mockGroup = $this->createMock(\OCP\IGroup::class);
+		$mockGroup->method('getUsers')->willReturn([]);
+		$addUserCalls = 0;
+		$mockGroup->method('addUser')->willReturnCallback(function () use (&$addUserCalls) {
+			$addUserCalls++;
+			if ($addUserCalls === 2) {
+				throw new \Exception('Simulated failure partway through applying membership');
+			}
+		});
+
+		$mockGroupManager = $this->createMock(IGroupManager::class);
+		$mockGroupManager->method('get')->willReturn($mockGroup);
+
+		$service = new GroupSyncService(
+			$this->connection,
+			$mockGroupManager,
+			$this->userManager,
+			new GroupNameHarmonizer(),
+			new GroupSyncLockService($this->connection),
+			$this->ledgerService
+		);
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Throws AddUser Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertFalse($result['success']);
+
+		[$dirty, $clean] = $this->readSeqs($voGroupId);
+		$this->assertGreaterThan($clean, $dirty, 'A sync that fails partway through applying membership must leave the group dirty for the sweep to repair');
+	}
+
+	/**
+	 * The opposite of the test above: a failure *before* any membership
+	 * mutation was attempted (e.g. the NC group itself is missing) must NOT
+	 * re-dirty the group - otherwise a permanently broken group would re-mark
+	 * itself dirty forever, and the sweep would retry it every tick with no
+	 * way to ever converge.
+	 */
+	public function testSyncThatThrowsBeforeMutatingMembershipDoesNotRedirty(): void {
+		$voGroupId = 'test_throws_before_mutation';
+		// Points at an NC group that was never created - throws "NC group does
+		// not exist" before the membership-mutation try/catch block is ever entered.
+		$this->createTestGroupInDB($voGroupId, 'uservo_test_throws_before_mutation_missing', 'Test Throws Before Mutation Group');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Throws Before Mutation Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertFalse($result['success']);
+		$this->assertStringContainsString('NC group does not exist', $result['error']);
+
+		[$dirty, $clean] = $this->readSeqs($voGroupId);
+		$this->assertSame(0, $dirty, 'A failure before any mutation was attempted must not re-dirty the group');
+		$this->assertSame(0, $clean);
+	}
+
+	/**
+	 * The ledger analogue of testStaleReleaseDoesNotStealANewlyAcquiredLease:
+	 * if this sync's own lease outlives its TTL and gets reassigned to
+	 * another worker mid-body, this sync must not claim clean on completion -
+	 * it may have just applied membership computed from a stale snapshot, and
+	 * a second worker may already be (or about to be) acting on fresher data.
+	 */
+	public function testSyncWhoseLeaseExpiredMidBodyDoesNotClaimClean(): void {
+		$voGroupId = 'test_lease_expire_mid';
+		$ncGroupId = 'uservo_test_lease_expire_mid';
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Lease Expire Mid Group');
+
+		$lockService = new GroupSyncLockService($this->connection);
+
+		$mockGroup = $this->createMock(\OCP\IGroup::class);
+		$mockGroup->method('getUsers')->willReturnCallback(function () use ($voGroupId, $lockService) {
+			$past = (new \DateTime())->modify('-1 second');
+			$qb = $this->connection->getQueryBuilder();
+			$qb->update('user_vo_groups')
+				->set('sync_lock_until', $qb->createNamedParameter($past, 'datetime'))
+				->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+				->executeStatement();
+			$otherToken = $lockService->tryAcquire($voGroupId, 60);
+			$this->assertNotNull($otherToken, 'Second worker should acquire once the first lease is forced to expire');
+			return [];
+		});
+
+		$mockGroupManager = $this->createMock(IGroupManager::class);
+		$mockGroupManager->method('get')->willReturn($mockGroup);
+
+		$service = new GroupSyncService(
+			$this->connection,
+			$mockGroupManager,
+			$this->userManager,
+			new GroupNameHarmonizer(),
+			$lockService,
+			$this->ledgerService
+		);
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Lease Expire Mid Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		// The original sync (whose lease was expired-and-reassigned mid-body
+		// by its own getUsers() call above) still runs to completion and
+		// tries to mark clean using its now-stale token.
+		$result = $service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		[$dirty, $clean] = $this->readSeqs($voGroupId);
+		$this->assertGreaterThan($clean, $dirty, 'A sync whose lease was reassigned mid-body must not claim clean');
+	}
+
+	/**
+	 * A dirty mark that lands while a sync is queued waiting for a contended
+	 * lease (not yet acquired) must still be correctly folded into that
+	 * sync's eventual seq capture once it does acquire - not left dangling as
+	 * a false "still dirty" after a fully successful sync. This is what
+	 * capturing seq_at_start *after* lock acquire (rather than before, or at
+	 * the start of the whole call) guarantees.
+	 */
+	public function testSeqCapturedAfterAcquireIsNotSpuriouslyDirtiedByAWaitBeforeIt(): void {
+		$voGroupId = 'test_seq_after_wait';
+		$ncGroupId = 'uservo_test_seq_after_wait';
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Seq After Wait Group');
+		$this->groupManager->createGroup($ncGroupId);
+
+		$lockService = new GroupSyncLockService($this->connection);
+		// Pre-holder blocks the target sync from acquiring immediately, with a
+		// short lease so it self-expires within the bounded wait.
+		$preHolderToken = $lockService->tryAcquire($voGroupId, 1);
+		$this->assertNotNull($preHolderToken);
+
+		// A write lands while the target sync is queued waiting for the lease.
+		$this->ledgerService->markDirty([$voGroupId]);
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Seq After Wait Group', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		[$dirty, $clean] = $this->readSeqs($voGroupId);
+		$this->assertSame($dirty, $clean, 'A mark that landed before the eventual acquire must be folded into the captured seq, not left dangling as a false dirty');
 	}
 }

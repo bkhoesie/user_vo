@@ -16,6 +16,7 @@ use OCA\UserVO\Base;
 use OCP\IConfig;
 use OCA\UserVO\Service\ApiClient;
 use OCA\UserVO\Service\ConfigService;
+use OCA\UserVO\Service\GroupSyncLedgerService;
 
 class UserVOAuth extends Base {
     /** Fresh cache lifetime for fetchAllGroups(allowCached: true). */
@@ -29,6 +30,7 @@ class UserVOAuth extends Base {
     private $config;
     private $configService;
     private $apiClient;
+    private GroupSyncLedgerService $ledgerService;
     /** @var array|null Request-scoped memo for fetchAllGroups() - see that method. */
     private ?array $liveGroupsFetchMemo = null;
 
@@ -37,6 +39,7 @@ class UserVOAuth extends Base {
         $this->config = $config ?? \OC::$server->get(\OCP\IConfig::class);
         $this->configService = new ConfigService($this->config);
         $this->apiClient = \OC::$server->get(ApiClient::class);
+        $this->ledgerService = \OC::$server->get(GroupSyncLedgerService::class);
 
         if ($apiUrl !== null && $username !== null && $password !== null) {
             // Use constructor parameters (for backward compatibility / testing)
@@ -708,27 +711,82 @@ class UserVOAuth extends Base {
     }
 
     /**
+     * Splits a comma-separated VO group ID string into a trimmed array,
+     * without the '' -> [''] garbage entry explode() would otherwise produce
+     * for an empty string.
+     *
+     * @return string[]
+     */
+    private static function splitGroupIds(string $groupIds): array {
+        return $groupIds !== '' ? array_map('trim', explode(',', $groupIds)) : [];
+    }
+
+    /**
      * Update VO metadata in user_vo table
+     *
+     * Runs as one transaction, and marks the union of the old and new VO
+     * group IDs dirty in the same transaction - this is the writer side of
+     * the B1 fix (see GroupSyncLedgerService and the
+     * Version1005Date20260803000000 migration for the full design). The
+     * union (not a diff) is used deliberately: it's a strict superset of the
+     * groups whose membership predicate could have changed, so it can never
+     * under-mark, and syncUserGroupsOnLogin() immediately syncs that same
+     * union right after this call anyway - the extra marks are cleared
+     * microseconds later in the common case, and matter only when that
+     * follow-up sync is itself skipped (lock contention), which is exactly
+     * when a sweep repair is wanted.
+     *
+     * The touch-update-then-read (rather than a plain SELECT) takes an
+     * exclusive lock on this uid's row before reading OLD: this app can't
+     * rely on SELECT ... FOR UPDATE across all DBs/NC versions it supports
+     * (see GroupSyncLockService's lease for the same constraint). Without
+     * it, two concurrent writes for the same uid - real, via NC's ~5 minute
+     * credential-token revalidation across multiple sessions/devices - could
+     * each read a stale OLD value and dirty-mark based on it, potentially
+     * missing a group whose predicate actually changed.
      *
      * @param string $uid NC username
      * @param array $voUserData User data from fetchUserDataFromVO
      */
     protected function updateVOMetadata(string $uid, array $voUserData): void {
-        try {
-            $db = \OC::$server->get(\OCP\IDBConnection::class);
+        $db = \OC::$server->get(\OCP\IDBConnection::class);
+        // Guard against nesting: no current caller runs this inside an outer
+        // transaction, but this method must stay a safe building block if one
+        // ever does.
+        $ownsTransaction = !$db->inTransaction();
 
-            // Check if record exists
-            $qb = $db->getQueryBuilder();
-            $qb->select('uid')
-                ->from('user_vo')
-                ->where($qb->expr()->eq('uid', $qb->createNamedParameter($uid)));
-            $result = $qb->executeQuery();
-            $exists = $result->fetchOne() !== false;
-            $result->closeCursor();
+        try {
+            if ($ownsTransaction) {
+                $db->beginTransaction();
+            }
 
             $voUserId = $voUserData['id'] ?? null;
             $voUsername = $voUserData['username'] ?? '';
             $voGroupIds = $voUserData['group_ids'] ?? '';
+            $now = new \DateTime();
+
+            // Take the row's write lock before reading OLD.
+            $touchQb = $db->getQueryBuilder();
+            $touchQb->update('user_vo')
+                ->set('last_synced', $touchQb->createNamedParameter($now, 'datetime'))
+                ->where($touchQb->expr()->eq('uid', $touchQb->createNamedParameter($uid)));
+            $touchQb->executeStatement();
+
+            // Existence check + OLD value, now stable thanks to the lock above.
+            // Deliberately not using the touch-UPDATE's affected-row count as
+            // the existence test: it can report 0 changed rows when
+            // last_synced happens to already hold the same (whole-second)
+            // value, which would wrongly route to INSERT below.
+            $selectQb = $db->getQueryBuilder();
+            $selectQb->select('vo_group_ids')
+                ->from('user_vo')
+                ->where($selectQb->expr()->eq('uid', $selectQb->createNamedParameter($uid)));
+            $result = $selectQb->executeQuery();
+            $row = $result->fetch();
+            $result->closeCursor();
+
+            $exists = $row !== false;
+            $oldVoGroupIds = $exists ? ($row['vo_group_ids'] ?? '') : '';
 
             if ($exists) {
                 // Update existing record
@@ -737,7 +795,7 @@ class UserVOAuth extends Base {
                     ->set('vo_user_id', $qb->createNamedParameter($voUserId))
                     ->set('vo_username', $qb->createNamedParameter($voUsername))
                     ->set('vo_group_ids', $qb->createNamedParameter($voGroupIds))
-                    ->set('last_synced', $qb->createNamedParameter(new \DateTime(), 'datetime'))
+                    ->set('last_synced', $qb->createNamedParameter($now, 'datetime'))
                     ->where($qb->expr()->eq('uid', $qb->createNamedParameter($uid)));
                 $qb->executeStatement();
             } else {
@@ -752,9 +810,18 @@ class UserVOAuth extends Base {
                         'vo_user_id' => $qb->createNamedParameter($voUserId),
                         'vo_username' => $qb->createNamedParameter($voUsername),
                         'vo_group_ids' => $qb->createNamedParameter($voGroupIds),
-                        'last_synced' => $qb->createNamedParameter(new \DateTime(), 'datetime')
+                        'last_synced' => $qb->createNamedParameter($now, 'datetime')
                     ]);
                 $qb->executeStatement();
+            }
+
+            $this->ledgerService->markDirty(array_merge(
+                self::splitGroupIds($oldVoGroupIds),
+                self::splitGroupIds($voGroupIds)
+            ));
+
+            if ($ownsTransaction) {
+                $db->commit();
             }
 
             logger('user_vo')->debug("Updated VO metadata", [
@@ -764,6 +831,9 @@ class UserVOAuth extends Base {
             ]);
 
         } catch (\Exception $e) {
+            if ($ownsTransaction && $db->inTransaction()) {
+                $db->rollBack();
+            }
             logger('user_vo')->error("Failed to update VO metadata", [
                 'uid' => $uid,
                 'error' => $e->getMessage()

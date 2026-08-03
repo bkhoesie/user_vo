@@ -3,6 +3,7 @@ namespace OCA\UserVO\Tests\Unit\Service;
 
 use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\Service\GroupNameHarmonizer;
+use OCA\UserVO\Service\GroupSyncLedgerService;
 use OCA\UserVO\Service\GroupSyncLockService;
 use OCA\UserVO\UserVOAuth;
 use OCP\IDBConnection;
@@ -20,6 +21,7 @@ class GroupSyncServiceTest extends TestCase {
 	private $userManager;
 	private $harmonizer;
 	private $lockService;
+	private $ledgerService;
 	private $service;
 
 	protected function setUp(): void {
@@ -32,13 +34,15 @@ class GroupSyncServiceTest extends TestCase {
 		// "lock always available" so existing behavior is unaffected.
 		$this->lockService->method('tryAcquire')->willReturn('test-token');
 		$this->lockService->method('acquireWithBoundedWait')->willReturn('test-token');
+		$this->ledgerService = $this->createMock(GroupSyncLedgerService::class);
 
 		$this->service = new GroupSyncService(
 			$this->connection,
 			$this->groupManager,
 			$this->userManager,
 			$this->harmonizer,
-			$this->lockService
+			$this->lockService,
+			$this->ledgerService
 		);
 	}
 
@@ -261,7 +265,7 @@ class GroupSyncServiceTest extends TestCase {
 		$lockService = $this->createMock(GroupSyncLockService::class);
 		$lockService->method('tryAcquire')->willReturn(null);
 		$lockService->method('acquireWithBoundedWait')->willReturn(null);
-		$service = new GroupSyncService($this->connection, $this->groupManager, $this->userManager, $this->harmonizer, $lockService);
+		$service = new GroupSyncService($this->connection, $this->groupManager, $this->userManager, $this->harmonizer, $lockService, $this->ledgerService);
 
 		$result = $service->syncGroupsByIds(['123'], $backend, nonBlocking: true);
 

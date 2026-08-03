@@ -10,7 +10,7 @@ The [documentation](https://github.com/bkhoesie/user_vo) describes how this plug
     ]]></description>
     <licence>AGPL</licence>
     <author>Nikolaus Demmel</author>
-    <version>0.3.3</version>
+    <version>0.4.0</version>
 	<namespace>UserVO</namespace>
 	<types>
 		<prelogin/>
@@ -33,10 +33,12 @@ The [documentation](https://github.com/bkhoesie/user_vo) describes how this plug
 </settings>
 	<background-jobs>
 		<job>OCA\UserVO\Cron\SyncUsersJob</job>
+		<job>OCA\UserVO\Cron\GroupSyncSweepJob</job>
 	</background-jobs>
 	<repair-steps>
 		<post-migration>
 			<step>OCA\UserVO\Migration\MigrateLegacyNightlySyncFlag</step>
+			<step>OCA\UserVO\Migration\ForceInitialGroupSweep</step>
 		</post-migration>
 	</repair-steps>
 </info>

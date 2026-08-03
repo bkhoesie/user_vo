@@ -93,6 +93,70 @@ class GroupManagementServiceTest extends TestCase {
 	}
 
 	/**
+	 * createGroupFromData() inserts new groups pre-marked dirty (dirty_seq=1)
+	 * so GroupSyncSweepJob can pick them up if the auto-sync below fails or is
+	 * contended - but in the normal path (this test), that auto-sync should
+	 * clear it right away by capturing seq_at_start=1 and advancing clean_seq
+	 * to match.
+	 */
+	public function testCreateGroupIsCleanAfterTheNormalAutoSync(): void {
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'test_dirty_after_create', 'name' => 'Test Dirty After Create', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->createGroup('test_dirty_after_create', $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('dirty_seq', 'clean_seq')
+			->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter('test_dirty_after_create')))
+			->executeQuery()->fetch();
+
+		$this->assertSame((int)$row['dirty_seq'], (int)$row['clean_seq'], 'The immediate auto-sync should have already cleared the initial dirty mark');
+	}
+
+	/**
+	 * Distinguishes the real behavior from a vacuous "always starts 0/0" -
+	 * the row must actually start dirty, not just converge because both
+	 * counters happen to start at 0. Forces the immediate post-create
+	 * auto-sync to fail (a second, separate fetchAllGroups() call inside
+	 * syncSingleGroupById(), distinct from createGroup()'s own lookup call)
+	 * and confirms the group is left dirty for GroupSyncSweepJob to repair,
+	 * rather than silently staying clean-and-possibly-empty.
+	 */
+	public function testCreateGroupStaysDirtyWhenTheAutoSyncFails(): void {
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$callCount = 0;
+		$backend->method('fetchAllGroups')->willReturnCallback(function () use (&$callCount) {
+			$callCount++;
+			if ($callCount === 1) {
+				// createGroup()'s own lookup of the group to create.
+				return [['id' => 'test_dirty_autosync_fails', 'name' => 'Test Dirty Autosync Fails', 'parentid' => null, 'pos' => 1]];
+			}
+			// The auto-sync's own separate fetch - simulates a VO outage
+			// landing right after creation.
+			return null;
+		});
+
+		$result = $this->service->createGroup('test_dirty_autosync_fails', $backend);
+		$this->assertTrue($result['success'], 'Group creation itself must still succeed even if the follow-up auto-sync fails');
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('dirty_seq', 'clean_seq')
+			->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter('test_dirty_autosync_fails')))
+			->executeQuery()->fetch();
+
+		$this->assertGreaterThan((int)$row['clean_seq'], (int)$row['dirty_seq'], 'A group whose initial auto-sync failed must stay dirty for the sweep to repair');
+	}
+
+	/**
 	 * Test creating duplicate group returns error
 	 */
 	public function testCreateDuplicateGroupReturnsError(): void {

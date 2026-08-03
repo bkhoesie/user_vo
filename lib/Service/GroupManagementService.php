@@ -509,6 +509,13 @@ class GroupManagementService {
                 'member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
                 'vo_member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
                 'non_vo_member_count' => $insertQb->createNamedParameter(0, \PDO::PARAM_INT),
+                // A newly adopted group is by definition un-synced. The immediate
+                // auto-sync below normally clears this right away (captures
+                // seq_at_start=1, advances clean_seq to match) - this is only a
+                // backstop for when that initial sync fails or is contended, so
+                // GroupSyncSweepJob picks it up instead of it staying permanently
+                // "clean" and empty.
+                'dirty_seq' => $insertQb->createNamedParameter(1, \PDO::PARAM_INT),
             ]);
         try {
             $insertQb->executeStatement();

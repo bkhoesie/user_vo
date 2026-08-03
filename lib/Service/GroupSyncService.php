@@ -69,19 +69,22 @@ class GroupSyncService {
     private IUserManager $userManager;
     private GroupNameHarmonizer $groupNameHarmonizer;
     private GroupSyncLockService $lockService;
+    private GroupSyncLedgerService $ledgerService;
 
     public function __construct(
         IDBConnection $connection,
         IGroupManager $groupManager,
         IUserManager $userManager,
         GroupNameHarmonizer $groupNameHarmonizer,
-        GroupSyncLockService $lockService
+        GroupSyncLockService $lockService,
+        GroupSyncLedgerService $ledgerService
     ) {
         $this->connection = $connection;
         $this->groupManager = $groupManager;
         $this->userManager = $userManager;
         $this->groupNameHarmonizer = $groupNameHarmonizer;
         $this->lockService = $lockService;
+        $this->ledgerService = $ledgerService;
     }
 
 
@@ -552,7 +555,7 @@ class GroupSyncService {
             // cache rather than live - a group missing from a stale snapshot isn't
             // trustworthy evidence it was actually deleted in VO, so only a
             // guaranteed-live fetch (every other caller) may set deleted_in_vo.
-            return $this->syncSingleGroupFullLocked($voGroupId, $ncGroupId, $storedVOName, $voGroupMap, mayDetectDeletion: !$nonBlocking);
+            return $this->syncSingleGroupFullLocked($voGroupId, $ncGroupId, $storedVOName, $voGroupMap, $lockToken, mayDetectDeletion: !$nonBlocking);
         } finally {
             $this->lockService->release($voGroupId, $lockToken);
         }
@@ -567,10 +570,14 @@ class GroupSyncService {
      *     on the login path, might simply be missing the group by coincidence
      *     of timing, not because it's gone).
      */
-    private function syncSingleGroupFullLocked(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, bool $mayDetectDeletion = true): array {
-        // Get stored metadata
+    private function syncSingleGroupFullLocked(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, string $lockToken, bool $mayDetectDeletion = true): array {
+        // Get stored metadata. dirty_seq is captured here - right after lease
+        // acquire, right before the user_vo membership read below - as this
+        // sync's "seq at start". See GroupSyncLedgerService and the
+        // Version1005Date20260803000000 migration for why the ledger needs
+        // this exact placement to correctly detect a write that races this sync.
         $qb = $this->connection->getQueryBuilder();
-        $qb->select('vo_parent_id', 'vo_position')
+        $qb->select('vo_parent_id', 'vo_position', 'dirty_seq')
             ->from('user_vo_groups')
             ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
         $result = $qb->executeQuery();
@@ -583,6 +590,7 @@ class GroupSyncService {
 
         $storedVOParentId = $groupRow['vo_parent_id'];
         $storedVOPosition = $groupRow['vo_position'] ? (int)$groupRow['vo_position'] : null;
+        $seqAtStart = (int)$groupRow['dirty_seq'];
 
         // Get current VO metadata (or use stored values if group deleted in VO,
         // or if the group is merely absent from a map we can't fully trust)
@@ -655,32 +663,42 @@ class GroupSyncService {
         $removed = [];
         $skipped = [];
 
-        // Add users who should be in the group but aren't
-        foreach ($expectedVOUsernames as $username) {
-            if (!in_array($username, $currentMemberIds, true)) {
-                $user = $this->userManager->get($username);
-                if ($user) {
-                    $ncGroup->addUser($user);
-                    $added[] = $username;
-                } else {
-                    $skipped[] = [
-                        'username' => $username,
-                        'reason' => 'User not found in NC'
-                    ];
+        // A failure partway through this block can leave membership half-applied.
+        // Re-dirty the group so the sweep repairs it, rather than let a half-applied
+        // sync masquerade as clean once retried successfully by a caller that
+        // swallows the exception (this app's callers generally do, to keep other
+        // groups in a batch unaffected).
+        try {
+            // Add users who should be in the group but aren't
+            foreach ($expectedVOUsernames as $username) {
+                if (!in_array($username, $currentMemberIds, true)) {
+                    $user = $this->userManager->get($username);
+                    if ($user) {
+                        $ncGroup->addUser($user);
+                        $added[] = $username;
+                    } else {
+                        $skipped[] = [
+                            'username' => $username,
+                            'reason' => 'User not found in NC'
+                        ];
+                    }
                 }
             }
-        }
 
-        // Remove users who are no longer in VO group
-        foreach ($currentMemberIds as $username) {
-            if (!in_array($username, $expectedVOUsernames, true)) {
-                // Only remove if user is from user_vo backend
-                $user = $this->userManager->get($username);
-                if ($user && $user->getBackendClassName() === 'OCA\\UserVO\\UserVOAuth') {
-                    $ncGroup->removeUser($user);
-                    $removed[] = $username;
+            // Remove users who are no longer in VO group
+            foreach ($currentMemberIds as $username) {
+                if (!in_array($username, $expectedVOUsernames, true)) {
+                    // Only remove if user is from user_vo backend
+                    $user = $this->userManager->get($username);
+                    if ($user && $user->getBackendClassName() === 'OCA\\UserVO\\UserVOAuth') {
+                        $ncGroup->removeUser($user);
+                        $removed[] = $username;
+                    }
                 }
             }
+        } catch (\Throwable $e) {
+            $this->ledgerService->markDirty([$voGroupId]);
+            throw $e;
         }
 
         // Calculate member counts
@@ -721,6 +739,14 @@ class GroupSyncService {
         }
 
         $updateQb->executeStatement();
+
+        // Last statement before returning (and thus before the lease release in
+        // syncSingleGroupFull()'s finally): advances clean_seq only if $lockToken
+        // still matches the current holder, so an overrun sync can't falsely claim
+        // "clean" out from under whoever holds the lease now. See
+        // GroupSyncLedgerService::markCleanIfStillOwned() and the
+        // Version1005Date20260803000000 migration for the full argument.
+        $this->ledgerService->markCleanIfStillOwned($voGroupId, $lockToken, $seqAtStart);
 
         return [
             'added' => $added,
