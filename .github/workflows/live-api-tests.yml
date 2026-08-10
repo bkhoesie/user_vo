@@ -81,4 +81,10 @@ jobs:
 
       - name: Print Nextcloud log
         if: failure()
-        run: cat data/nextcloud.log
+        run: |
+          echo "=== user_vo log entries (the likely cause) ==="
+          jq -r 'select(.app == "user_vo") | "[\(.time)] \(.message)"' data/nextcloud.log
+          echo
+          echo "::group::Full nextcloud.log"
+          cat data/nextcloud.log
+          echo "::endgroup::"
