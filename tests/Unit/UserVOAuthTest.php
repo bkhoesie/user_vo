@@ -242,6 +242,38 @@ class UserVOAuthTest extends TestCase {
 		$this->assertEquals([['id' => '1', 'name' => 'Doe, Jane']], $auth->fetchAllMembers());
 	}
 
+	/**
+	 * @dataProvider malformedListResponseProvider
+	 *
+	 * These are shapes a non-array-entries check alone would miss (a single
+	 * associative array whose *values* happen to be arrays too) - each one
+	 * is still a non-empty, truthy PHP array, so a caller checking only
+	 * "is this a non-empty array" would treat it as real VO data with zero
+	 * usable entries, the same production incident this covers.
+	 */
+	public function testFetchAllMembersRejectsOtherMalformedShapes($malformedResponse): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(fn() => $malformedResponse));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	/** @dataProvider malformedListResponseProvider */
+	public function testFetchAllGroupsRejectsOtherMalformedShapes($malformedResponse): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(fn() => $malformedResponse));
+
+		$this->assertNull($auth->fetchAllGroups());
+	}
+
+	public static function malformedListResponseProvider(): array {
+		return [
+			'error envelope with array value' => [['errors' => [['code' => 5]]]],
+			'wrapped/enveloped response' => [['data' => [['id' => '1']], 'meta' => []]],
+			'differently-keyed envelope' => [['result' => [], 'meta' => []]],
+			'list of records missing id' => [[['name' => 'No ID Group']]],
+			'list containing an empty record' => [[[], []]],
+		];
+	}
+
 	public function testFetchAllGroupsReturnsNullOnVOErrorShapedResponse(): void {
 		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
 			fn() => ['error' => 'Rate limited']

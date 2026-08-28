@@ -85,6 +85,32 @@ class VoApiContractTest extends TestCase {
 		$this->assertMatchesRegularExpression('/^\d+$/', $memberId);
 	}
 
+	/**
+	 * Pins the exact response shape ConfigController::testApiConnection()
+	 * relies on for its "connection successful" verdict when testing with a
+	 * deliberately nonexistent user (exactly what that method itself does
+	 * in production on every "Test Configuration" click, so this carries no
+	 * additional real-account/lockout risk beyond what already happens
+	 * there) - VO is documented to return `[""]` in this case, not e.g. an
+	 * empty array or an {"error": ...} object. If VO's behavior here ever
+	 * changes, admins with a correct config would start seeing "Unexpected
+	 * response" on every connection test - this is the trip wire for that.
+	 */
+	public function testVerifyLoginReturnsEmptyIdEntryForNonexistentUser(): void {
+		$apiClient = new ApiClient(\OC::$server->get(LoggerInterface::class), \OC::$server->get(IClientService::class));
+		$token = $apiClient->createToken(self::$env['api_username'], self::$env['api_password']);
+
+		$result = $apiClient->makeRequest(
+			rtrim(self::$env['url'], '/') . '/?api=VerifyLogin',
+			['user' => 'test_user_that_should_not_exist', 'password' => 'dummy_password', 'result' => 'id'],
+			$token
+		);
+
+		$this->assertIsArray($result);
+		$this->assertArrayHasKey(0, $result, 'ConfigController::testApiConnection() requires isset($response[0]) for a success verdict');
+		$this->assertSame('', $result[0]);
+	}
+
 	public function testGetMemberReturnsNormalizedData(): void {
 		$memberId = $this->resolveTestMemberId();
 		$backend = $this->createBackend();

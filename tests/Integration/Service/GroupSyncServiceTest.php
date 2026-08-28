@@ -605,7 +605,7 @@ class GroupSyncServiceTest extends TestCase {
 
 		$this->assertFalse($result['success']);
 		$this->assertEquals(500, $result['status_code']);
-		$this->assertAuditLogHasFetchFailedEntry($voGroupId);
+		$this->assertAuditLogHasFetchFailedEntry($voGroupId, 'Group sync failed');
 	}
 
 	public function testSyncGroupsByIdsRecordsAuditLogEntryWhenGetGroupsFailsEntirelyAndBlocking(): void {
@@ -620,7 +620,7 @@ class GroupSyncServiceTest extends TestCase {
 		$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: false);
 
 		$this->assertFalse($result['success']);
-		$this->assertAuditLogHasFetchFailedEntry(null);
+		$this->assertAuditLogHasFetchFailedEntry(null, 'vo_group_ids: ' . $voGroupId);
 	}
 
 	public function testSyncAllManagedGroupsRecordsAuditLogEntryWhenGetGroupsFailsEntirely(): void {
@@ -635,18 +635,27 @@ class GroupSyncServiceTest extends TestCase {
 		$result = $this->service->syncAllManagedGroups($backend);
 
 		$this->assertFalse($result['success']);
-		$this->assertAuditLogHasFetchFailedEntry(null);
+		$this->assertAuditLogHasFetchFailedEntry(null, 'Bulk group sync failed');
 	}
 
-	/** Asserts a 'vo_api_fetch_failed' audit log entry exists, then deletes it (not covered by cleanupTestData()). */
-	private function assertAuditLogHasFetchFailedEntry(?string $expectedGroupId): void {
+	/**
+	 * Asserts a 'vo_api_fetch_failed' audit log entry exists, then deletes
+	 * it (not covered by cleanupTestData()). Matches on message text too,
+	 * not just event_type + group_id - for the two null-group_id call sites
+	 * that pair alone is loose enough that a leftover row from an aborted
+	 * earlier test run (cleanup here is inline, not in tearDown(), so an
+	 * assertion failure above leaks the row) could satisfy it.
+	 */
+	private function assertAuditLogHasFetchFailedEntry(?string $expectedGroupId, string $expectedMessageSubstring): void {
 		$auditLog = \OC::$server->get(AuditLogService::class);
 		$entries = $auditLog->getRecentEntries();
 		$entry = current(array_filter(
 			$entries,
-			fn ($e) => $e['event_type'] === 'vo_api_fetch_failed' && $e['group_id'] === $expectedGroupId
+			fn ($e) => $e['event_type'] === 'vo_api_fetch_failed'
+				&& $e['group_id'] === $expectedGroupId
+				&& str_contains($e['message'], $expectedMessageSubstring)
 		));
-		$this->assertNotFalse($entry, 'Expected a vo_api_fetch_failed audit log entry (group_id=' . ($expectedGroupId ?? 'null') . ')');
+		$this->assertNotFalse($entry, 'Expected a vo_api_fetch_failed audit log entry (group_id=' . ($expectedGroupId ?? 'null') . ', message containing "' . $expectedMessageSubstring . '")');
 
 		$deleteQb = $this->connection->getQueryBuilder();
 		$deleteQb->delete('user_vo_audit_log')

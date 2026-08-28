@@ -120,6 +120,32 @@ class UserProvisioningServiceTest extends TestCase {
 		$this->assertCount(0, $result['users']);
 	}
 
+	/**
+	 * Regression test: fetchUserDataFromVO() returns a truthy array on a
+	 * transient API error too (the '_error' => 'api_error' contract), so
+	 * this member must not be silently counted the same as a genuine
+	 * no-login member - and the caller must be told results may be
+	 * incomplete, not get a plain success with no signal anything went
+	 * wrong for this member.
+	 */
+	public function testSearchVOUsersCountsApiErrorsSeparatelyFromNoLoginMembers(): void {
+		$backend = $this->backendMock();
+		$backend->method('fetchAllMembers')->willReturn([
+			['id' => '1', 'name' => 'Error, Member'],
+			['id' => '2', 'name' => 'Findable, Member'],
+		]);
+		$backend->method('fetchUserDataFromVO')->willReturnCallback(fn ($id) => $id === '1'
+			? ['_error' => 'api_error', '_message' => 'Rate limited']
+			: ['id' => '2', 'username' => 'findable.member']);
+
+		$result = $this->service->searchVOUsers('', $backend);
+
+		$this->assertTrue($result['success']);
+		$this->assertCount(1, $result['users']);
+		$this->assertEquals('findable.member', $result['users'][0]['vo_username']);
+		$this->assertEquals(1, $result['api_errors']);
+	}
+
 	public function testSearchVOUsersSkipsDeletedMembers(): void {
 		$backend = $this->backendMock();
 		$backend->method('fetchAllMembers')->willReturn([['id' => '1', 'name' => 'Gone, User']]);
@@ -223,6 +249,27 @@ class UserProvisioningServiceTest extends TestCase {
 
 		$this->assertFalse($result['success']);
 		$this->assertStringContainsString('does not have login', $result['error']);
+	}
+
+	/**
+	 * Regression test: fetchUserDataFromVO()'s '_error' => 'api_error' shape
+	 * is a truthy array like a real member record, so it must not fall
+	 * through to the empty-username check above and come out as the false
+	 * claim "this user does not have login credentials in VereinOnline" -
+	 * that message is reserved for '_error' => 'no_login', a genuine data
+	 * fact (covered by testCreateAccountFromVOFailsWithoutLoginCredentials()
+	 * above), not a transient API failure.
+	 */
+	public function testCreateAccountFromVOReportsApiFailureDistinctlyFromNoLogin(): void {
+		$backend = $this->backendMock();
+		$backend->method('fetchUserDataFromVO')->willReturn(['_error' => 'api_error', '_message' => 'Rate limited']);
+
+		$result = $this->service->createAccountFromVO('1', $backend);
+
+		$this->assertFalse($result['success']);
+		$this->assertStringNotContainsString('does not have login', $result['error']);
+		$this->assertStringContainsString('Failed to fetch user data', $result['error']);
+		$this->assertStringContainsString('Rate limited', $result['error']);
 	}
 
 	public function testCreateAccountFromVOFailsWhenDeleted(): void {

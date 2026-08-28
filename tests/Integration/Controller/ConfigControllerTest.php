@@ -318,7 +318,7 @@ class ConfigControllerTest extends NextcloudTestCase {
 		$this->assertTrue($response->getData()['success']);
 	}
 
-	public function testTestConfigurationSucceedsOnVOErrorShapeContainingAccessDenied() {
+	public function testTestConfigurationRejectsVOErrorShapeContainingAccessDenied() {
 		$controller = $this->controllerWithApiResponse(['error' => 'Zugriff verweigert']);
 		$this->request->method('getParam')
 			->willReturnCallback(function ($key, $default) {

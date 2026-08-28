@@ -60,6 +60,8 @@ class GroupManagementService {
             $allGroups = $backend->fetchAllGroups();
 
             if (!$allGroups) {
+                $this->auditLogService->log('vo_api_fetch_failed', null, null, 'Loading the full VO group list failed: could not fetch groups from VereinOnline');
+
                 return [
                     'success' => false,
                     'error' => 'Failed to fetch groups from VereinOnline'

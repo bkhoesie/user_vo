@@ -52,6 +52,7 @@ class UserProvisioningService {
             }
 
             $results = [];
+            $apiErrorCount = 0;
             $searchLower = mb_strtolower(trim($searchTerm), 'UTF-8');
             $userManager = \OC::$server->get(\OCP\IUserManager::class);
 
@@ -107,6 +108,18 @@ class UserProvisioningService {
 
                 if (!$memberData) {
                     continue; // Skip if can't fetch details
+                }
+
+                // A transient fetch failure for this one member is not the
+                // same as "this member genuinely has no VO login" below -
+                // fetchUserDataFromVO() returns a truthy array either way
+                // (see its '_error' contract), so this must be checked
+                // explicitly rather than falling through to the empty-
+                // username check, which would silently misreport an API
+                // error as a fact about the member's VO data.
+                if (($memberData['_error'] ?? null) === 'api_error') {
+                    $apiErrorCount++;
+                    continue;
                 }
 
                 // Filter: Must have username and not be deleted
@@ -165,10 +178,18 @@ class UserProvisioningService {
                 ];
             }
 
+            if ($apiErrorCount > 0) {
+                $this->logger->warning('Some VO members could not be checked during search due to API errors - results may be incomplete', [
+                    'app' => 'user_vo',
+                    'api_error_count' => $apiErrorCount
+                ]);
+            }
+
             return [
                 'success' => true,
                 'users' => $results,
-                'total' => count($results)
+                'total' => count($results),
+                'api_errors' => $apiErrorCount
             ];
 
         } catch (\Exception $e) {
@@ -196,6 +217,19 @@ class UserProvisioningService {
                 return [
                     'success' => false,
                     'error' => 'Failed to fetch user data from VereinOnline'
+                ];
+            }
+
+            // A transient API failure must be reported as exactly that, not
+            // fall through to the empty-username check below and come out
+            // as the (false) claim "this user has no VO login credentials" -
+            // 'no_login' is fetchUserDataFromVO()'s other _error case and
+            // *is* a genuine data fact, so it deliberately isn't intercepted
+            // here and falls through to that same existing message.
+            if (($memberData['_error'] ?? null) === 'api_error') {
+                return [
+                    'success' => false,
+                    'error' => 'Failed to fetch user data from VereinOnline: ' . ($memberData['_message'] ?? 'Unknown error')
                 ];
             }
 

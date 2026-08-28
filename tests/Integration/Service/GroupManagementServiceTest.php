@@ -451,6 +451,28 @@ class GroupManagementServiceTest extends TestCase {
 		$this->assertFalse($newGroup['is_managed']);
 	}
 
+	public function testFetchAllVOGroupsRecordsAuditLogEntryWhenVOFetchFails(): void {
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn(null);
+
+		$result = $this->service->fetchAllVOGroups($backend);
+
+		$this->assertFalse($result['success']);
+
+		$auditLog = \OC::$server->get(AuditLogService::class);
+		$entries = $auditLog->getRecentEntries();
+		$entry = current(array_filter($entries, fn ($e) => $e['event_type'] === 'vo_api_fetch_failed'
+			&& str_contains($e['message'], 'Loading the full VO group list failed')));
+		$this->assertNotFalse($entry, 'Expected a vo_api_fetch_failed audit log entry');
+
+		$deleteQb = $this->connection->getQueryBuilder();
+		$deleteQb->delete('user_vo_audit_log')
+			->where($deleteQb->expr()->eq('id', $deleteQb->createNamedParameter($entry['id'], \PDO::PARAM_INT)))
+			->executeStatement();
+	}
+
 	/**
 	 * Same backend-adoption reasoning as
 	 * testCreateGroupRefusesToAdoptAGroupManagedByADifferentBackend(), but

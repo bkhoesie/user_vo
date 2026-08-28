@@ -291,25 +291,52 @@ class UserVOAuth extends Base {
      * An empty list ([]) is deliberately NOT rejected here - it's vacuously
      * well-formed and callers already treat a falsy (empty) response as a
      * fetch failure via their own `!$listResponse` check.
+     *
+     * Two checks, not one, because a single non-array-entries check misses
+     * realistic error shapes: an error *envelope* like `{"errors": [...]}`
+     * or `{"data": [...], "meta": {...}}` is still an associative array
+     * whose values can themselves be arrays, so it'd otherwise pass. A
+     * genuine VO list response is always a plain sequential array (0, 1, 2,
+     * ...) of records, each with a usable `id` - every real caller already
+     * assumes `id` is present (see the `isset($group['id'])`/`$member['id']`
+     * reads throughout this class), so requiring it here rejects malformed
+     * records the same way instead of silently producing an empty id set.
      */
     private static function isWellFormedVOList(array $response): bool {
-        if (isset($response['error'])) {
+        if (!self::isSequentialArray($response)) {
+            // Covers {"error": "..."} and any other associative-envelope
+            // shape (e.g. {"errors": [...]}, {"data": [...], "meta": {}})
+            // in one check, rather than special-casing 'error' alone.
             return false;
         }
         foreach ($response as $entry) {
-            if (!is_array($entry)) {
+            if (!is_array($entry) || !isset($entry['id']) || $entry['id'] === '') {
                 return false;
             }
         }
         return true;
     }
 
-    /** @return array{type: string, keys?: array} Safe-to-log summary of a rejected response, without dumping its full (possibly large) content. */
+    /** True for [] and for a plain 0-indexed sequential array; false for any associative/gap-keyed array. Manual check, not array_is_list() - this app's minimum supported PHP is 8.0 (array_is_list() is 8.1+). */
+    private static function isSequentialArray(array $array): bool {
+        if (empty($array)) {
+            // range(0, -1) is [0, -1], not [] - count($array) - 1 below
+            // would be wrong for the empty case if not special-cased here.
+            return true;
+        }
+        return array_keys($array) === range(0, count($array) - 1);
+    }
+
+    /** @return array{type: string, keys?: array, error?: string} Safe-to-log summary of a rejected response - keeps VO's own error message (the single most useful diagnostic, especially since this deployment has no direct nextcloud.log access) without dumping the full, possibly large, response body. */
     private static function describeUnexpectedShape($response): array {
         if (!is_array($response)) {
             return ['type' => get_debug_type($response)];
         }
-        return ['type' => 'array', 'keys' => array_slice(array_keys($response), 0, 10)];
+        $description = ['type' => 'array', 'keys' => array_slice(array_keys($response), 0, 10)];
+        if (isset($response['error']) && is_scalar($response['error'])) {
+            $description['error'] = (string)$response['error'];
+        }
+        return $description;
     }
 
     /**
@@ -472,6 +499,20 @@ class UserVOAuth extends Base {
             $memberData = $this->makeRequest($getMemberUrl, ['id' => $member['id']], $token);
 
             if (!$memberData || !is_array($memberData)) {
+                continue;
+            }
+
+            // A per-member API error (e.g. a transient VO hiccup mid-loop)
+            // must not be mistaken for "this member genuinely has no VO
+            // login" below - same class of misattribution as this app's
+            // other _error-marker checks (fetchUserDataFromVO() callers),
+            // just logged here instead of surfaced to a caller since this
+            // best-effort matching loop has no per-candidate error channel.
+            if (isset($memberData['error'])) {
+                logger('user_vo')->debug("API error while fetching member detail during name matching", [
+                    'vo_member_id' => $member['id'],
+                    'error' => $memberData['error']
+                ]);
                 continue;
             }
 
