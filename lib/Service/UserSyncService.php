@@ -423,8 +423,8 @@ class UserSyncService {
         // $failureCount still counts for the admin-facing summary. Drives
         // last_full_user_sync_at in syncAllUsers().
         $apiFailureCount = 0;
-        // Skipped users have no vo_user_id yet, so can't be a group member
-        // either way - excluded from $apiFailureCount too.
+        // Skipped users have no cached vo_group_ids yet, so can't be a
+        // group member either way - excluded from $apiFailureCount too.
         $skippedCount = 0;
         $photoErrorCount = 0;
 

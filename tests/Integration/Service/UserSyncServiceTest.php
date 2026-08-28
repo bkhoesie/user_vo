@@ -347,6 +347,7 @@ class UserSyncServiceTest extends TestCase {
 		$result = $this->service->syncAllUsers($backend);
 		$after = time();
 
+		$this->assertEquals('deleted', $this->findResultRow($result, $uid)['status'], 'Precondition: this uid took the deleted branch, not some other failure branch');
 		$this->assertEquals(0, $result['summary']['api_failures'], 'Precondition: deleted + orphaned must not count as an api_failure');
 
 		$stamped = (int)$config->getAppValue('user_vo', 'last_full_user_sync_at', '0');
@@ -377,6 +378,7 @@ class UserSyncServiceTest extends TestCase {
 
 		$result = $this->service->syncAllUsers($backend);
 
+		$this->assertEquals('deleted', $this->findResultRow($result, $uid)['status'], 'Precondition: this uid took the deleted branch, not some other failure branch');
 		$this->assertGreaterThan(0, $result['summary']['api_failures'], 'Precondition: a deleted user whose write also failed must still count as an api_failure');
 		$this->assertEquals('', $config->getAppValue('user_vo', 'last_full_user_sync_at', ''));
 	}
