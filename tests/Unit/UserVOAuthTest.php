@@ -265,36 +265,68 @@ class UserVOAuthTest extends TestCase {
 		$this->assertEquals([['id' => '1', 'name' => 'Doe, Jane']], $auth->fetchAllMembers());
 	}
 
-	/**
-	 * @dataProvider malformedListResponseProvider
-	 *
-	 * These are shapes a non-array-entries check alone would miss (a single
-	 * associative array whose *values* happen to be arrays too) - each one
-	 * is still a non-empty, truthy PHP array, so a caller checking only
-	 * "is this a non-empty array" would treat it as real VO data with zero
-	 * usable entries, the same production incident this covers.
-	 */
-	public function testFetchAllMembersRejectsOtherMalformedShapes($malformedResponse): void {
-		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(fn() => $malformedResponse));
+	// These are shapes a non-array-entries check alone would miss (a single
+	// associative array whose *values* happen to be arrays too) - each one
+	// is still a non-empty, truthy PHP array, so a caller checking only "is
+	// this a non-empty array" would treat it as real VO data with zero
+	// usable entries, the same production incident this covers. Explicit
+	// per-shape test methods, not a data provider - this codebase doesn't
+	// use PHPUnit data providers elsewhere, and the docblock-style
+	// @dataProvider annotation isn't portable across every PHPUnit version
+	// this app's CI matrix runs (confirmed: fails with an ArgumentCountError
+	// on at least one PHP/PHPUnit combination).
+
+	public function testFetchAllMembersRejectsErrorEnvelopeWithArrayValue(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['errors' => [['code' => 5]]]
+		));
 
 		$this->assertNull($auth->fetchAllMembers());
 	}
 
-	/** @dataProvider malformedListResponseProvider */
-	public function testFetchAllGroupsRejectsOtherMalformedShapes($malformedResponse): void {
-		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(fn() => $malformedResponse));
+	public function testFetchAllMembersRejectsWrappedEnvelopeResponse(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['data' => [['id' => '1']], 'meta' => []]
+		));
 
-		$this->assertNull($auth->fetchAllGroups());
+		$this->assertNull($auth->fetchAllMembers());
 	}
 
-	public static function malformedListResponseProvider(): array {
-		return [
-			'error envelope with array value' => [['errors' => [['code' => 5]]]],
-			'wrapped/enveloped response' => [['data' => [['id' => '1']], 'meta' => []]],
-			'differently-keyed envelope' => [['result' => [], 'meta' => []]],
-			'list of records missing id' => [[['name' => 'No ID Group']]],
-			'list containing an empty record' => [[[], []]],
-		];
+	public function testFetchAllMembersRejectsDifferentlyKeyedEnvelope(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['result' => [], 'meta' => []]
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	public function testFetchAllMembersRejectsListOfRecordsMissingId(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => [['name' => 'No ID Member']]
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	public function testFetchAllMembersRejectsListContainingAnEmptyRecord(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => [[], []]
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	/**
+	 * fetchAllGroups() shares the exact same isWellFormedVOList() check as
+	 * fetchAllMembers() above - one representative malformed shape here just
+	 * confirms it's actually wired up, not a full re-test of every case.
+	 */
+	public function testFetchAllGroupsRejectsWrappedEnvelopeResponse(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['data' => [['id' => '1']], 'meta' => []]
+		));
+
+		$this->assertNull($auth->fetchAllGroups());
 	}
 
 	public function testFetchAllGroupsReturnsNullOnVOErrorShapedResponse(): void {

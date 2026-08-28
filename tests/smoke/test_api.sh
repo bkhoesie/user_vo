@@ -185,7 +185,11 @@ echo -e "${BLUE}User Provisioning Endpoints:${NC}"
 echo ""
 echo -e "${BLUE}Group Endpoints:${NC}"
 test_endpoint "GET" "/admin/fetch-all-vo-groups" "200" ".success != null" "Fetch all VO groups"
-test_endpoint "GET" "/admin/fetch-managed-groups" "200" ".success == true" "Fetch managed groups"
+# Unlike fetch-all-vo-groups, this endpoint has no data to fall back to when VO
+# is unreachable - it always needs a live fetch (to detect deleted_in_vo), so
+# it correctly fails (500, not the previous silent success) in this smoke-test
+# environment, which has no VO configured.
+test_endpoint "GET" "/admin/fetch-managed-groups" "500" ".success == false" "Fetch managed groups (VO unreachable in this environment)"
 # Note: Not testing group create/delete to avoid modifying groups
 
 # Group Sync Controller Endpoints
