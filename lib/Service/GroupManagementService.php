@@ -67,6 +67,14 @@ class GroupManagementService {
      * Deliberately not "the group is actually wrong" - just "not yet
      * confirmed against the freshest known user data". A group with no
      * last_synced at all is always considered stale (never confirmed).
+     *
+     * $lastSynced (a DATETIME column, compared via strtotime()) and
+     * last_full_user_sync_at (a raw unix timestamp) are only comparable
+     * because every writer of both values agrees on naive UTC - NC pins
+     * date_default_timezone_set('UTC') itself, and both last_synced writers
+     * (UserVOAuth::updateVOMetadata(), GroupSyncService's sync body) emit
+     * UTC datetimes with no timezone marker. A different default timezone
+     * would skew this comparison silently.
      */
     private function isPossiblyStale(?string $lastSynced): bool {
         $lastFullUserSyncAt = $this->config->getAppValue('user_vo', 'last_full_user_sync_at', '');

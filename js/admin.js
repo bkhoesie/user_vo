@@ -1242,7 +1242,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Sync all users
     if (syncAllUsersButton) {
         syncAllUsersButton.addEventListener('click', function() {
-            syncAllUsersButton.disabled = true;
+            // setSyncActionsBusy() is declared further down via a hoisted
+            // function declaration - safe to call from here regardless.
+            setSyncActionsBusy(true);
             syncAllUsersStatus.textContent = t('user_vo', 'Syncing from VO... (this may take a moment)');
             syncAllUsersStatus.className = 'sync-status syncing';
             userSyncResults.style.display = 'none';
@@ -1256,7 +1258,7 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(response => response.json())
             .then(data => {
-                syncAllUsersButton.disabled = false;
+                setSyncActionsBusy(false);
 
                 if (data.success) {
                     const summary = data.summary;
@@ -1332,10 +1334,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             })
             .catch(error => {
-                syncAllUsersButton.disabled = false;
+                setSyncActionsBusy(false);
                 syncAllUsersStatus.textContent = t('user_vo', 'Error:') + ' ' + error;
                 syncAllUsersStatus.className = 'sync-status error';
             });
+        });
+    }
+
+    // Shared mutual exclusion across every top-level sync action, so an
+    // admin can't start a user sync and a group sync at the same time -
+    // that exact interleaving can make last_full_user_sync_at land after
+    // some groups' own last_synced, producing a misleading "possibly stale"
+    // (or "not stale") result for groups whose sync just happened to race
+    // it. Looked up fresh by id (not the buttons' own later-declared
+    // consts), so this works regardless of where in the file it's called
+    // from - a plain function declaration is hoisted, so definition order
+    // relative to its callers doesn't matter either.
+    function setSyncActionsBusy(busy) {
+        ['full-resync', 'sync-all-users', 'sync-all-groups', 'sync-all-users-shortcut', 'sync-all-groups-shortcut'].forEach(function(id) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.disabled = busy;
+            }
         });
     }
 
@@ -1348,12 +1368,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // that dependency exists. Deliberately a fresh, self-contained request
     // chain rather than reusing syncAllUsersButton/syncAllGroupsButton's own
     // click handlers - those also drive their section's detailed results
-    // table, which this top-level action doesn't need to manage.
+    // table, which this top-level action doesn't need to manage (the
+    // managed-groups table is still refreshed below, if it's the active
+    // view, so newly-cleared staleness badges are visible without a manual
+    // reload).
     const fullResyncButton = document.getElementById('full-resync');
     const fullResyncStatus = document.getElementById('full-resync-status');
     if (fullResyncButton) {
         fullResyncButton.addEventListener('click', function() {
-            fullResyncButton.disabled = true;
+            setSyncActionsBusy(true);
             fullResyncStatus.textContent = t('user_vo', 'Syncing users...');
             fullResyncStatus.className = 'sync-status syncing';
 
@@ -1364,7 +1387,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     'requesttoken': OC.requestToken
                 }
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(t('user_vo', 'User sync request failed (HTTP {status})', { status: response.status }));
+                }
+                return response.json();
+            })
             .then(userData => {
                 if (!userData.success) {
                     throw new Error(userData.error || t('user_vo', 'User sync failed'));
@@ -1379,19 +1407,54 @@ document.addEventListener('DOMContentLoaded', function() {
                     },
                     body: JSON.stringify({})
                 })
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(t('user_vo', 'Group sync request failed (HTTP {status})', { status: response.status }));
+                    }
+                    return response.json();
+                })
                 .then(groupData => {
                     if (!groupData.success) {
                         throw new Error(groupData.error || t('user_vo', 'Group sync failed'));
                     }
 
-                    const usersSynced = userData.summary.success ?? userData.summary.synced ?? 0;
+                    const usersSynced = userData.summary.success ?? 0;
+                    const usersFailed = userData.summary.failed ?? 0;
                     const groupsSynced = groupData.summary.succeeded ?? 0;
-                    fullResyncStatus.textContent = t('user_vo', 'Full resync complete: {users} users, {groups} groups', {
-                        users: usersSynced,
-                        groups: groupsSynced
-                    });
-                    fullResyncStatus.className = 'sync-status success';
+                    const groupsFailed = groupData.summary.failed ?? 0;
+
+                    // Both endpoints report success:true even with a nonzero
+                    // failed count (individual per-item failures, not a
+                    // fetch-level error) - a resync that quietly left some
+                    // users/groups unsynced must not read as an unqualified
+                    // "complete".
+                    if (usersFailed > 0 || groupsFailed > 0) {
+                        fullResyncStatus.textContent = t('user_vo', 'Full resync completed with errors: {users} users synced ({usersFailed} failed), {groups} groups synced ({groupsFailed} failed)', {
+                            users: usersSynced,
+                            usersFailed: usersFailed,
+                            groups: groupsSynced,
+                            groupsFailed: groupsFailed
+                        });
+                        fullResyncStatus.className = 'sync-status warning';
+                    } else {
+                        fullResyncStatus.textContent = t('user_vo', 'Full resync complete: {users} users, {groups} groups', {
+                            users: usersSynced,
+                            groups: groupsSynced
+                        });
+                        fullResyncStatus.className = 'sync-status success';
+                    }
+
+                    // currentViewType/loadAllVOGroupsButton/loadManagedGroupsButton
+                    // are declared further down in this same DOMContentLoaded
+                    // handler - safe to reference here despite that: this
+                    // callback only runs after both network round-trips above
+                    // complete, long after the handler's synchronous top-level
+                    // body (which declares them) has already finished.
+                    if (currentViewType === 'managed' && loadManagedGroupsButton) {
+                        loadManagedGroupsButton.click();
+                    } else if (currentViewType === 'all' && loadAllVOGroupsButton) {
+                        loadAllVOGroupsButton.click();
+                    }
                 });
             })
             .catch(error => {
@@ -1399,7 +1462,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 fullResyncStatus.className = 'sync-status error';
             })
             .then(() => {
-                fullResyncButton.disabled = false;
+                setSyncActionsBusy(false);
             });
         });
     }
@@ -2205,7 +2268,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const syncAllGroupsButton = document.getElementById('sync-all-groups');
     if (syncAllGroupsButton) {
         syncAllGroupsButton.addEventListener('click', function() {
-            syncAllGroupsButton.disabled = true;
+            setSyncActionsBusy(true);
 
             fetch(OC.generateUrl('/apps/user_vo/admin/sync-all-groups'), {
                 method: 'POST',
@@ -2217,7 +2280,7 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(response => response.json())
             .then(data => {
-                syncAllGroupsButton.disabled = false;
+                setSyncActionsBusy(false);
 
                 if (data.success) {
                     const summary = data.summary;
@@ -2244,7 +2307,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             })
             .catch(error => {
-                syncAllGroupsButton.disabled = false;
+                setSyncActionsBusy(false);
                 OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
             });
         });

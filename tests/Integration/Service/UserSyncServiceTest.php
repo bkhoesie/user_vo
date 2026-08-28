@@ -210,6 +210,34 @@ class UserSyncServiceTest extends TestCase {
 	}
 
 	/**
+	 * Regression test: processSyncLoop() (and so syncAllUsers()) returns a
+	 * top-level 'success' => true even when every single user failed - see
+	 * testSyncSelectedUsersReportsFailureFromBackend() for the same
+	 * envelope-vs-per-user distinction. A VO outage mid-sync must not stamp
+	 * this timestamp: nothing was actually refreshed, so every managed
+	 * group's "possibly stale" flag would be falsely cleared by a sync that
+	 * accomplished nothing.
+	 */
+	public function testSyncAllUsersDoesNotStampTimestampWhenAUserFails(): void {
+		$config = \OC::$server->get(IConfig::class);
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+
+		$uid = self::UID_PREFIX . 'fullsyncfail1';
+		$this->insertUser($uid, '1');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchUserDataFromVO')->willReturn(null);
+
+		$result = $this->service->syncAllUsers($backend);
+
+		// syncAllUsers() syncs every user_vo row, not just the one this test
+		// inserted - other rows may already exist in this environment, so
+		// only assert that a failure was recorded, not an exact count.
+		$this->assertGreaterThan(0, $result['summary']['failed'], 'Precondition: the sync must have actually recorded a failure');
+		$this->assertEquals('', $config->getAppValue('user_vo', 'last_full_user_sync_at', ''));
+	}
+
+	/**
 	 * Only syncAllUsers() (a full sweep of every known user) may stamp this
 	 * timestamp - syncSelectedUsers() only refreshes some users, and
 	 * stamping it here would give every managed group a false "confirmed

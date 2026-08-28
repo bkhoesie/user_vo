@@ -452,6 +452,55 @@ class GroupManagementServiceTest extends TestCase {
 		$this->assertFalse($newGroup['is_managed']);
 	}
 
+	/**
+	 * fetchAllVOGroups() computes possibly_stale via the same
+	 * isPossiblyStale() helper as fetchManagedGroups() (tested extensively
+	 * below), but reads last_synced from a different query (SELECT * ...
+	 * vs. the explicit column list there) - this pins that the wiring is
+	 * actually correct at this second call site too, not just that the
+	 * shared helper's logic is right in isolation.
+	 */
+	public function testFetchAllVOGroupsFlagsPossiblyStaleManagedGroup(): void {
+		$config = \OC::$server->get(\OCP\IConfig::class);
+		$this->createTestGroup('test_allgroups_stale', 'Stale In All Groups View', '1');
+		$this->setGroupLastSynced('test_allgroups_stale', new \DateTime('-2 hours'));
+		$config->setAppValue('user_vo', 'last_full_user_sync_at', (string)(time() - 3600));
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'test_allgroups_stale', 'name' => 'Stale In All Groups View', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->fetchAllVOGroups($backend);
+		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_allgroups_stale'));
+		$this->assertNotFalse($group);
+		$this->assertTrue($group['possibly_stale']);
+
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+	}
+
+	public function testFetchAllVOGroupsDoesNotFlagUnmanagedGroupAsPossiblyStale(): void {
+		$config = \OC::$server->get(\OCP\IConfig::class);
+		$config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'test_allgroups_unmanaged', 'name' => 'Never Created', 'parentid' => null, 'pos' => 1],
+		]);
+
+		$result = $this->service->fetchAllVOGroups($backend);
+		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_allgroups_unmanaged'));
+		$this->assertNotFalse($group);
+		$this->assertFalse($group['is_managed']);
+		$this->assertFalse($group['possibly_stale']);
+
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+	}
+
 	public function testFetchAllVOGroupsRecordsAuditLogEntryWhenVOFetchFails(): void {
 		$backend = $this->getMockBuilder(UserVOAuth::class)
 			->disableOriginalConstructor()

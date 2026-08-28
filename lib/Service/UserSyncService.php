@@ -113,7 +113,19 @@ class UserSyncService {
             // Used to flag a managed group's membership as possibly stale
             // (its last group sync predates this) - see
             // GroupManagementService's use of this key.
-            $this->config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
+            //
+            // Only stamped when every user actually succeeded ($result's
+            // top-level 'success' is true even if every single user failed -
+            // see processSyncLoop()'s own contract) - otherwise a VO outage
+            // mid-sync would leave every cached vo_group_ids untouched while
+            // still telling every managed group it can trust this as a fresh
+            // baseline, the exact false-freshness signal this key exists to
+            // prevent. Not gated on 'skipped' too: a skipped user has no
+            // vo_user_id yet and can't be a group member either way, so
+            // their presence shouldn't block the stamp.
+            if (($result['summary']['failed'] ?? 0) === 0) {
+                $this->config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
+            }
 
             return $result;
 

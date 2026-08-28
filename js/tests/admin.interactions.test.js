@@ -90,4 +90,53 @@ describe('interactive DOM wiring (jsdom integration - loads the real admin.js)',
             expect(options.headers.requesttoken).toBe('test-token');
         }
     });
+
+    test('clicking "Full Resync" POSTs to sync-from-vo first', () => {
+        document.getElementById('full-resync').click();
+
+        const userSyncCalls = callsTo('/apps/user_vo/admin/sync-from-vo');
+        expect(userSyncCalls.length).toBeGreaterThanOrEqual(1);
+        for (const [url, options] of userSyncCalls) {
+            expect(url).toBe('/apps/user_vo/admin/sync-from-vo');
+            expect(options.method).toBe('POST');
+        }
+        // fetch() never resolves in this fixture, so sync-all-groups (which
+        // only fires after the first response) must not have fired yet.
+        expect(callsTo('/apps/user_vo/admin/sync-all-groups')).toHaveLength(0);
+    });
+
+    test('the "Sync All Users" shortcut forwards to the canonical button', () => {
+        document.getElementById('sync-all-users-shortcut').click();
+
+        expect(callsTo('/apps/user_vo/admin/sync-from-vo').length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('the "Sync All Groups" shortcut forwards to the canonical button', () => {
+        document.getElementById('sync-all-groups-shortcut').click();
+
+        expect(callsTo('/apps/user_vo/admin/sync-all-groups').length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('"Full Resync" disables the other sync actions so they cannot race it', () => {
+        document.getElementById('full-resync').click();
+
+        expect(document.getElementById('sync-all-users').disabled).toBe(true);
+        expect(document.getElementById('sync-all-groups').disabled).toBe(true);
+        expect(document.getElementById('sync-all-users-shortcut').disabled).toBe(true);
+        expect(document.getElementById('sync-all-groups-shortcut').disabled).toBe(true);
+    });
+
+    /**
+     * Regression coverage for the exact interleaving that produced a
+     * spurious "possibly stale" flag on every managed group during manual
+     * testing: an admin starting "Sync All Users" while a group sync is
+     * running (or vice versa) can make last_full_user_sync_at land after
+     * some groups' own last_synced, purely from timing, not any real
+     * staleness.
+     */
+    test('"Sync All Groups" disables "Full Resync" so it cannot race it', () => {
+        document.getElementById('sync-all-groups').click();
+
+        expect(document.getElementById('full-resync').disabled).toBe(true);
+    });
 });
