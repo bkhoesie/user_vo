@@ -65,7 +65,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child', 'uservo_test_pos_zero_unchanged', 'uservo_test_throwable_good', 'uservo_test_throwable_bad', 'uservo_test_toctou_deleted_during_wait'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child', 'uservo_test_pos_zero_unchanged', 'uservo_test_throwable_good', 'uservo_test_throwable_bad', 'uservo_test_toctou_deleted_during_wait', 'uservo_test_blocking_api_down_single', 'uservo_test_blocking_api_down_byids', 'uservo_test_blocking_api_down_all'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -585,6 +585,73 @@ class GroupSyncServiceTest extends TestCase {
 		$this->assertTrue($this->isUserInNcGroup($uid, $ncGroupId), 'User should actually be added to the NC group');
 
 		$this->userManager->get($uid)?->delete();
+	}
+
+	/**
+	 * Blocking callers (admin/manual sync, unlike the login path above) must
+	 * fail loudly - and record the failure in the audit log - rather than
+	 * silently doing nothing, when the VO groups fetch fails entirely.
+	 */
+	public function testSyncSingleGroupByIdRecordsAuditLogEntryWhenGetGroupsFailsEntirely(): void {
+		$voGroupId = 'test_blocking_api_down_single';
+		$ncGroupId = 'uservo_test_blocking_api_down_single';
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Group Blocking API Down');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn(null);
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+
+		$this->assertFalse($result['success']);
+		$this->assertEquals(500, $result['status_code']);
+		$this->assertAuditLogHasFetchFailedEntry($voGroupId);
+	}
+
+	public function testSyncGroupsByIdsRecordsAuditLogEntryWhenGetGroupsFailsEntirelyAndBlocking(): void {
+		$voGroupId = 'test_blocking_api_down_byids';
+		$ncGroupId = 'uservo_test_blocking_api_down_byids';
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Group Blocking API Down ByIds');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn(null);
+
+		$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: false);
+
+		$this->assertFalse($result['success']);
+		$this->assertAuditLogHasFetchFailedEntry(null);
+	}
+
+	public function testSyncAllManagedGroupsRecordsAuditLogEntryWhenGetGroupsFailsEntirely(): void {
+		$voGroupId = 'test_blocking_api_down_all';
+		$ncGroupId = 'uservo_test_blocking_api_down_all';
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Group Blocking API Down All');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn(null);
+
+		$result = $this->service->syncAllManagedGroups($backend);
+
+		$this->assertFalse($result['success']);
+		$this->assertAuditLogHasFetchFailedEntry(null);
+	}
+
+	/** Asserts a 'vo_api_fetch_failed' audit log entry exists, then deletes it (not covered by cleanupTestData()). */
+	private function assertAuditLogHasFetchFailedEntry(?string $expectedGroupId): void {
+		$auditLog = \OC::$server->get(AuditLogService::class);
+		$entries = $auditLog->getRecentEntries();
+		$entry = current(array_filter(
+			$entries,
+			fn ($e) => $e['event_type'] === 'vo_api_fetch_failed' && $e['group_id'] === $expectedGroupId
+		));
+		$this->assertNotFalse($entry, 'Expected a vo_api_fetch_failed audit log entry (group_id=' . ($expectedGroupId ?? 'null') . ')');
+
+		$deleteQb = $this->connection->getQueryBuilder();
+		$deleteQb->delete('user_vo_audit_log')
+			->where($deleteQb->expr()->eq('id', $deleteQb->createNamedParameter($entry['id'], \PDO::PARAM_INT)))
+			->executeStatement();
 	}
 
 	/**

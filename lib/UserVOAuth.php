@@ -267,12 +267,49 @@ class UserVOAuth extends Base {
         $listUrl = $this->apiUrl . "/?api=GetMembers";
         $listResponse = $this->makeRequest($listUrl, [], $token);
 
-        if (!$listResponse || !is_array($listResponse)) {
-            logger('user_vo')->error("Failed to fetch members list from VO");
+        if (!$listResponse || !is_array($listResponse) || !self::isWellFormedVOList($listResponse)) {
+            logger('user_vo')->error("Failed to fetch members list from VO", [
+                'response_shape' => self::describeUnexpectedShape($listResponse)
+            ]);
             return null;
         }
 
         return $listResponse;
+    }
+
+    /**
+     * A genuine VO list response (GetGroups/GetMembers) is a sequential
+     * array of record arrays. VO reports errors (auth failure, rate limit,
+     * transient backend issue, ...) as a single associative array like
+     * `{"error": "..."}` - that's still a non-empty, truthy PHP array once
+     * decoded, so callers that only checked "is this a non-empty array"
+     * would silently treat it as "VO has zero groups/members", which then
+     * looks identical to every managed group/member having been deleted.
+     * This rejects that shape (and any other non-list-of-records shape)
+     * before a caller can mistake it for real data.
+     *
+     * An empty list ([]) is deliberately NOT rejected here - it's vacuously
+     * well-formed and callers already treat a falsy (empty) response as a
+     * fetch failure via their own `!$listResponse` check.
+     */
+    private static function isWellFormedVOList(array $response): bool {
+        if (isset($response['error'])) {
+            return false;
+        }
+        foreach ($response as $entry) {
+            if (!is_array($entry)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** @return array{type: string, keys?: array} Safe-to-log summary of a rejected response, without dumping its full (possibly large) content. */
+    private static function describeUnexpectedShape($response): array {
+        if (!is_array($response)) {
+            return ['type' => get_debug_type($response)];
+        }
+        return ['type' => 'array', 'keys' => array_slice(array_keys($response), 0, 10)];
     }
 
     /**
@@ -320,8 +357,10 @@ class UserVOAuth extends Base {
         $listUrl = $this->apiUrl . "/?api=GetGroups";
         $listResponse = $this->makeRequest($listUrl, [], $token);
 
-        if (!$listResponse || !is_array($listResponse)) {
-            logger('user_vo')->error("Failed to fetch groups list from VO");
+        if (!$listResponse || !is_array($listResponse) || !self::isWellFormedVOList($listResponse)) {
+            logger('user_vo')->error("Failed to fetch groups list from VO", [
+                'response_shape' => self::describeUnexpectedShape($listResponse)
+            ]);
 
             if ($allowCached) {
                 $stale = $cache->get($cacheKey . '-stale');

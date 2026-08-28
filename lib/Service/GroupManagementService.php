@@ -221,14 +221,28 @@ class GroupManagementService {
      */
     public function fetchManagedGroups(UserVOAuth $backend): array {
         try {
-            // Fetch all groups from VO to detect deletions
+            // Fetch all groups from VO to detect deletions. A failed/malformed
+            // fetch must abort here, not fall through with an empty
+            // $voGroupIds - otherwise every managed group looks absent from
+            // VO and gets marked deleted_in_vo on a transient API hiccup,
+            // even though nothing actually changed in VO.
             $allVOGroups = $backend->fetchAllGroups();
+            if (!$allVOGroups) {
+                $this->logger->error('Failed to fetch groups from VO while loading managed groups - leaving deleted_in_vo status untouched', [
+                    'app' => 'user_vo'
+                ]);
+                $this->auditLogService->log('vo_api_fetch_failed', null, null, 'Loading managed groups failed: could not fetch groups from VereinOnline (group statuses left unchanged)');
+
+                return [
+                    'success' => false,
+                    'error' => 'Failed to fetch groups from VereinOnline'
+                ];
+            }
+
             $voGroupIds = [];
-            if ($allVOGroups) {
-                foreach ($allVOGroups as $group) {
-                    if (isset($group['id'])) {
-                        $voGroupIds[] = $group['id'];
-                    }
+            foreach ($allVOGroups as $group) {
+                if (isset($group['id'])) {
+                    $voGroupIds[] = $group['id'];
                 }
             }
 

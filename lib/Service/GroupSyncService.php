@@ -148,6 +148,8 @@ class GroupSyncService {
 
             if (!$allVOGroups) {
                 if (!$nonBlocking) {
+                    $this->auditLogService->log('vo_api_fetch_failed', null, null, 'Group sync failed: could not fetch groups from VereinOnline (vo_group_ids: ' . implode(', ', $voGroupIds) . ')');
+
                     return [
                         'success' => false,
                         'error' => 'Failed to fetch groups from VereinOnline',
@@ -319,6 +321,8 @@ class GroupSyncService {
             // Fetch all VO groups (needed for metadata sync)
             $allVOGroups = $backend->fetchAllGroups();
             if (!$allVOGroups) {
+                $this->auditLogService->log('vo_api_fetch_failed', null, $voGroupId, 'Group sync failed: could not fetch groups from VereinOnline');
+
                 return [
                     'success' => false,
                     'error' => 'Failed to fetch groups from VereinOnline',
@@ -424,6 +428,8 @@ class GroupSyncService {
             $allVOGroups = $backend->fetchAllGroups();
 
             if (!$allVOGroups) {
+                $this->auditLogService->log('vo_api_fetch_failed', null, null, 'Bulk group sync failed: could not fetch groups from VereinOnline');
+
                 return [
                     'success' => false,
                     'error' => 'Failed to fetch groups from VereinOnline',

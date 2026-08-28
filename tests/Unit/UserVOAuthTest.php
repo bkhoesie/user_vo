@@ -206,4 +206,58 @@ class UserVOAuthTest extends TestCase {
 		$this->assertArrayNotHasKey('nobody.else', $map);
 		$this->assertCount(1, $map);
 	}
+
+	// --- fetchAllMembers() / fetchAllGroups() malformed-response rejection ---
+	//
+	// VO reports errors (auth failure, rate limit, transient backend issue,
+	// ...) as a single associative array like {"error": "..."} - still a
+	// non-empty, truthy PHP array once decoded. A caller that only checked
+	// "is this a non-empty array" would treat it as "VO has zero
+	// groups/members", which then looks identical to every managed
+	// group/member having been deleted (the actual bug this covers).
+
+	public function testFetchAllMembersReturnsNullOnVOErrorShapedResponse(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['error' => 'Zugriff verweigert']
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	public function testFetchAllMembersReturnsNullWhenEntriesAreNotRecords(): void {
+		// Any other non-list-of-records shape must be rejected too, not just
+		// the specific {"error": ...} convention.
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['just', 'some', 'strings']
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	public function testFetchAllMembersReturnsDataForAWellFormedList(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => [['id' => '1', 'name' => 'Doe, Jane']]
+		));
+
+		$this->assertEquals([['id' => '1', 'name' => 'Doe, Jane']], $auth->fetchAllMembers());
+	}
+
+	public function testFetchAllGroupsReturnsNullOnVOErrorShapedResponse(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['error' => 'Rate limited']
+		));
+
+		$this->assertNull($auth->fetchAllGroups());
+	}
+
+	public function testFetchAllGroupsReturnsDataForAWellFormedList(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => [['id' => '1', 'name' => 'Test Group', 'parentid' => null, 'pos' => 1]]
+		));
+
+		$groups = $auth->fetchAllGroups();
+
+		$this->assertNotNull($groups);
+		$this->assertEquals('1', $groups[0]['id']);
+	}
 }

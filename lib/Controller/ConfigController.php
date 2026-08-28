@@ -238,11 +238,29 @@ class ConfigController extends Controller {
 			];
 		}
 
-		// If we get here, the API is reachable and credentials are valid
-		// (even if the test user doesn't exist, which is expected - API returns [""] in this case)
+		// The API is reachable and credentials are valid if we get VerifyLogin's
+		// expected shape - a list with an id/empty-string at index 0 (empty
+		// because the test user deliberately doesn't exist). Anything else
+		// (an unexpected object shape, a differently-keyed array, ...) isn't a
+		// response this endpoint is known to return, so it must not be
+		// silently accepted as "connection successful" - see
+		// UserVOAuth::isWellFormedVOList() for the same class of gap on the
+		// list-fetching endpoints.
+		if (isset($response[0])) {
+			return [
+				'success' => true,
+				'message' => 'API connection successful. Credentials are valid.'
+			];
+		}
+
+		$this->logger->error('Unexpected VerifyLogin response shape during config test', [
+			'app' => 'user_vo',
+			'response_keys' => array_slice(array_keys($response), 0, 10)
+		]);
+
 		return [
-			'success' => true,
-			'message' => 'API connection successful. Credentials are valid.'
+			'success' => false,
+			'message' => 'Unexpected response from VereinOnline API. Please verify the API URL is correct.'
 		];
 	}
 
