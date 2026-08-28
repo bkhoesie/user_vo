@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A VereinOnline API error could be mistaken for "no groups/members", which could make every
+  managed group show as "Deleted in VO" after a single API hiccup - now detected and reported
+- Pre-provisioning could report a VereinOnline API error as "user has no login credentials";
+  search now also flags when results may be incomplete
+
 ## [0.4.0] - 2026-08-03
 
 ### Added

@@ -25,10 +25,15 @@ use Test\TestCase;
  * aren't set - this suite is opt-in, not part of the regular unit/integration
  * runs, so it's safe for it to simply be absent in most environments.
  *
- * VerifyLogin is called at most once per test run (cached via
- * resolveTestMemberId()) regardless of how many tests need the resulting VO
- * member ID - minimizes load on the real API and avoids the small residual
- * risk repeated login attempts carry, even with a correct password.
+ * VerifyLogin with the real test member's credentials is called at most once
+ * per test run (cached via resolveTestMemberId()) regardless of how many
+ * tests need the resulting VO member ID - minimizes load on the real API and
+ * avoids the small residual risk repeated login attempts carry, even with a
+ * correct password. testVerifyLoginReturnsEmptyIdEntryForNonexistentUser()
+ * below makes a second, separate VerifyLogin call, deliberately - it carries
+ * no such risk (the username is nonexistent, so there's no real account to
+ * affect) and is exactly the request production already issues on every
+ * "Test Configuration" click.
  */
 class VoApiContractTest extends TestCase {
 	private static array $env;
@@ -83,6 +88,32 @@ class VoApiContractTest extends TestCase {
 	public function testVerifyLoginSucceedsWithKnownGoodCredentials(): void {
 		$memberId = $this->resolveTestMemberId();
 		$this->assertMatchesRegularExpression('/^\d+$/', $memberId);
+	}
+
+	/**
+	 * Pins the exact response shape ConfigController::testApiConnection()
+	 * relies on for its "connection successful" verdict when testing with a
+	 * deliberately nonexistent user (exactly what that method itself does
+	 * in production on every "Test Configuration" click, so this carries no
+	 * additional real-account/lockout risk beyond what already happens
+	 * there) - VO is documented to return `[""]` in this case, not e.g. an
+	 * empty array or an {"error": ...} object. If VO's behavior here ever
+	 * changes, admins with a correct config would start seeing "Unexpected
+	 * response" on every connection test - this is the trip wire for that.
+	 */
+	public function testVerifyLoginReturnsEmptyIdEntryForNonexistentUser(): void {
+		$apiClient = new ApiClient(\OC::$server->get(LoggerInterface::class), \OC::$server->get(IClientService::class));
+		$token = $apiClient->createToken(self::$env['api_username'], self::$env['api_password']);
+
+		$result = $apiClient->makeRequest(
+			rtrim(self::$env['url'], '/') . '/?api=VerifyLogin',
+			['user' => 'test_user_that_should_not_exist', 'password' => 'dummy_password', 'result' => 'id'],
+			$token
+		);
+
+		$this->assertIsArray($result);
+		$this->assertArrayHasKey(0, $result, 'ConfigController::testApiConnection() requires isset($response[0]) for a success verdict');
+		$this->assertSame('', $result[0]);
 	}
 
 	public function testGetMemberReturnsNormalizedData(): void {

@@ -157,18 +157,23 @@ class GroupControllerTest extends TestCase {
 		$this->assertFalse($response->getData()['success']);
 	}
 
-	// --- fetchManagedGroups: never touches VO, local-DB-only ---
-	// Note: doesn't assert the list is exactly empty/contains-only-N-items -
-	// this suite may run against a long-lived dev instance (e.g. stable33)
-	// with real pre-existing managed groups, not just a fresh CI instance.
+	// --- fetchManagedGroups: DOES call VO (to detect deletions/restores via
+	// deleted_in_vo) - unlike deleteGroup/bulkDeleteGroups below, it isn't
+	// local-DB-only. With this class's VO config deliberately cleared, it
+	// must fail loudly (not silently proceed with an empty/malformed VO
+	// group list, which previously made every managed group look deleted -
+	// see GroupManagementServiceTest::
+	// testFetchManagedGroupsBailsOutWithoutTouchingDeletedFlagsWhenVOFetchFails()
+	// for that regression at the service layer). The "returns real managed-
+	// group data" success path is covered there too, with a mocked backend.
 
-	public function testFetchManagedGroupsReturnsExistingManagedGroup(): void {
+	public function testFetchManagedGroupsReturns500WhenVOUnreachable(): void {
 		$this->createTestGroup('test_fmg1', 'Test Group');
 
 		$response = $this->controller->fetchManagedGroups();
 
-		$groupIds = array_column($response->getData()['groups'], 'vo_group_id');
-		$this->assertContains('test_fmg1', $groupIds);
+		$this->assertEquals(500, $response->getStatus());
+		$this->assertFalse($response->getData()['success']);
 	}
 
 	// --- deleteGroup / bulkDeleteGroups: never touch VO, fully testable ---

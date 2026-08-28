@@ -190,6 +190,29 @@ class UserVOAuthTest extends TestCase {
 		$this->assertEquals([], $map);
 	}
 
+	/**
+	 * An 'error' marker on the per-candidate GetMember response must take
+	 * precedence over an otherwise-present, otherwise-matching userlogin -
+	 * without this check, a response carrying both would previously have
+	 * been added to the map anyway (only `empty($memberData['userlogin'])`
+	 * was checked), silently accepting VO's own error indicator as if it
+	 * were real data for that candidate.
+	 */
+	public function testFetchMembersMapForUsersSkipsMemberWhenErrorMarkerIsPresentEvenWithAUserlogin(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			function ($url, $data) {
+				if (str_contains($url, 'GetMembers')) {
+					return [['id' => '1', 'name' => 'Doe, Jane']];
+				}
+				return ['id' => '1', 'userlogin' => 'jane.doe', 'error' => 'rate limited'];
+			}
+		));
+
+		$map = $auth->fetchMembersMapForUsers(['jane.doe']);
+
+		$this->assertEquals([], $map);
+	}
+
 	public function testFetchMembersMapForUsersReturnsPartialMapWhenNotAllFound(): void {
 		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
 			function ($url, $data) {
@@ -205,5 +228,123 @@ class UserVOAuthTest extends TestCase {
 		$this->assertArrayHasKey('jane.doe', $map);
 		$this->assertArrayNotHasKey('nobody.else', $map);
 		$this->assertCount(1, $map);
+	}
+
+	// --- fetchAllMembers() / fetchAllGroups() malformed-response rejection ---
+	//
+	// VO reports errors (auth failure, rate limit, transient backend issue,
+	// ...) as a single associative array like {"error": "..."} - still a
+	// non-empty, truthy PHP array once decoded. A caller that only checked
+	// "is this a non-empty array" would treat it as "VO has zero
+	// groups/members", which then looks identical to every managed
+	// group/member having been deleted (the actual bug this covers).
+
+	public function testFetchAllMembersReturnsNullOnVOErrorShapedResponse(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['error' => 'Zugriff verweigert']
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	public function testFetchAllMembersReturnsNullWhenEntriesAreNotRecords(): void {
+		// Any other non-list-of-records shape must be rejected too, not just
+		// the specific {"error": ...} convention.
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['just', 'some', 'strings']
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	public function testFetchAllMembersReturnsDataForAWellFormedList(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => [['id' => '1', 'name' => 'Doe, Jane']]
+		));
+
+		$this->assertEquals([['id' => '1', 'name' => 'Doe, Jane']], $auth->fetchAllMembers());
+	}
+
+	// These are shapes a non-array-entries check alone would miss (a single
+	// associative array whose *values* happen to be arrays too) - each one
+	// is still a non-empty, truthy PHP array, so a caller checking only "is
+	// this a non-empty array" would treat it as real VO data with zero
+	// usable entries, the same production incident this covers. Explicit
+	// per-shape test methods, not a data provider - this codebase doesn't
+	// use PHPUnit data providers elsewhere, and the docblock-style
+	// @dataProvider annotation isn't portable across every PHPUnit version
+	// this app's CI matrix runs (confirmed: fails with an ArgumentCountError
+	// on at least one PHP/PHPUnit combination).
+
+	public function testFetchAllMembersRejectsErrorEnvelopeWithArrayValue(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['errors' => [['code' => 5]]]
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	public function testFetchAllMembersRejectsWrappedEnvelopeResponse(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['data' => [['id' => '1']], 'meta' => []]
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	public function testFetchAllMembersRejectsDifferentlyKeyedEnvelope(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['result' => [], 'meta' => []]
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	public function testFetchAllMembersRejectsListOfRecordsMissingId(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => [['name' => 'No ID Member']]
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	public function testFetchAllMembersRejectsListContainingAnEmptyRecord(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => [[], []]
+		));
+
+		$this->assertNull($auth->fetchAllMembers());
+	}
+
+	/**
+	 * fetchAllGroups() shares the exact same isWellFormedVOList() check as
+	 * fetchAllMembers() above - one representative malformed shape here just
+	 * confirms it's actually wired up, not a full re-test of every case.
+	 */
+	public function testFetchAllGroupsRejectsWrappedEnvelopeResponse(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['data' => [['id' => '1']], 'meta' => []]
+		));
+
+		$this->assertNull($auth->fetchAllGroups());
+	}
+
+	public function testFetchAllGroupsReturnsNullOnVOErrorShapedResponse(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['error' => 'Rate limited']
+		));
+
+		$this->assertNull($auth->fetchAllGroups());
+	}
+
+	public function testFetchAllGroupsReturnsDataForAWellFormedList(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => [['id' => '1', 'name' => 'Test Group', 'parentid' => null, 'pos' => 1]]
+		));
+
+		$groups = $auth->fetchAllGroups();
+
+		$this->assertNotNull($groups);
+		$this->assertEquals('1', $groups[0]['id']);
 	}
 }

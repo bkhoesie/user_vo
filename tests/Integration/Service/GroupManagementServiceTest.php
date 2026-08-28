@@ -451,6 +451,28 @@ class GroupManagementServiceTest extends TestCase {
 		$this->assertFalse($newGroup['is_managed']);
 	}
 
+	public function testFetchAllVOGroupsRecordsAuditLogEntryWhenVOFetchFails(): void {
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn(null);
+
+		$result = $this->service->fetchAllVOGroups($backend);
+
+		$this->assertFalse($result['success']);
+
+		$auditLog = \OC::$server->get(AuditLogService::class);
+		$entries = $auditLog->getRecentEntries();
+		$entry = current(array_filter($entries, fn ($e) => $e['event_type'] === 'vo_api_fetch_failed'
+			&& str_contains($e['message'], 'Loading the full VO group list failed')));
+		$this->assertNotFalse($entry, 'Expected a vo_api_fetch_failed audit log entry');
+
+		$deleteQb = $this->connection->getQueryBuilder();
+		$deleteQb->delete('user_vo_audit_log')
+			->where($deleteQb->expr()->eq('id', $deleteQb->createNamedParameter($entry['id'], \PDO::PARAM_INT)))
+			->executeStatement();
+	}
+
 	/**
 	 * Same backend-adoption reasoning as
 	 * testCreateGroupRefusesToAdoptAGroupManagedByADifferentBackend(), but
@@ -600,6 +622,49 @@ class GroupManagementServiceTest extends TestCase {
 		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_ncpresent'));
 		$this->assertNotFalse($group);
 		$this->assertFalse($group['nc_group_missing']);
+	}
+
+	/**
+	 * The actual production incident this covers: a transient/malformed VO
+	 * fetch must not be mistaken for "VO has zero groups", which previously
+	 * made every managed group look deleted. Regression test for the
+	 * fetchManagedGroups() bail-out fix.
+	 */
+	public function testFetchManagedGroupsBailsOutWithoutTouchingDeletedFlagsWhenVOFetchFails(): void {
+		$this->createTestGroup('test_fetchfail', 'Fetch Fail Group', '1');
+
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+		$backend->method('fetchAllGroups')->willReturn(null);
+
+		$result = $this->service->fetchManagedGroups($backend);
+
+		$this->assertFalse($result['success']);
+		$this->assertArrayHasKey('error', $result);
+
+		// deleted_in_vo must be left exactly as it was - not flipped to 1
+		// just because the fetch failed.
+		$qb = $this->connection->getQueryBuilder();
+		$qb->select('deleted_in_vo')
+			->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter('test_fetchfail')));
+		$row = $qb->executeQuery()->fetch();
+		$this->assertEquals(0, (int)$row['deleted_in_vo']);
+
+		// The failure must be recorded in the audit log, not silently swallowed.
+		$auditLog = \OC::$server->get(AuditLogService::class);
+		$entries = $auditLog->getRecentEntries();
+		$entry = current(array_filter($entries, fn ($e) => $e['event_type'] === 'vo_api_fetch_failed'
+			&& str_contains($e['message'], 'Loading managed groups failed')));
+		$this->assertNotFalse($entry, 'Expected a vo_api_fetch_failed audit log entry for the failed fetch');
+
+		// Clean up the audit log entry this test created (not covered by
+		// tearDown()'s user_vo_groups/NC-group cleanup).
+		$deleteQb = $this->connection->getQueryBuilder();
+		$deleteQb->delete('user_vo_audit_log')
+			->where($deleteQb->expr()->eq('id', $deleteQb->createNamedParameter($entry['id'], \PDO::PARAM_INT)))
+			->executeStatement();
 	}
 
 	/**

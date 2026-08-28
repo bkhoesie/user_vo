@@ -78,7 +78,14 @@ class UserProvisioningController extends Controller {
 				'users' => $result['users'],
 				'count' => $result['total'],
 				'search_term' => $searchTerm,
-				'is_all_users' => empty($searchTerm)
+				'is_all_users' => empty($searchTerm),
+				// How many VO members couldn't be checked due to an API error
+				// during the search - without this, a transient VO hiccup
+				// mid-search looks identical to "these are genuinely all the
+				// matches", the exact class of silent-partial-result this was
+				// added to stop being invisible (see UserProvisioningService::
+				// searchVOUsers()).
+				'api_errors' => $result['api_errors'] ?? 0
 			]);
 
 		} catch (\Exception $e) {

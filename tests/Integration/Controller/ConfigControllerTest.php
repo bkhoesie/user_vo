@@ -250,6 +250,89 @@ class ConfigControllerTest extends NextcloudTestCase {
 		$this->assertStringContainsString('Configuration test failed', $response->getData()['message']);
 	}
 
+	/**
+	 * Builds a ConfigController wired to a real ApiClient whose transport
+	 * (IClientService/IClient) is mocked, so the VerifyLogin response shape
+	 * can be controlled deterministically - the class-level $this->apiClient
+	 * is deliberately real/network-backed (see the note above
+	 * testTestConfigurationFailsWithMissingFields()), so this builds a
+	 * separate instance rather than mocking ApiClient itself.
+	 */
+	private function controllerWithApiResponse($responseBody): ConfigController {
+		$client = $this->createMock(\OCP\Http\Client\IClient::class);
+		$response = $this->createMock(\OCP\Http\Client\IResponse::class);
+		$response->method('getStatusCode')->willReturn(200);
+		$response->method('getBody')->willReturn(is_string($responseBody) ? $responseBody : json_encode($responseBody));
+		$client->method('post')->willReturn($response);
+		$clientService = $this->createMock(IClientService::class);
+		$clientService->method('newClient')->willReturn($client);
+
+		return new ConfigController(
+			'user_vo',
+			$this->request,
+			$this->configService,
+			new ApiClient($this->logger, $clientService),
+			$this->config,
+			$this->logger,
+			\OC::$server->get(AuditLogService::class)
+		);
+	}
+
+	/**
+	 * Regression test: previously any response that merely lacked VO's
+	 * {"error": ...} convention was accepted as "connection successful" -
+	 * a malformed/unexpected VerifyLogin response (not an error, but not the
+	 * expected [id-or-empty-string] shape either) was silently reported as a
+	 * working configuration. Same class of gap as
+	 * UserVOAuth::isWellFormedVOList() closes for the list-fetching
+	 * endpoints.
+	 */
+	public function testTestConfigurationRejectsUnexpectedResponseShape() {
+		$controller = $this->controllerWithApiResponse(['unexpected' => 'shape']);
+		$this->request->method('getParam')
+			->willReturnCallback(function ($key, $default) {
+				$params = ['api_url' => 'https://vo.example/', 'api_username' => 'u', 'api_password' => 'p'];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $controller->testConfiguration();
+
+		$this->assertEquals(400, $response->getStatus());
+		$data = $response->getData();
+		$this->assertFalse($data['success']);
+		$this->assertStringContainsString('Unexpected response', $data['message']);
+	}
+
+	public function testTestConfigurationSucceedsOnExpectedEmptyIdResponse() {
+		// VO's real response for a deliberately-nonexistent test user: [""].
+		$controller = $this->controllerWithApiResponse(['']);
+		$this->request->method('getParam')
+			->willReturnCallback(function ($key, $default) {
+				$params = ['api_url' => 'https://vo.example/', 'api_username' => 'u', 'api_password' => 'p'];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $controller->testConfiguration();
+
+		$this->assertEquals(200, $response->getStatus());
+		$this->assertTrue($response->getData()['success']);
+	}
+
+	public function testTestConfigurationRejectsVOErrorShapeContainingAccessDenied() {
+		$controller = $this->controllerWithApiResponse(['error' => 'Zugriff verweigert']);
+		$this->request->method('getParam')
+			->willReturnCallback(function ($key, $default) {
+				$params = ['api_url' => 'https://vo.example/', 'api_username' => 'u', 'api_password' => 'p'];
+				return $params[$key] ?? $default;
+			});
+
+		$response = $controller->testConfiguration();
+
+		$data = $response->getData();
+		$this->assertFalse($data['success']);
+		$this->assertStringContainsString('Invalid API credentials', $data['message']);
+	}
+
 	public function testClearConfigurationSucceeds() {
 		// Set some configuration first
 		$this->config->setAppValue('user_vo', 'api_url', 'https://example.com');
