@@ -46,6 +46,12 @@ class UserSyncServiceTest extends TestCase {
 		$qb->delete('user_vo')
 			->where($qb->expr()->like('uid', $qb->createNamedParameter(self::UID_PREFIX . '%')))
 			->executeStatement();
+
+		// Unconditional, not just in the specific tests that set it - a
+		// failed assertion partway through one of those would otherwise
+		// skip its own inline cleanup and leak a stamped value into
+		// whichever test runs next.
+		\OC::$server->get(IConfig::class)->deleteAppValue('user_vo', 'last_full_user_sync_at');
 	}
 
 	private function insertUser(string $uid, ?string $voUserId, string $backend = 'user_vo'): void {
@@ -217,6 +223,13 @@ class UserSyncServiceTest extends TestCase {
 	 * this timestamp: nothing was actually refreshed, so every managed
 	 * group's "possibly stale" flag would be falsely cleared by a sync that
 	 * accomplished nothing.
+	 *
+	 * Mocks the '_error' => 'api_error' shape (not fetchUserDataFromVO()
+	 * returning null) - that's the shape a real VO outage actually produces
+	 * (UserVOAuth::fetchUserDataFromVO() has no `return null;` in its
+	 * current implementation, only ever returning that error-marked array
+	 * or a normalized success array), so this pins the path real code can
+	 * actually take, not just a defensive branch the type signature allows.
 	 */
 	public function testSyncAllUsersDoesNotStampTimestampWhenAUserFails(): void {
 		$config = \OC::$server->get(IConfig::class);
@@ -226,14 +239,77 @@ class UserSyncServiceTest extends TestCase {
 		$this->insertUser($uid, '1');
 
 		$backend = $this->createMock(UserVOAuth::class);
-		$backend->method('fetchUserDataFromVO')->willReturn(null);
+		$backend->method('fetchUserDataFromVO')->willReturn(['_error' => 'api_error', '_message' => 'Rate limited']);
 
 		$result = $this->service->syncAllUsers($backend);
 
 		// syncAllUsers() syncs every user_vo row, not just the one this test
 		// inserted - other rows may already exist in this environment, so
 		// only assert that a failure was recorded, not an exact count.
-		$this->assertGreaterThan(0, $result['summary']['failed'], 'Precondition: the sync must have actually recorded a failure');
+		$this->assertGreaterThan(0, $result['summary']['api_failures'], 'Precondition: the sync must have actually recorded an API failure');
+		$this->assertEquals('', $config->getAppValue('user_vo', 'last_full_user_sync_at', ''));
+	}
+
+	/**
+	 * Regression test for a third issue a second independent review found:
+	 * syncUserData() also returns success:false for an orphaned user_vo row
+	 * (the tracking row survives, but its NC account is gone - a
+	 * documented, real hazard, not a hypothetical) via its own
+	 * nc_user_missing marker. Without this exclusion, an install with even
+	 * one orphaned row would never stamp this timestamp again, on every
+	 * future sync, for the same reason deleted-in-VO/no_login had to be
+	 * excluded above - this is the same bug class, one branch deeper.
+	 */
+	public function testSyncAllUsersStampsTimestampEvenWhenAUserHasNoNcAccount(): void {
+		$config = \OC::$server->get(IConfig::class);
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+
+		$uid = self::UID_PREFIX . 'fullsyncorphaned1';
+		$this->insertUser($uid, '1');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchUserDataFromVO')->willReturn([
+			'username' => $uid, 'firstname' => 'Orphaned', 'lastname' => 'Row',
+		]);
+		$backend->method('syncUserData')->willReturn(['success' => false, 'photo_error' => null, 'nc_user_missing' => true]);
+
+		$before = time();
+		$result = $this->service->syncAllUsers($backend);
+		$after = time();
+
+		$this->assertGreaterThan(0, $result['summary']['failed'], 'Precondition: the orphaned row is still counted under the broad failed count');
+		$this->assertEquals(0, $result['summary']['api_failures'], 'Precondition: but not as an api_failure');
+
+		$stamped = (int)$config->getAppValue('user_vo', 'last_full_user_sync_at', '0');
+		$this->assertGreaterThanOrEqual($before, $stamped);
+		$this->assertLessThanOrEqual($after, $stamped);
+
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+	}
+
+	/**
+	 * The other side of the previous test: a genuine syncUserData() failure
+	 * (no nc_user_missing marker - e.g. an exception partway through, before
+	 * updateVOMetadata() could run) must still block the stamp. Confirms
+	 * the exclusion above is specific to nc_user_missing, not "any
+	 * success:false from syncUserData()".
+	 */
+	public function testSyncAllUsersDoesNotStampTimestampOnAGenuineSyncUserDataFailure(): void {
+		$config = \OC::$server->get(IConfig::class);
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+
+		$uid = self::UID_PREFIX . 'fullsyncgenuinefail1';
+		$this->insertUser($uid, '1');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchUserDataFromVO')->willReturn([
+			'username' => $uid, 'firstname' => 'Genuine', 'lastname' => 'Failure',
+		]);
+		$backend->method('syncUserData')->willReturn(['success' => false, 'photo_error' => null]);
+
+		$result = $this->service->syncAllUsers($backend);
+
+		$this->assertGreaterThan(0, $result['summary']['api_failures'], 'Precondition: a plain success:false without nc_user_missing must still count as an api_failure');
 		$this->assertEquals('', $config->getAppValue('user_vo', 'last_full_user_sync_at', ''));
 	}
 
@@ -265,6 +341,7 @@ class UserSyncServiceTest extends TestCase {
 		$result = $this->service->syncAllUsers($backend);
 		$after = time();
 
+		$this->assertEquals('deleted', $this->findResultRow($result, $uid)['status'], 'Precondition: this uid specifically took the deleted branch, not some other failure branch');
 		$this->assertGreaterThan(0, $result['summary']['failed'], 'Precondition: deleted-in-VO is still counted under the broad failed count');
 		$this->assertEquals(0, $result['summary']['api_failures'], 'Precondition: but not as an api_failure');
 

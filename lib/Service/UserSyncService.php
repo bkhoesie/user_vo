@@ -132,7 +132,12 @@ class UserSyncService {
             // skipped user has no vo_user_id yet and can't be a group
             // member either way, so their presence shouldn't block the
             // stamp.
-            if (($result['summary']['api_failures'] ?? 0) === 0) {
+            // Fail-safe direction: an unexpectedly missing key must not be
+            // treated as "0 failures" - default to a nonzero sentinel so a
+            // future change to processSyncLoop()'s summary shape fails by
+            // not stamping, not by silently reopening the bug this guard
+            // exists to prevent.
+            if (($result['summary']['api_failures'] ?? 1) === 0) {
                 $this->config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
             }
 
@@ -530,9 +535,15 @@ class UserSyncService {
                 $failureCount++;
                 // 'no_login' is a real, potentially-permanent per-user state
                 // (this VO member simply has no login credentials), not a
-                // sync failure - only 'api_error' means this user's data
-                // genuinely wasn't refreshed.
-                if ($errorType === 'api_error') {
+                // sync failure - excluded specifically, everything else
+                // (currently just 'api_error', but also any future _error
+                // value fetchUserDataFromVO() might start returning) counts.
+                // Fail-safe direction matters here: an unrecognized error
+                // type defaulting to "don't count it" would silently
+                // reopen the false-freshness bug this count exists to
+                // prevent, for every _error value added after this line
+                // was written.
+                if ($errorType !== 'no_login') {
                     $apiFailureCount++;
                 }
                 continue;
@@ -597,10 +608,15 @@ class UserSyncService {
                         'message' => 'User marked as deleted in VO'
                     ];
                     $failureCount++; // Count as failure for summary purposes
-                    // Not $apiFailureCount++ - the sync itself succeeded (we're in
-                    // the $success-or-$isDeleted branch); "deleted in VO" is a
-                    // real, potentially permanent per-user state, not a failure
-                    // to refresh this user's data.
+                    // Not $apiFailureCount++ - "deleted in VO" is a real,
+                    // potentially permanent per-user state, not a sync
+                    // failure. (Note this branch is reached whenever
+                    // $isDeleted is true regardless of $success - a deleted
+                    // member whose sync itself also failed still lands
+                    // here, not in the failure branch below. A deleted VO
+                    // member can't be a real group member either way, so
+                    // their vo_group_ids staying unrefreshed doesn't matter
+                    // for the staleness check this count feeds.)
                 } else {
                     $results[] = [
                         'uid' => $uid,
@@ -634,7 +650,17 @@ class UserSyncService {
                     'message' => 'Sync method returned false'
                 ];
                 $failureCount++;
-                $apiFailureCount++;
+                // syncUserData() returning success:false has two distinct
+                // causes bundled into one boolean: a genuinely transient
+                // failure (an exception partway through, before
+                // updateVOMetadata() could run - a real reason to distrust
+                // this stamp), or nc_user_missing (an orphaned user_vo row
+                // whose NC account is gone - a real, permanent state, not a
+                // sync failure, that would otherwise block this stamp
+                // forever on every future sync). Only the former counts.
+                if (!($syncResult['nc_user_missing'] ?? false)) {
+                    $apiFailureCount++;
+                }
             }
         }
 

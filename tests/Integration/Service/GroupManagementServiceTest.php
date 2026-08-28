@@ -53,6 +53,12 @@ class GroupManagementServiceTest extends TestCase {
 			$group->delete();
 		}
 
+		// Unconditional, not just in the specific tests that set it - a
+		// failed assertion partway through one of the possibly_stale tests
+		// would otherwise skip its own inline cleanup and leak a stamped
+		// value into whichever test runs next.
+		\OC::$server->get(\OCP\IConfig::class)->deleteAppValue('user_vo', 'last_full_user_sync_at');
+
 		parent::tearDown();
 	}
 

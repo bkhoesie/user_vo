@@ -572,7 +572,17 @@ class UserVOAuth extends Base {
 
             if (!$user) {
                 logger('user_vo')->error("Cannot sync - user not found in NC", ['uid' => $uid]);
-                return ['success' => false, 'photo_error' => null];
+                // nc_user_missing distinguishes this from a genuine sync
+                // failure below: an orphaned user_vo row (the tracking row
+                // survives, but its NC account is gone - a documented
+                // hazard, not a hypothetical) would otherwise look exactly
+                // like a transient failure to every caller, forever, on
+                // every single sync. UserSyncService::processSyncLoop()
+                // uses this to keep counting it toward the admin-facing
+                // 'failed' tally while excluding it from the narrower
+                // 'api_failures' count that gates last_full_user_sync_at -
+                // see that method's own comment for the full reasoning.
+                return ['success' => false, 'photo_error' => null, 'nc_user_missing' => true];
             }
 
             // Update display name (always)

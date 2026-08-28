@@ -178,8 +178,10 @@ describe('interactive DOM wiring (jsdom integration - loads the real admin.js)',
 
             const status = document.getElementById('full-resync-status');
             expect(status.className).toContain('warning');
-            expect(status.textContent).toContain('2');
-            expect(status.textContent).toContain('1');
+            // Pin the counts to their actual slots (users vs. groups), not
+            // just that the digits appear somewhere in the string.
+            expect(status.textContent).toContain('(2 failed)');
+            expect(status.textContent).toContain('(1 failed)');
         });
 
         test('re-enables the sync actions once the chain settles, on both the success and warning paths', async () => {
