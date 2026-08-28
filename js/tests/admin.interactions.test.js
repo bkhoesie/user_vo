@@ -90,4 +90,133 @@ describe('interactive DOM wiring (jsdom integration - loads the real admin.js)',
             expect(options.headers.requesttoken).toBe('test-token');
         }
     });
+
+    test('clicking "Full Resync" POSTs to sync-from-vo first', () => {
+        document.getElementById('full-resync').click();
+
+        const userSyncCalls = callsTo('/apps/user_vo/admin/sync-from-vo');
+        expect(userSyncCalls.length).toBeGreaterThanOrEqual(1);
+        for (const [url, options] of userSyncCalls) {
+            expect(url).toBe('/apps/user_vo/admin/sync-from-vo');
+            expect(options.method).toBe('POST');
+        }
+        // fetch() never resolves in this fixture, so sync-all-groups (which
+        // only fires after the first response) must not have fired yet.
+        expect(callsTo('/apps/user_vo/admin/sync-all-groups')).toHaveLength(0);
+    });
+
+    test('the "Sync All Users" shortcut forwards to the canonical button', () => {
+        document.getElementById('sync-all-users-shortcut').click();
+
+        expect(callsTo('/apps/user_vo/admin/sync-from-vo').length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('the "Sync All Groups" shortcut forwards to the canonical button', () => {
+        document.getElementById('sync-all-groups-shortcut').click();
+
+        expect(callsTo('/apps/user_vo/admin/sync-all-groups').length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('"Full Resync" disables the other sync actions so they cannot race it', () => {
+        document.getElementById('full-resync').click();
+
+        expect(document.getElementById('sync-all-users').disabled).toBe(true);
+        expect(document.getElementById('sync-all-groups').disabled).toBe(true);
+        expect(document.getElementById('sync-all-users-shortcut').disabled).toBe(true);
+        expect(document.getElementById('sync-all-groups-shortcut').disabled).toBe(true);
+    });
+
+    test('"Sync All Groups" disables "Full Resync" so it cannot race it', () => {
+        document.getElementById('sync-all-groups').click();
+
+        expect(document.getElementById('full-resync').disabled).toBe(true);
+    });
+
+    // These use a resolving fetch mock (per-test, not the shared
+    // never-resolving beforeEach one) to reach Full Resync's completion
+    // handling, not just confirm the requests were sent.
+    describe('Full Resync completion handling (resolving fetch)', () => {
+        function mockResponse(body) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+        }
+
+        function flushPromiseChain() {
+            // Full Resync's chain is response->json->userData->fetch->
+            // response->json->groupData->... - several microtask hops deep.
+            // A single macrotask tick runs after every pending microtask
+            // has already drained, so one is enough regardless of how many
+            // .then()s are chained ahead of it.
+            return new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        test('reports a warning, not a false success, when some users/groups fail', async () => {
+            dom.window.close();
+            const resolvingFetch = jest.fn((url) => {
+                if (url.includes('sync-from-vo')) {
+                    return mockResponse({ success: true, summary: { success: 3, failed: 2 }, results: [] });
+                }
+                if (url.includes('sync-all-groups')) {
+                    return mockResponse({ success: true, summary: { total: 5, succeeded: 4, failed: 1 }, results: [] });
+                }
+                return new Promise(() => {});
+            });
+            ({ dom, window, document } = createAdminPage({ fetch: resolvingFetch }));
+
+            document.getElementById('full-resync').click();
+            await flushPromiseChain();
+
+            const status = document.getElementById('full-resync-status');
+            expect(status.className).toContain('warning');
+            // Pin the counts to their actual slots (users vs. groups) - both
+            // slots share the same "(N failed)" shape, so checking that
+            // alone would still pass with the two counts swapped.
+            expect(status.textContent).toContain('3 users synced (2 failed)');
+            expect(status.textContent).toContain('4 groups synced (1 failed)');
+        });
+
+        test('re-enables the sync actions once the chain settles, on both the success and warning paths', async () => {
+            dom.window.close();
+            const resolvingFetch = jest.fn((url) => {
+                if (url.includes('sync-from-vo')) {
+                    return mockResponse({ success: true, summary: { success: 5, failed: 0 }, results: [] });
+                }
+                if (url.includes('sync-all-groups')) {
+                    return mockResponse({ success: true, summary: { total: 5, succeeded: 5, failed: 0 }, results: [] });
+                }
+                return new Promise(() => {});
+            });
+            ({ dom, window, document } = createAdminPage({ fetch: resolvingFetch }));
+
+            document.getElementById('full-resync').click();
+            expect(document.getElementById('sync-all-users').disabled).toBe(true);
+
+            await flushPromiseChain();
+
+            expect(document.getElementById('full-resync').disabled).toBe(false);
+            expect(document.getElementById('sync-all-users').disabled).toBe(false);
+            expect(document.getElementById('sync-all-groups').disabled).toBe(false);
+            const status = document.getElementById('full-resync-status');
+            expect(status.className).toContain('success');
+        });
+
+        test('re-enables the sync actions when the user-sync step itself fails', async () => {
+            dom.window.close();
+            const resolvingFetch = jest.fn((url) => {
+                if (url.includes('sync-from-vo')) {
+                    return mockResponse({ success: false, error: 'VO unreachable' });
+                }
+                return new Promise(() => {});
+            });
+            ({ dom, window, document } = createAdminPage({ fetch: resolvingFetch }));
+
+            document.getElementById('full-resync').click();
+            await flushPromiseChain();
+
+            expect(document.getElementById('full-resync').disabled).toBe(false);
+            expect(document.getElementById('sync-all-users').disabled).toBe(false);
+            const status = document.getElementById('full-resync-status');
+            expect(status.className).toContain('error');
+            expect(status.textContent).toContain('VO unreachable');
+        });
+    });
 });

@@ -24,17 +24,29 @@ const ELEMENT_IDS = [
     'bulk-create-accounts-btn', 'bulk-create-groups', 'bulk-create-status', 'bulk-delete-groups',
     'bulk-sync-groups', 'clear-config', 'collapse-all-groups', 'config-message-admin',
     'config-message-configphp', 'duplicate-list', 'duplicate-results', 'enable-nightly-group-sync',
-    'enable-nightly-user-sync', 'expand-all-groups', 'groups-list', 'groups-results',
+    'enable-nightly-user-sync', 'expand-all-groups', 'full-resync', 'full-resync-status',
+    'groups-list', 'groups-results',
     'groups-status', 'groups-summary', 'load-all-vo-groups', 'load-managed-groups',
     'nightly-sync-error', 'nightly-sync-error-container', 'nightly-sync-last-run',
     'nightly-sync-status-badge', 'nightly-sync-summary', 'scan-duplicates', 'scan-results',
     'search-vo-users-btn', 'search-vo-users-status', 'select-all-groups', 'select-all-sync-users',
-    'select-all-vo-users', 'summary-info', 'sync-all-groups', 'sync-all-users',
+    'select-all-vo-users', 'summary-info', 'sync-all-groups', 'sync-all-groups-shortcut',
+    'sync-all-users', 'sync-all-users-shortcut',
     'sync-all-users-status', 'sync-email', 'sync-photo', 'sync-selected-users-btn',
     'user-sync-list', 'user-sync-results', 'user-sync-summary', 'view-local-data',
     'view-user-metadata', 'vo-user-search', 'vo-user-search-list', 'vo-user-search-results',
     'vo-user-search-summary', 'vo-user-search-warning',
 ];
+
+// Elements whose real template markup is a <button> and whose tests care
+// about genuine disabled-state semantics (e.g. setSyncActionsBusy() tests
+// asserting a disabled button can't be clicked) - rendered as <button> here
+// rather than the generic <div> fallback below, since `.disabled = true` on
+// a <div> is just an inert JS expando, not real form-control behavior.
+const BUTTON_ELEMENT_IDS = new Set([
+    'full-resync', 'sync-all-users', 'sync-all-groups',
+    'sync-all-users-shortcut', 'sync-all-groups-shortcut',
+]);
 
 function buildFixtureHtml() {
     const elements = ELEMENT_IDS.map(id => {
@@ -43,6 +55,9 @@ function buildFixtureHtml() {
         }
         if (id.startsWith('sync-email') || id.startsWith('sync-photo') || id.startsWith('enable-nightly') || id.startsWith('select-all')) {
             return `<input type="checkbox" id="${id}" />`;
+        }
+        if (BUTTON_ELEMENT_IDS.has(id)) {
+            return `<button id="${id}"></button>`;
         }
         return `<div id="${id}"></div>`;
     }).join('\n');

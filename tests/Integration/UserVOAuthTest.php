@@ -187,6 +187,30 @@ class UserVOAuthTest extends TestCase {
 		$this->assertFalse($this->userExistsInDb($uid), 'Must not create a user_vo row for a uid this app does not own');
 	}
 
+	// --- syncUserData() / updateVOMetadata() failure propagation ---
+
+	/**
+	 * updateVOMetadata() catches its own DB failures and reports them via
+	 * its bool return rather than throwing - syncUserData() must propagate
+	 * that into its own 'success', not hardcode true just because nothing
+	 * threw. See UserSyncService::processSyncLoop()'s use of 'success'.
+	 */
+	public function testSyncUserDataReportsFailureWhenMetadataWriteFails(): void {
+		$uid = self::UID_PREFIX . 'metadatawritefails';
+		$this->userManager->createUser($uid, 'irrelevant-password-123!');
+
+		$auth = $this->getMockBuilder(UserVOAuth::class)
+			->setConstructorArgs(['https://vo.test/org', 'apiuser', 'apipass'])
+			->onlyMethods(['updateVOMetadata'])
+			->getMock();
+		$auth->method('updateVOMetadata')->willReturn(false);
+
+		$result = $auth->syncUserData($uid, ['id' => '999', 'username' => $uid, 'firstname' => 'Test', 'lastname' => 'User']);
+
+		$this->assertFalse($result['success'], 'success must reflect the metadata write outcome, not just "did syncUserData() throw"');
+		$this->assertFalse($result['nc_user_missing'] ?? false, 'the NC account does exist here - this must not be misreported as the other failure mode');
+	}
+
 	public function testLoginStillSucceedsForANonConflictingUid(): void {
 		// Negative control for the test above - a uid with no pre-existing
 		// account at all must still be able to log in normally.

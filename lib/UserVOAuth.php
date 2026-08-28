@@ -551,7 +551,13 @@ class UserVOAuth extends Base {
      *
      * @param string $uid NC username (lowercase canonical)
      * @param array $voUserData User data from fetchUserDataFromVO
-     * @return array ['success' => bool, 'photo_error' => string|null]
+     * @return array ['success' => bool, 'photo_error' => string|null,
+     *     'nc_user_missing'? => bool] success is false either when this
+     *     method fails outright, or when the underlying metadata write
+     *     did (see updateVOMetadata()'s return contract). nc_user_missing
+     *     is only present (and true) when $uid has no NC account -
+     *     callers use it to distinguish that permanent state from a
+     *     transient failure, see UserSyncService::processSyncLoop().
      */
     public function syncUserData(string $uid, array $voUserData): array {
         try {
@@ -572,7 +578,10 @@ class UserVOAuth extends Base {
 
             if (!$user) {
                 logger('user_vo')->error("Cannot sync - user not found in NC", ['uid' => $uid]);
-                return ['success' => false, 'photo_error' => null];
+                // Distinguishes an orphaned user_vo row (tracking row
+                // survives, NC account gone) from a genuine sync failure -
+                // see UserSyncService::processSyncLoop()'s use of this.
+                return ['success' => false, 'photo_error' => null, 'nc_user_missing' => true];
             }
 
             // Update display name (always)
@@ -607,10 +616,12 @@ class UserVOAuth extends Base {
                 }
             }
 
-            // Update metadata in user_vo table
-            $this->updateVOMetadata($uid, $voUserData);
+            // updateVOMetadata() catches its own DB failures internally, so
+            // its return value (not just "did this throw") is what tells
+            // us whether vo_group_ids actually got refreshed.
+            $metadataWritten = $this->updateVOMetadata($uid, $voUserData);
 
-            return ['success' => true, 'photo_error' => $photoError];
+            return ['success' => $metadataWritten, 'photo_error' => $photoError];
 
         } catch (\Throwable $e) {
             // Catch both Exception and Error (e.g., memory exhaustion, type errors)
@@ -855,8 +866,11 @@ class UserVOAuth extends Base {
      *
      * @param string $uid NC username
      * @param array $voUserData User data from fetchUserDataFromVO
+     * @return bool False on a caught failure - vo_group_ids was NOT
+     *     refreshed. Drives UserSyncService::processSyncLoop()'s
+     *     api_failures tracking.
      */
-    protected function updateVOMetadata(string $uid, array $voUserData): void {
+    protected function updateVOMetadata(string $uid, array $voUserData): bool {
         $db = \OC::$server->get(\OCP\IDBConnection::class);
         // Guard against nesting: no current caller runs this inside an outer
         // transaction, but this method must stay a safe building block if one
@@ -940,6 +954,8 @@ class UserVOAuth extends Base {
                 'group_count' => empty($voGroupIds) ? 0 : count(explode(',', $voGroupIds))
             ]);
 
+            return true;
+
         } catch (\Exception $e) {
             if ($ownsTransaction && $db->inTransaction()) {
                 $db->rollBack();
@@ -948,6 +964,7 @@ class UserVOAuth extends Base {
                 'uid' => $uid,
                 'error' => $e->getMessage()
             ]);
+            return false;
         }
     }
 

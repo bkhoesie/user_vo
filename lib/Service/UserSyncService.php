@@ -104,7 +104,21 @@ class UserSyncService {
             }
 
             // Process sync for all users
-            return $this->processSyncLoop($users, $backend, true);
+            $result = $this->processSyncLoop($users, $backend, true);
+
+            // Drives GroupManagementService's "possibly stale" flag: only a
+            // full sync (not the selective syncSelectedUsers() below) may
+            // stamp this. Gated on api_failures, not $result['success']
+            // (true even if every single user failed - see
+            // processSyncLoop()'s contract) or the broader 'failed', which
+            // also counts real per-user states like deleted-in-VO or
+            // no-login that would otherwise block this forever. Missing key
+            // defaults to "don't stamp".
+            if (($result['summary']['api_failures'] ?? 1) === 0) {
+                $this->config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
+            }
+
+            return $result;
 
         } catch (\Exception $e) {
             $this->logger->error('Error in syncAllUsers: ' . $e->getMessage(), ['app' => 'user_vo']);
@@ -403,6 +417,14 @@ class UserSyncService {
         $results = [];
         $successCount = 0;
         $failureCount = 0;
+        // Narrower than $failureCount: only cases where this user's
+        // vo_group_ids genuinely wasn't refreshed. Excludes permanent
+        // per-user states (no_login, orphaned NC account) that
+        // $failureCount still counts for the admin-facing summary. Drives
+        // last_full_user_sync_at in syncAllUsers().
+        $apiFailureCount = 0;
+        // Skipped users have no cached vo_group_ids yet, so can't be a
+        // group member either way - excluded from $apiFailureCount too.
         $skippedCount = 0;
         $photoErrorCount = 0;
 
@@ -455,6 +477,7 @@ class UserSyncService {
                     'message' => 'User not found in VO'
                 ];
                 $failureCount++;
+                $apiFailureCount++;
                 continue;
             }
 
@@ -481,6 +504,13 @@ class UserSyncService {
                     'message' => $message
                 ];
                 $failureCount++;
+                // no_login is a permanent state, not a sync failure -
+                // everything else counts, including any future _error
+                // value (deny-list, not allow-list, so an unrecognized
+                // type fails safe).
+                if ($errorType !== 'no_login') {
+                    $apiFailureCount++;
+                }
                 continue;
             }
 
@@ -543,6 +573,17 @@ class UserSyncService {
                         'message' => 'User marked as deleted in VO'
                     ];
                     $failureCount++; // Count as failure for summary purposes
+                    // Deleted-in-VO alone is a permanent state, not a sync
+                    // failure - but if the metadata write itself also
+                    // failed (!$success), vo_group_ids is stale and
+                    // GroupSyncService doesn't filter membership by
+                    // deleted-in-VO, so that stale value could still be
+                    // wrongly honored. nc_user_missing is excluded like the
+                    // branch below: a nonexistent uid can't be a group
+                    // member, so its stale vo_group_ids can't matter.
+                    if (!$success && !($syncResult['nc_user_missing'] ?? false)) {
+                        $apiFailureCount++;
+                    }
                 } else {
                     $results[] = [
                         'uid' => $uid,
@@ -576,6 +617,13 @@ class UserSyncService {
                     'message' => 'Sync method returned false'
                 ];
                 $failureCount++;
+                // nc_user_missing (an orphaned user_vo row with no NC
+                // account) is a permanent state, not a sync failure -
+                // everything else (e.g. an exception before
+                // updateVOMetadata() could run) counts.
+                if (!($syncResult['nc_user_missing'] ?? false)) {
+                    $apiFailureCount++;
+                }
             }
         }
 
@@ -584,6 +632,10 @@ class UserSyncService {
             'total' => $successCount + $failureCount + $skippedCount,
             $isFullSync ? 'success' : 'synced' => $successCount,
             'failed' => $failureCount,
+            // Narrower than 'failed' above - see $apiFailureCount's own
+            // comment near this method's start. This is what
+            // syncAllUsers() gates last_full_user_sync_at on.
+            'api_failures' => $apiFailureCount,
             'skipped' => $skippedCount,
             'photo_errors' => $photoErrorCount
         ];

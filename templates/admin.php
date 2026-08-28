@@ -178,13 +178,20 @@ style('user_vo', 'admin');
         </div> <!-- Close colored configuration box (yellow/green/red) -->
     </div>
 
-    <!-- User Data Synchronization Section -->
+    <!-- Sync Overview Section: general options, nightly sync, and the one-click
+         path that gets the user-then-group ordering right without the admin
+         needing to know that dependency exists. -->
     <div class="user-sync-section">
-        <h3><?php p($l->t('User Data Synchronization')); ?></h3>
+        <h3><?php p($l->t('Sync Overview')); ?></h3>
 
         <div class="vo-notice">
             <span class="icon icon-info"></span>
             <?php p($l->t('User data (display name, email) is automatically synchronized from VereinOnline on every login. VO is the source of truth - manual changes in Nextcloud will be overwritten.')); ?>
+        </div>
+
+        <div class="vo-notice">
+            <span class="icon icon-info"></span>
+            <?php p($l->t('Group sync updates group metadata (name, hierarchy) live from VereinOnline, but only reconciles membership against each user\'s already-synced VereinOnline group list - it does not refresh that list itself. Each affected member\'s own next login picks this up automatically; to make a group membership change take effect immediately for everyone, without waiting on logins, run a user sync first (or use "Full Resync" below), then sync the affected group(s).')); ?>
         </div>
 
         <h4><?php p($l->t('Sync Options')); ?></h4>
@@ -245,6 +252,21 @@ style('user_vo', 'admin');
                 <span id="nightly-sync-error" class="error-message"></span>
             </div>
         </div>
+
+        <h4><?php p($l->t('Sync Now')); ?></h4>
+        <p>
+            <button id="full-resync" class="button primary">
+                <?php p($l->t('Full Resync (users, then groups)')); ?>
+            </button>
+            <button id="sync-all-users-shortcut" class="button"><?php p($l->t('Sync All Users')); ?></button>
+            <button id="sync-all-groups-shortcut" class="button"><?php p($l->t('Sync All Groups')); ?></button>
+            <span id="full-resync-status" class="sync-status"></span>
+        </p>
+    </div>
+
+    <!-- User Data Synchronization Section -->
+    <div class="user-sync-section">
+        <h3><?php p($l->t('User Data Synchronization')); ?></h3>
 
         <h4><?php p($l->t('Manual User Sync')); ?></h4>
         <p><?php p($l->t('Trigger immediate synchronization for all users. This will fetch the latest data from VereinOnline for all user_vo users.')); ?></p>
@@ -322,7 +344,7 @@ style('user_vo', 'admin');
             </table>
 
             <div class="vo-bulk-actions" style="margin-top: 15px;">
-                <button id="bulk-create-accounts-btn" class="button-primary">
+                <button id="bulk-create-accounts-btn" class="button primary">
                     <?php p($l->t('Create Selected Accounts')); ?>
                 </button>
                 <span id="bulk-create-status"></span>

@@ -131,6 +131,16 @@ function renderGroupStatusBadge(group) {
     return '<span class="vo-badge vo-badge-warning">' + escapeHtml(t('user_vo', 'Not created')) + '</span>';
 }
 
+// See GroupManagementService::isPossiblyStale(). Shown alongside the status
+// badge, not instead of it - "not yet re-checked", not a problem.
+function renderStaleBadge(group) {
+    if (!group.possibly_stale) {
+        return '';
+    }
+    const tooltipText = t('user_vo', 'A user sync has completed since this group\'s membership was last confirmed - its member list may not reflect the latest VereinOnline data yet. Run a user sync, then sync this group again.');
+    return ' <span class="vo-badge vo-badge-warning" title="' + escapeHtml(tooltipText) + '">⚠ ' + escapeHtml(t('user_vo', 'Possibly stale')) + '</span>';
+}
+
 // Helper function to render group actions
 function renderGroupActions(group) {
     if (group.nc_group_missing) {
@@ -388,6 +398,7 @@ if (typeof module !== 'undefined' && module.exports) {
         generateSyncSummaryHTML,
         generatePhotoErrorsHTML,
         renderGroupStatusBadge,
+        renderStaleBadge,
         renderGroupActions,
         addPlaceholdersForMissingParents,
         sortGroupsHierarchically,
@@ -1226,7 +1237,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Sync all users
     if (syncAllUsersButton) {
         syncAllUsersButton.addEventListener('click', function() {
-            syncAllUsersButton.disabled = true;
+            // setSyncActionsBusy() is declared further down via a hoisted
+            // function declaration - safe to call from here regardless.
+            setSyncActionsBusy(true);
             syncAllUsersStatus.textContent = t('user_vo', 'Syncing from VO... (this may take a moment)');
             syncAllUsersStatus.className = 'sync-status syncing';
             userSyncResults.style.display = 'none';
@@ -1240,7 +1253,7 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(response => response.json())
             .then(data => {
-                syncAllUsersButton.disabled = false;
+                setSyncActionsBusy(false);
 
                 if (data.success) {
                     const summary = data.summary;
@@ -1316,10 +1329,137 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             })
             .catch(error => {
-                syncAllUsersButton.disabled = false;
+                setSyncActionsBusy(false);
                 syncAllUsersStatus.textContent = t('user_vo', 'Error:') + ' ' + error;
                 syncAllUsersStatus.className = 'sync-status error';
             });
+        });
+    }
+
+    // Mutual exclusion between Full Resync, Sync All Users, and Sync All
+    // Groups (plus their shortcuts) - running a user sync and a group sync
+    // at the same time can make last_full_user_sync_at land after some
+    // groups' own last_synced, producing a misleading staleness result.
+    // Does not cover "Sync Selected Groups" or per-row sync buttons, or the
+    // nightly cron/sweep - only the actions a single admin triggers here.
+    function setSyncActionsBusy(busy) {
+        ['full-resync', 'sync-all-users', 'sync-all-groups', 'sync-all-users-shortcut', 'sync-all-groups-shortcut'].forEach(function(id) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.disabled = busy;
+            }
+        });
+    }
+
+    // Full Resync: users first, then groups - group sync alone only
+    // reconciles against each user's already-cached VO group list, it never
+    // refreshes that cache. A self-contained request chain rather than
+    // reusing the other two buttons' handlers, which also drive their own
+    // results tables that this top-level action doesn't need to manage.
+    const fullResyncButton = document.getElementById('full-resync');
+    const fullResyncStatus = document.getElementById('full-resync-status');
+    if (fullResyncButton) {
+        fullResyncButton.addEventListener('click', function() {
+            setSyncActionsBusy(true);
+            fullResyncStatus.textContent = t('user_vo', 'Syncing users...');
+            fullResyncStatus.className = 'sync-status syncing';
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/sync-from-vo'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(t('user_vo', 'User sync request failed (HTTP {status})', { status: response.status }));
+                }
+                return response.json();
+            })
+            .then(userData => {
+                if (!userData.success) {
+                    throw new Error(userData.error || t('user_vo', 'User sync failed'));
+                }
+                fullResyncStatus.textContent = t('user_vo', 'Users synced, now syncing groups...');
+
+                return fetch(OC.generateUrl('/apps/user_vo/admin/sync-all-groups'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'requesttoken': OC.requestToken
+                    },
+                    body: JSON.stringify({})
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(t('user_vo', 'Group sync request failed (HTTP {status})', { status: response.status }));
+                    }
+                    return response.json();
+                })
+                .then(groupData => {
+                    if (!groupData.success) {
+                        throw new Error(groupData.error || t('user_vo', 'Group sync failed'));
+                    }
+
+                    const usersSynced = userData.summary.success ?? 0;
+                    const usersFailed = userData.summary.failed ?? 0;
+                    const groupsSynced = groupData.summary.succeeded ?? 0;
+                    const groupsFailed = groupData.summary.failed ?? 0;
+
+                    // Both endpoints report success:true even with a nonzero
+                    // failed count (individual per-item failures, not a
+                    // fetch-level error) - a resync that quietly left some
+                    // users/groups unsynced must not read as an unqualified
+                    // "complete".
+                    if (usersFailed > 0 || groupsFailed > 0) {
+                        fullResyncStatus.textContent = t('user_vo', 'Full resync completed with errors: {users} users synced ({usersFailed} failed), {groups} groups synced ({groupsFailed} failed)', {
+                            users: usersSynced,
+                            usersFailed: usersFailed,
+                            groups: groupsSynced,
+                            groupsFailed: groupsFailed
+                        });
+                        fullResyncStatus.className = 'sync-status warning';
+                    } else {
+                        fullResyncStatus.textContent = t('user_vo', 'Full resync complete: {users} users, {groups} groups', {
+                            users: usersSynced,
+                            groups: groupsSynced
+                        });
+                        fullResyncStatus.className = 'sync-status success';
+                    }
+
+                    // Declared further down this file, but safe to reference
+                    // here - this callback only runs after the fetches above
+                    // resolve, well after the rest of the file has run.
+                    if (currentViewType === 'managed' && loadManagedGroupsButton) {
+                        loadManagedGroupsButton.click();
+                    } else if (currentViewType === 'all' && loadAllVOGroupsButton) {
+                        loadAllVOGroupsButton.click();
+                    }
+                });
+            })
+            .catch(error => {
+                fullResyncStatus.textContent = t('user_vo', 'Error:') + ' ' + (error.message || error);
+                fullResyncStatus.className = 'sync-status error';
+            })
+            .then(() => {
+                setSyncActionsBusy(false);
+            });
+        });
+    }
+
+    // Forward to the canonical "Sync from VO" / "Sync All Managed Groups"
+    // buttons further down, reusing their own click handlers.
+    const syncAllUsersShortcut = document.getElementById('sync-all-users-shortcut');
+    if (syncAllUsersShortcut) {
+        syncAllUsersShortcut.addEventListener('click', function() {
+            document.getElementById('sync-all-users')?.click();
+        });
+    }
+    const syncAllGroupsShortcut = document.getElementById('sync-all-groups-shortcut');
+    if (syncAllGroupsShortcut) {
+        syncAllGroupsShortcut.addEventListener('click', function() {
+            document.getElementById('sync-all-groups')?.click();
         });
     }
 
@@ -1880,7 +2020,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td>${escapeHtml(group.vo_group_id)}</td>
                     <td>${escapeHtml(group.nc_display_name || '-')}</td>
                     <td>${escapeHtml(group.nc_group_id || '-')}</td>
-                    <td>${renderGroupStatusBadge(group)}</td>
+                    <td>${renderGroupStatusBadge(group)}${renderStaleBadge(group)}</td>
                     <td>${escapeHtml(voMemberCountDisplay)}</td>
                     <td>${escapeHtml(nonVoMemberCountDisplay)}</td>
                     <td>${escapeHtml(formatDateTime(group.last_synced))}</td>
@@ -2104,7 +2244,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const syncAllGroupsButton = document.getElementById('sync-all-groups');
     if (syncAllGroupsButton) {
         syncAllGroupsButton.addEventListener('click', function() {
-            syncAllGroupsButton.disabled = true;
+            setSyncActionsBusy(true);
 
             fetch(OC.generateUrl('/apps/user_vo/admin/sync-all-groups'), {
                 method: 'POST',
@@ -2116,7 +2256,7 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(response => response.json())
             .then(data => {
-                syncAllGroupsButton.disabled = false;
+                setSyncActionsBusy(false);
 
                 if (data.success) {
                     const summary = data.summary;
@@ -2143,7 +2283,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             })
             .catch(error => {
-                syncAllGroupsButton.disabled = false;
+                setSyncActionsBusy(false);
                 OC.Notification.showTemporary(t('user_vo', 'Error:') + ' ' + error, { type: 'error' });
             });
         });

@@ -7,6 +7,7 @@ const {
     generateSyncSummaryHTML,
     generatePhotoErrorsHTML,
     renderGroupStatusBadge,
+    renderStaleBadge,
     renderGroupActions,
     addPlaceholdersForMissingParents,
     sortGroupsHierarchically,
@@ -196,6 +197,22 @@ describe('renderGroupStatusBadge', () => {
     test('backend_conflict takes priority over the plain not-created badge', () => {
         const html = renderGroupStatusBadge({ is_managed: false, backend_conflict: true, conflicting_backends: ['LDAP'], vo_group_id: '1' });
         expect(html).not.toContain('Not created');
+    });
+});
+
+describe('renderStaleBadge', () => {
+    test('renders nothing when not possibly stale', () => {
+        expect(renderStaleBadge({ possibly_stale: false })).toBe('');
+    });
+
+    test('renders nothing when the field is absent', () => {
+        expect(renderStaleBadge({})).toBe('');
+    });
+
+    test('flags a possibly-stale group', () => {
+        const html = renderStaleBadge({ possibly_stale: true });
+        expect(html).toContain('vo-badge-warning');
+        expect(html).toContain('Possibly stale');
     });
 });
 

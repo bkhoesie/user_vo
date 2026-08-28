@@ -84,10 +84,10 @@ class UserVOAuthDirtyMarkingTest extends TestCase {
 		return [(int)$row['dirty_seq'], (int)$row['clean_seq']];
 	}
 
-	private function invokeUpdateVOMetadata(UserVOAuth $auth, string $uid, array $voUserData): void {
+	private function invokeUpdateVOMetadata(UserVOAuth $auth, string $uid, array $voUserData): bool {
 		$ref = new \ReflectionMethod(UserVOAuth::class, 'updateVOMetadata');
 		$ref->setAccessible(true);
-		$ref->invoke($auth, $uid, $voUserData);
+		return $ref->invoke($auth, $uid, $voUserData);
 	}
 
 	public function testMetadataWriteMarksBothAddedAndRemovedGroupsDirty(): void {
@@ -218,5 +218,21 @@ class UserVOAuthDirtyMarkingTest extends TestCase {
 			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter('')))
 			->executeQuery()->fetch();
 		$this->assertFalse($row, 'An empty group_ids string must not produce a garbage \'\' group entry');
+	}
+
+	/**
+	 * updateVOMetadata()'s return value (not just whether it threw) tells
+	 * callers whether vo_group_ids actually got refreshed - see
+	 * UserSyncService::processSyncLoop()'s api_failures tracking. Only the
+	 * happy path is covered; reliably forcing the catch block via a genuine,
+	 * portable cross-database failure isn't practical here.
+	 */
+	public function testMetadataWriteReturnsTrueOnSuccess(): void {
+		$uid = self::UID_PREFIX . 'returnvalue';
+		$auth = new UserVOAuth('https://vo.test/org', 'apiuser', 'apipass');
+
+		$result = $this->invokeUpdateVOMetadata($auth, $uid, ['id' => '1', 'username' => $uid, 'group_ids' => '']);
+
+		$this->assertTrue($result);
 	}
 }

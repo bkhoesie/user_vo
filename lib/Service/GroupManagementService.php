@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\UserVO\Service;
 
+use OCP\IConfig;
 use OCP\IDBConnection;
 use OCP\IGroupManager;
 use OCA\UserVO\UserVOAuth;
@@ -29,6 +30,7 @@ class GroupManagementService {
     private GroupSyncService $groupSyncService;
     private AuditLogService $auditLogService;
     private GroupSyncLockService $lockService;
+    private IConfig $config;
 
     public function __construct(
         IDBConnection $connection,
@@ -37,7 +39,8 @@ class GroupManagementService {
         LoggerInterface $logger,
         GroupSyncService $groupSyncService,
         AuditLogService $auditLogService,
-        GroupSyncLockService $lockService
+        GroupSyncLockService $lockService,
+        IConfig $config
     ) {
         $this->connection = $connection;
         $this->groupManager = $groupManager;
@@ -46,6 +49,34 @@ class GroupManagementService {
         $this->groupSyncService = $groupSyncService;
         $this->auditLogService = $auditLogService;
         $this->lockService = $lockService;
+        $this->config = $config;
+    }
+
+    /**
+     * A group's membership is only as fresh as the last full user sync
+     * (vo_group_ids is a per-user cache that only a user sync refreshes,
+     * never a group sync). A group whose last_synced predates that hasn't
+     * been re-checked against the freshest data yet - not "wrong", just
+     * not yet confirmed. No last_synced at all is always stale.
+     *
+     * $lastSynced (DATETIME, via strtotime()) and last_full_user_sync_at
+     * (unix timestamp) are comparable because NC pins UTC and both
+     * last_synced writers emit naive UTC datetimes.
+     */
+    private function isPossiblyStale(?string $lastSynced): bool {
+        $lastFullUserSyncAt = $this->config->getAppValue('user_vo', 'last_full_user_sync_at', '');
+        if ($lastFullUserSyncAt === '') {
+            // No full user sync has ever completed - nothing to compare
+            // against, so don't flag every single group as stale on a
+            // fresh install before the first sync has even had a chance to
+            // run.
+            return false;
+        }
+        if ($lastSynced === null) {
+            return true;
+        }
+        $lastSyncedTimestamp = strtotime($lastSynced);
+        return $lastSyncedTimestamp === false || $lastSyncedTimestamp < (int)$lastFullUserSyncAt;
     }
 
     /**
@@ -191,6 +222,7 @@ class GroupManagementService {
                     'member_count' => $isManaged ? (int)$dbRow['member_count'] : null,
                     'vo_member_count' => $isManaged ? (int)$dbRow['vo_member_count'] : null,
                     'non_vo_member_count' => $isManaged ? (int)$dbRow['non_vo_member_count'] : null,
+                    'possibly_stale' => $isManaged ? $this->isPossiblyStale($dbRow['last_synced']) : false,
                     'backend_conflict' => $backendConflict,
                     'conflicting_backends' => $conflictingBackends,
                 ];
@@ -305,6 +337,7 @@ class GroupManagementService {
                     'member_count' => (int)$group['member_count'],
                     'vo_member_count' => (int)$group['vo_member_count'],
                     'non_vo_member_count' => (int)$group['non_vo_member_count'],
+                    'possibly_stale' => $this->isPossiblyStale($group['last_synced']),
                     'is_managed' => true,  // All groups from this endpoint are managed
                     // A tracking row whose NC group is gone - e.g. an admin
                     // deleted it directly via NC's own UI and
