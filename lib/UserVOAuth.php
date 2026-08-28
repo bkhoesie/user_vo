@@ -551,7 +551,13 @@ class UserVOAuth extends Base {
      *
      * @param string $uid NC username (lowercase canonical)
      * @param array $voUserData User data from fetchUserDataFromVO
-     * @return array ['success' => bool, 'photo_error' => string|null]
+     * @return array ['success' => bool, 'photo_error' => string|null,
+     *     'nc_user_missing'? => bool] success is false either when this
+     *     method fails outright, or when the underlying metadata write
+     *     did (see updateVOMetadata()'s return contract). nc_user_missing
+     *     is only present (and true) when $uid has no NC account -
+     *     callers use it to distinguish that permanent state from a
+     *     transient failure, see UserSyncService::processSyncLoop().
      */
     public function syncUserData(string $uid, array $voUserData): array {
         try {

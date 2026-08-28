@@ -325,6 +325,63 @@ class UserSyncServiceTest extends TestCase {
 	}
 
 	/**
+	 * A user who is both deleted-in-VO and has an orphaned user_vo row
+	 * (nc_user_missing) must still be excluded like the plain orphaned-row
+	 * case above - a nonexistent uid can't be a group member, so its stale
+	 * vo_group_ids can't matter.
+	 */
+	public function testSyncAllUsersStampsTimestampWhenAUserIsDeletedInVOAndOrphaned(): void {
+		$config = \OC::$server->get(IConfig::class);
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+
+		$uid = self::UID_PREFIX . 'fullsyncdeletedorphaned1';
+		$this->insertUser($uid, '1');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchUserDataFromVO')->willReturn([
+			'username' => $uid, 'firstname' => 'Gone', 'lastname' => 'AndOrphaned', '_deleted' => true,
+		]);
+		$backend->method('syncUserData')->willReturn(['success' => false, 'photo_error' => null, 'nc_user_missing' => true]);
+
+		$before = time();
+		$result = $this->service->syncAllUsers($backend);
+		$after = time();
+
+		$this->assertEquals(0, $result['summary']['api_failures'], 'Precondition: deleted + orphaned must not count as an api_failure');
+
+		$stamped = (int)$config->getAppValue('user_vo', 'last_full_user_sync_at', '0');
+		$this->assertGreaterThanOrEqual($before, $stamped);
+		$this->assertLessThanOrEqual($after, $stamped);
+
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+	}
+
+	/**
+	 * Deleted-in-VO whose metadata write itself failed (not orphaned) is the
+	 * one sub-case that must still block the stamp: GroupSyncService doesn't
+	 * filter membership by deleted-in-VO, so a stale vo_group_ids could be
+	 * wrongly honored for a uid that does still exist in NC.
+	 */
+	public function testSyncAllUsersDoesNotStampTimestampWhenADeletedUsersMetadataWriteFails(): void {
+		$config = \OC::$server->get(IConfig::class);
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+
+		$uid = self::UID_PREFIX . 'fullsyncdeletedwritefail1';
+		$this->insertUser($uid, '1');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchUserDataFromVO')->willReturn([
+			'username' => $uid, 'firstname' => 'Gone', 'lastname' => 'WriteFailed', '_deleted' => true,
+		]);
+		$backend->method('syncUserData')->willReturn(['success' => false, 'photo_error' => null]);
+
+		$result = $this->service->syncAllUsers($backend);
+
+		$this->assertGreaterThan(0, $result['summary']['api_failures'], 'Precondition: a deleted user whose write also failed must still count as an api_failure');
+		$this->assertEquals('', $config->getAppValue('user_vo', 'last_full_user_sync_at', ''));
+	}
+
+	/**
 	 * Only syncAllUsers() (a full sweep of every known user) may stamp this
 	 * timestamp - syncSelectedUsers() only refreshes some users, and
 	 * stamping it here would give every managed group a false "confirmed

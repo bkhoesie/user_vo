@@ -108,11 +108,12 @@ class UserSyncService {
 
             // Drives GroupManagementService's "possibly stale" flag: only a
             // full sync (not the selective syncSelectedUsers() below) may
-            // stamp this. Gated on api_failures (transient fetch/write
-            // failures), not the broader 'failed', which also counts real
-            // per-user states like deleted-in-VO or no-login that would
-            // otherwise block this forever. Missing key defaults to "don't
-            // stamp".
+            // stamp this. Gated on api_failures, not $result['success']
+            // (true even if every single user failed - see
+            // processSyncLoop()'s contract) or the broader 'failed', which
+            // also counts real per-user states like deleted-in-VO or
+            // no-login that would otherwise block this forever. Missing key
+            // defaults to "don't stamp".
             if (($result['summary']['api_failures'] ?? 1) === 0) {
                 $this->config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
             }
@@ -418,10 +419,12 @@ class UserSyncService {
         $failureCount = 0;
         // Narrower than $failureCount: only cases where this user's
         // vo_group_ids genuinely wasn't refreshed. Excludes permanent
-        // per-user states (no_login, deleted-in-VO) that $failureCount
-        // still counts for the admin-facing summary. Drives
+        // per-user states (no_login, orphaned NC account) that
+        // $failureCount still counts for the admin-facing summary. Drives
         // last_full_user_sync_at in syncAllUsers().
         $apiFailureCount = 0;
+        // Skipped users have no vo_user_id yet, so can't be a group member
+        // either way - excluded from $apiFailureCount too.
         $skippedCount = 0;
         $photoErrorCount = 0;
 
@@ -575,9 +578,10 @@ class UserSyncService {
                     // failed (!$success), vo_group_ids is stale and
                     // GroupSyncService doesn't filter membership by
                     // deleted-in-VO, so that stale value could still be
-                    // wrongly honored. Counts the same as a non-deleted
-                    // failure in that case.
-                    if (!$success) {
+                    // wrongly honored. nc_user_missing is excluded like the
+                    // branch below: a nonexistent uid can't be a group
+                    // member, so its stale vo_group_ids can't matter.
+                    if (!$success && !($syncResult['nc_user_missing'] ?? false)) {
                         $apiFailureCount++;
                     }
                 } else {
