@@ -1396,7 +1396,13 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             summaryText += ' ' + t('user_vo', 'matching "{term}"', { term: response.search_term });
         }
-        summary.innerHTML = `<p>${summaryText}</p>`;
+        let summaryHtml = `<p>${escapeHtml(summaryText)}</p>`;
+        if (response.api_errors > 0) {
+            // Results may be incomplete - a VO API error mid-search must not
+            // look identical to "these are genuinely all the matches".
+            summaryHtml += `<p class="vo-warning">${escapeHtml(t('user_vo', 'Warning: {count} VO members could not be checked due to an API error - results may be incomplete. Try searching again.', { count: response.api_errors }))}</p>`;
+        }
+        summary.innerHTML = summaryHtml;
 
         // Results table
         response.users.forEach(user => {

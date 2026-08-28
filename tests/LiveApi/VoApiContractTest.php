@@ -25,10 +25,15 @@ use Test\TestCase;
  * aren't set - this suite is opt-in, not part of the regular unit/integration
  * runs, so it's safe for it to simply be absent in most environments.
  *
- * VerifyLogin is called at most once per test run (cached via
- * resolveTestMemberId()) regardless of how many tests need the resulting VO
- * member ID - minimizes load on the real API and avoids the small residual
- * risk repeated login attempts carry, even with a correct password.
+ * VerifyLogin with the real test member's credentials is called at most once
+ * per test run (cached via resolveTestMemberId()) regardless of how many
+ * tests need the resulting VO member ID - minimizes load on the real API and
+ * avoids the small residual risk repeated login attempts carry, even with a
+ * correct password. testVerifyLoginReturnsEmptyIdEntryForNonexistentUser()
+ * below makes a second, separate VerifyLogin call, deliberately - it carries
+ * no such risk (the username is nonexistent, so there's no real account to
+ * affect) and is exactly the request production already issues on every
+ * "Test Configuration" click.
  */
 class VoApiContractTest extends TestCase {
 	private static array $env;

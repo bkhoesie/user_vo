@@ -190,6 +190,29 @@ class UserVOAuthTest extends TestCase {
 		$this->assertEquals([], $map);
 	}
 
+	/**
+	 * An 'error' marker on the per-candidate GetMember response must take
+	 * precedence over an otherwise-present, otherwise-matching userlogin -
+	 * without this check, a response carrying both would previously have
+	 * been added to the map anyway (only `empty($memberData['userlogin'])`
+	 * was checked), silently accepting VO's own error indicator as if it
+	 * were real data for that candidate.
+	 */
+	public function testFetchMembersMapForUsersSkipsMemberWhenErrorMarkerIsPresentEvenWithAUserlogin(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			function ($url, $data) {
+				if (str_contains($url, 'GetMembers')) {
+					return [['id' => '1', 'name' => 'Doe, Jane']];
+				}
+				return ['id' => '1', 'userlogin' => 'jane.doe', 'error' => 'rate limited'];
+			}
+		));
+
+		$map = $auth->fetchMembersMapForUsers(['jane.doe']);
+
+		$this->assertEquals([], $map);
+	}
+
 	public function testFetchMembersMapForUsersReturnsPartialMapWhenNotAllFound(): void {
 		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
 			function ($url, $data) {
