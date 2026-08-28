@@ -131,6 +131,21 @@ function renderGroupStatusBadge(group) {
     return '<span class="vo-badge vo-badge-warning">' + escapeHtml(t('user_vo', 'Not created')) + '</span>';
 }
 
+// A managed group's membership was last confirmed no later than its own
+// last_synced timestamp - but that's only as fresh as the last full user
+// sync (vo_group_ids is a per-user cache the group-sync buttons never
+// refresh themselves - see GroupManagementService::isPossiblyStale() for
+// the full reasoning). Shown alongside the status badge, not instead of it -
+// this is "not yet re-checked against newer data", not a problem with the
+// group itself.
+function renderStaleBadge(group) {
+    if (!group.possibly_stale) {
+        return '';
+    }
+    const tooltipText = t('user_vo', 'A user sync has completed since this group\'s membership was last confirmed - its member list may not reflect the latest VereinOnline data yet. Run a user sync, then sync this group again.');
+    return ' <span class="vo-badge vo-badge-warning" title="' + escapeHtml(tooltipText) + '">⚠ ' + escapeHtml(t('user_vo', 'Possibly stale')) + '</span>';
+}
+
 // Helper function to render group actions
 function renderGroupActions(group) {
     if (group.nc_group_missing) {
@@ -388,6 +403,7 @@ if (typeof module !== 'undefined' && module.exports) {
         generateSyncSummaryHTML,
         generatePhotoErrorsHTML,
         renderGroupStatusBadge,
+        renderStaleBadge,
         renderGroupActions,
         addPlaceholdersForMissingParents,
         sortGroupsHierarchically,
@@ -1323,6 +1339,91 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Full Resync: users first, then groups, in that order - a group sync
+    // alone only reconciles NC group membership against each user's already-
+    // cached VereinOnline group list; it never refreshes that cache itself.
+    // A newly created VO group, or a membership change made in VO, won't be
+    // picked up until a user sync has run past it - this is the single
+    // action that gets both steps right without the admin needing to know
+    // that dependency exists. Deliberately a fresh, self-contained request
+    // chain rather than reusing syncAllUsersButton/syncAllGroupsButton's own
+    // click handlers - those also drive their section's detailed results
+    // table, which this top-level action doesn't need to manage.
+    const fullResyncButton = document.getElementById('full-resync');
+    const fullResyncStatus = document.getElementById('full-resync-status');
+    if (fullResyncButton) {
+        fullResyncButton.addEventListener('click', function() {
+            fullResyncButton.disabled = true;
+            fullResyncStatus.textContent = t('user_vo', 'Syncing users...');
+            fullResyncStatus.className = 'sync-status syncing';
+
+            fetch(OC.generateUrl('/apps/user_vo/admin/sync-from-vo'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'requesttoken': OC.requestToken
+                }
+            })
+            .then(response => response.json())
+            .then(userData => {
+                if (!userData.success) {
+                    throw new Error(userData.error || t('user_vo', 'User sync failed'));
+                }
+                fullResyncStatus.textContent = t('user_vo', 'Users synced, now syncing groups...');
+
+                return fetch(OC.generateUrl('/apps/user_vo/admin/sync-all-groups'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'requesttoken': OC.requestToken
+                    },
+                    body: JSON.stringify({})
+                })
+                .then(response => response.json())
+                .then(groupData => {
+                    if (!groupData.success) {
+                        throw new Error(groupData.error || t('user_vo', 'Group sync failed'));
+                    }
+
+                    const usersSynced = userData.summary.success ?? userData.summary.synced ?? 0;
+                    const groupsSynced = groupData.summary.succeeded ?? 0;
+                    fullResyncStatus.textContent = t('user_vo', 'Full resync complete: {users} users, {groups} groups', {
+                        users: usersSynced,
+                        groups: groupsSynced
+                    });
+                    fullResyncStatus.className = 'sync-status success';
+                });
+            })
+            .catch(error => {
+                fullResyncStatus.textContent = t('user_vo', 'Error:') + ' ' + (error.message || error);
+                fullResyncStatus.className = 'sync-status error';
+            })
+            .then(() => {
+                fullResyncButton.disabled = false;
+            });
+        });
+    }
+
+    // Thin proxies onto the canonical "Sync from VO" / "Sync All Managed
+    // Groups" buttons (declared further down, in their own sections) - reuse
+    // those buttons' own tested click handlers (including each section's
+    // detailed results-table rendering) rather than duplicating any of that
+    // logic here. Looked up by id at click time, not the later-declared
+    // consts for those buttons, so declaration order in this file doesn't
+    // matter.
+    const syncAllUsersShortcut = document.getElementById('sync-all-users-shortcut');
+    if (syncAllUsersShortcut) {
+        syncAllUsersShortcut.addEventListener('click', function() {
+            document.getElementById('sync-all-users')?.click();
+        });
+    }
+    const syncAllGroupsShortcut = document.getElementById('sync-all-groups-shortcut');
+    if (syncAllGroupsShortcut) {
+        syncAllGroupsShortcut.addEventListener('click', function() {
+            document.getElementById('sync-all-groups')?.click();
+        });
+    }
+
     // Pre-provision user accounts
     const searchVOUsersBtn = document.getElementById('search-vo-users-btn');
     if (searchVOUsersBtn) {
@@ -1880,7 +1981,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td>${escapeHtml(group.vo_group_id)}</td>
                     <td>${escapeHtml(group.nc_display_name || '-')}</td>
                     <td>${escapeHtml(group.nc_group_id || '-')}</td>
-                    <td>${renderGroupStatusBadge(group)}</td>
+                    <td>${renderGroupStatusBadge(group)}${renderStaleBadge(group)}</td>
                     <td>${escapeHtml(voMemberCountDisplay)}</td>
                     <td>${escapeHtml(nonVoMemberCountDisplay)}</td>
                     <td>${escapeHtml(formatDateTime(group.last_synced))}</td>

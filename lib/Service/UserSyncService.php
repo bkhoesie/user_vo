@@ -104,7 +104,18 @@ class UserSyncService {
             }
 
             // Process sync for all users
-            return $this->processSyncLoop($users, $backend, true);
+            $result = $this->processSyncLoop($users, $backend, true);
+
+            // Marks when every known user's cached vo_group_ids was last
+            // refreshed from live VO data - a full sweep, not the selective
+            // syncSelectedUsers() below, which only touches some users and
+            // would give a false "everything is fresh" signal for the rest.
+            // Used to flag a managed group's membership as possibly stale
+            // (its last group sync predates this) - see
+            // GroupManagementService's use of this key.
+            $this->config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
+
+            return $result;
 
         } catch (\Exception $e) {
             $this->logger->error('Error in syncAllUsers: ' . $e->getMessage(), ['app' => 'user_vo']);

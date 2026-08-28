@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- "Full Resync" button (users, then groups, in the right order) on a new admin overview section,
+  with an explanation of why group sync alone can miss new VereinOnline group members
+- Managed groups now show a "Possibly stale" badge when a user sync has completed since the
+  group's own membership was last confirmed
+
 ### Fixed
 - A VereinOnline API error could be mistaken for "no groups/members", which could make every
   managed group show as "Deleted in VO" after a single API hiccup - now detected and reported

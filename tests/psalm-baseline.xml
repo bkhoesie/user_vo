@@ -158,6 +158,7 @@
   </file>
   <file src="lib/Migration/Version1002Date20251013000000.php">
     <UndefinedDocblockClass>
+      <code><![CDATA[$schema->createTable('user_vo_groups')]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
@@ -178,6 +179,7 @@
   </file>
   <file src="lib/Migration/Version1003Date20260802000000.php">
     <UndefinedDocblockClass>
+      <code><![CDATA[$schema->getTable('user_vo_groups')]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
@@ -190,6 +192,7 @@
   </file>
   <file src="lib/Migration/Version1004Date20260802000000.php">
     <UndefinedDocblockClass>
+      <code><![CDATA[$schema->getTable('user_vo_groups')]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
@@ -198,6 +201,7 @@
   </file>
   <file src="lib/Migration/Version1005Date20260803000000.php">
     <UndefinedDocblockClass>
+      <code><![CDATA[$schema->getTable('user_vo_groups')]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
@@ -206,6 +210,7 @@
   </file>
   <file src="lib/Migration/Version1006Date20260803120000.php">
     <UndefinedDocblockClass>
+      <code><![CDATA[$schema->createTable('user_vo_audit_log')]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
       <code><![CDATA[$table]]></code>
@@ -251,6 +256,9 @@
     </UndefinedFunction>
   </file>
   <file src="lib/Service/GroupManagementService.php">
+    <DeprecatedMethod>
+      <code><![CDATA[getAppValue]]></code>
+    </DeprecatedMethod>
     <MissingDependency>
       <code><![CDATA[UserVOAuth]]></code>
       <code><![CDATA[UserVOAuth]]></code>

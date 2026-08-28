@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\UserVO\Service;
 
+use OCP\IConfig;
 use OCP\IDBConnection;
 use OCP\IGroupManager;
 use OCA\UserVO\UserVOAuth;
@@ -29,6 +30,7 @@ class GroupManagementService {
     private GroupSyncService $groupSyncService;
     private AuditLogService $auditLogService;
     private GroupSyncLockService $lockService;
+    private IConfig $config;
 
     public function __construct(
         IDBConnection $connection,
@@ -37,7 +39,8 @@ class GroupManagementService {
         LoggerInterface $logger,
         GroupSyncService $groupSyncService,
         AuditLogService $auditLogService,
-        GroupSyncLockService $lockService
+        GroupSyncLockService $lockService,
+        IConfig $config
     ) {
         $this->connection = $connection;
         $this->groupManager = $groupManager;
@@ -46,6 +49,39 @@ class GroupManagementService {
         $this->groupSyncService = $groupSyncService;
         $this->auditLogService = $auditLogService;
         $this->lockService = $lockService;
+        $this->config = $config;
+    }
+
+    /**
+     * A managed group's membership was last confirmed against VO data no
+     * later than its own last_synced timestamp - but that data is itself
+     * only as fresh as the last full user sync (vo_group_ids is a per-user
+     * cache, refreshed only by a user sync, never by a group sync - see
+     * GroupSyncService's class doc-comment for the full mechanism this
+     * closes the loop on). A group whose last_synced predates the most
+     * recent full user sync hasn't been re-checked against that fresher
+     * data yet, and should be flagged rather than silently trusted - this
+     * is what let a newly-VO-assigned member go unnoticed indefinitely
+     * until a user sync happened to run for an unrelated reason.
+     *
+     * Deliberately not "the group is actually wrong" - just "not yet
+     * confirmed against the freshest known user data". A group with no
+     * last_synced at all is always considered stale (never confirmed).
+     */
+    private function isPossiblyStale(?string $lastSynced): bool {
+        $lastFullUserSyncAt = $this->config->getAppValue('user_vo', 'last_full_user_sync_at', '');
+        if ($lastFullUserSyncAt === '') {
+            // No full user sync has ever completed - nothing to compare
+            // against, so don't flag every single group as stale on a
+            // fresh install before the first sync has even had a chance to
+            // run.
+            return false;
+        }
+        if ($lastSynced === null) {
+            return true;
+        }
+        $lastSyncedTimestamp = strtotime($lastSynced);
+        return $lastSyncedTimestamp === false || $lastSyncedTimestamp < (int)$lastFullUserSyncAt;
     }
 
     /**
@@ -191,6 +227,7 @@ class GroupManagementService {
                     'member_count' => $isManaged ? (int)$dbRow['member_count'] : null,
                     'vo_member_count' => $isManaged ? (int)$dbRow['vo_member_count'] : null,
                     'non_vo_member_count' => $isManaged ? (int)$dbRow['non_vo_member_count'] : null,
+                    'possibly_stale' => $isManaged ? $this->isPossiblyStale($dbRow['last_synced']) : false,
                     'backend_conflict' => $backendConflict,
                     'conflicting_backends' => $conflictingBackends,
                 ];
@@ -305,6 +342,7 @@ class GroupManagementService {
                     'member_count' => (int)$group['member_count'],
                     'vo_member_count' => (int)$group['vo_member_count'],
                     'non_vo_member_count' => (int)$group['non_vo_member_count'],
+                    'possibly_stale' => $this->isPossiblyStale($group['last_synced']),
                     'is_managed' => true,  // All groups from this endpoint are managed
                     // A tracking row whose NC group is gone - e.g. an admin
                     // deleted it directly via NC's own UI and

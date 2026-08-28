@@ -181,4 +181,56 @@ class UserSyncServiceTest extends TestCase {
 		$this->assertTrue($result['success'], 'Envelope success is true even though the individual user failed');
 		$this->assertEquals(1, $result['summary']['failed']);
 	}
+
+	// --- syncAllUsers(): last_full_user_sync_at stamping (drives
+	// GroupManagementService's possibly_stale flag - see that class) ---
+
+	public function testSyncAllUsersStampsLastFullUserSyncTimestamp(): void {
+		$config = \OC::$server->get(IConfig::class);
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+
+		$uid = self::UID_PREFIX . 'fullsync1';
+		$this->insertUser($uid, '1');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchUserDataFromVO')->willReturn([
+			'username' => $uid, 'firstname' => 'Full', 'lastname' => 'Sync',
+		]);
+		$backend->method('syncUserData')->willReturn(['success' => true, 'photo_error' => null]);
+
+		$before = time();
+		$this->service->syncAllUsers($backend);
+		$after = time();
+
+		$stamped = (int)$config->getAppValue('user_vo', 'last_full_user_sync_at', '0');
+		$this->assertGreaterThanOrEqual($before, $stamped);
+		$this->assertLessThanOrEqual($after, $stamped);
+
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+	}
+
+	/**
+	 * Only syncAllUsers() (a full sweep of every known user) may stamp this
+	 * timestamp - syncSelectedUsers() only refreshes some users, and
+	 * stamping it here would give every managed group a false "confirmed
+	 * fresh" signal even for groups whose actual members weren't part of
+	 * this selective sync.
+	 */
+	public function testSyncSelectedUsersDoesNotStampLastFullUserSyncTimestamp(): void {
+		$config = \OC::$server->get(IConfig::class);
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+
+		$uid = self::UID_PREFIX . 'selective1';
+		$this->insertUser($uid, '1');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchUserDataFromVO')->willReturn([
+			'username' => $uid, 'firstname' => 'Selective', 'lastname' => 'Sync',
+		]);
+		$backend->method('syncUserData')->willReturn(['success' => true, 'photo_error' => null]);
+
+		$this->service->syncSelectedUsers([$uid], $backend);
+
+		$this->assertEquals('', $config->getAppValue('user_vo', 'last_full_user_sync_at', ''));
+	}
 }
