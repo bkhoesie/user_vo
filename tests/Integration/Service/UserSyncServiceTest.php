@@ -216,20 +216,9 @@ class UserSyncServiceTest extends TestCase {
 	}
 
 	/**
-	 * Regression test: processSyncLoop() (and so syncAllUsers()) returns a
-	 * top-level 'success' => true even when every single user failed - see
-	 * testSyncSelectedUsersReportsFailureFromBackend() for the same
-	 * envelope-vs-per-user distinction. A VO outage mid-sync must not stamp
-	 * this timestamp: nothing was actually refreshed, so every managed
-	 * group's "possibly stale" flag would be falsely cleared by a sync that
-	 * accomplished nothing.
-	 *
-	 * Mocks the '_error' => 'api_error' shape (not fetchUserDataFromVO()
-	 * returning null) - that's the shape a real VO outage actually produces
-	 * (UserVOAuth::fetchUserDataFromVO() has no `return null;` in its
-	 * current implementation, only ever returning that error-marked array
-	 * or a normalized success array), so this pins the path real code can
-	 * actually take, not just a defensive branch the type signature allows.
+	 * A VO outage mid-sync must not stamp last_full_user_sync_at - nothing
+	 * was actually refreshed. Mocks the real '_error' => 'api_error' shape
+	 * (fetchUserDataFromVO() never actually returns a literal null).
 	 */
 	public function testSyncAllUsersDoesNotStampTimestampWhenAUserFails(): void {
 		$config = \OC::$server->get(IConfig::class);
@@ -251,14 +240,9 @@ class UserSyncServiceTest extends TestCase {
 	}
 
 	/**
-	 * Regression test for a third issue a second independent review found:
-	 * syncUserData() also returns success:false for an orphaned user_vo row
-	 * (the tracking row survives, but its NC account is gone - a
-	 * documented, real hazard, not a hypothetical) via its own
-	 * nc_user_missing marker. Without this exclusion, an install with even
-	 * one orphaned row would never stamp this timestamp again, on every
-	 * future sync, for the same reason deleted-in-VO/no_login had to be
-	 * excluded above - this is the same bug class, one branch deeper.
+	 * An orphaned user_vo row (tracking row survives, NC account gone) is a
+	 * permanent state, not a sync failure - must not permanently block the
+	 * stamp.
 	 */
 	public function testSyncAllUsersStampsTimestampEvenWhenAUserHasNoNcAccount(): void {
 		$config = \OC::$server->get(IConfig::class);
@@ -287,13 +271,7 @@ class UserSyncServiceTest extends TestCase {
 		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
 	}
 
-	/**
-	 * The other side of the previous test: a genuine syncUserData() failure
-	 * (no nc_user_missing marker - e.g. an exception partway through, before
-	 * updateVOMetadata() could run) must still block the stamp. Confirms
-	 * the exclusion above is specific to nc_user_missing, not "any
-	 * success:false from syncUserData()".
-	 */
+	/** The other side: success:false without nc_user_missing must still block the stamp. */
 	public function testSyncAllUsersDoesNotStampTimestampOnAGenuineSyncUserDataFailure(): void {
 		$config = \OC::$server->get(IConfig::class);
 		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
@@ -314,15 +292,9 @@ class UserSyncServiceTest extends TestCase {
 	}
 
 	/**
-	 * Regression test for a second issue an independent review found in the
-	 * first fix: 'failed' also counts real-but-permanent per-user states
-	 * (deleted in VO, no VO login credentials) that processSyncLoop()
-	 * intentionally still calls successful for summary purposes - those
-	 * aren't sync failures, and gating the stamp on 'failed' would mean an
-	 * install with even one such member could never stamp this timestamp
-	 * again, silently disabling the entire staleness feature. Deleted-in-VO
-	 * is exercised here; 'no_login' goes through the same api_failures
-	 * exclusion in processSyncLoop() and isn't separately re-tested.
+	 * Deleted-in-VO is a permanent per-user state, not a sync failure - must
+	 * not block the stamp. ('no_login' goes through the same exclusion and
+	 * isn't separately re-tested.)
 	 */
 	public function testSyncAllUsersStampsTimestampEvenWhenAUserIsDeletedInVO(): void {
 		$config = \OC::$server->get(IConfig::class);

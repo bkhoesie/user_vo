@@ -126,26 +126,15 @@ describe('interactive DOM wiring (jsdom integration - loads the real admin.js)',
         expect(document.getElementById('sync-all-groups-shortcut').disabled).toBe(true);
     });
 
-    /**
-     * Regression coverage for the exact interleaving that produced a
-     * spurious "possibly stale" flag on every managed group during manual
-     * testing: an admin starting "Sync All Users" while a group sync is
-     * running (or vice versa) can make last_full_user_sync_at land after
-     * some groups' own last_synced, purely from timing, not any real
-     * staleness.
-     */
     test('"Sync All Groups" disables "Full Resync" so it cannot race it', () => {
         document.getElementById('sync-all-groups').click();
 
         expect(document.getElementById('full-resync').disabled).toBe(true);
     });
 
-    /**
-     * Unlike the tests above, these use a fetch mock that actually resolves
-     * (createAdminPage()'s fetch override, per-test rather than the shared
-     * never-resolving beforeEach one) - needed to reach Full Resync's own
-     * completion handling, not just confirm the requests were sent.
-     */
+    // These use a resolving fetch mock (per-test, not the shared
+    // never-resolving beforeEach one) to reach Full Resync's completion
+    // handling, not just confirm the requests were sent.
     describe('Full Resync completion handling (resolving fetch)', () => {
         function mockResponse(body) {
             return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
@@ -178,10 +167,11 @@ describe('interactive DOM wiring (jsdom integration - loads the real admin.js)',
 
             const status = document.getElementById('full-resync-status');
             expect(status.className).toContain('warning');
-            // Pin the counts to their actual slots (users vs. groups), not
-            // just that the digits appear somewhere in the string.
-            expect(status.textContent).toContain('(2 failed)');
-            expect(status.textContent).toContain('(1 failed)');
+            // Pin the counts to their actual slots (users vs. groups) - both
+            // slots share the same "(N failed)" shape, so checking that
+            // alone would still pass with the two counts swapped.
+            expect(status.textContent).toContain('3 users synced (2 failed)');
+            expect(status.textContent).toContain('4 groups synced (1 failed)');
         });
 
         test('re-enables the sync actions once the chain settles, on both the success and warning paths', async () => {

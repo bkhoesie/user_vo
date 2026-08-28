@@ -53,28 +53,15 @@ class GroupManagementService {
     }
 
     /**
-     * A managed group's membership was last confirmed against VO data no
-     * later than its own last_synced timestamp - but that data is itself
-     * only as fresh as the last full user sync (vo_group_ids is a per-user
-     * cache, refreshed only by a user sync, never by a group sync - see
-     * GroupSyncService's class doc-comment for the full mechanism this
-     * closes the loop on). A group whose last_synced predates the most
-     * recent full user sync hasn't been re-checked against that fresher
-     * data yet, and should be flagged rather than silently trusted - this
-     * is what let a newly-VO-assigned member go unnoticed indefinitely
-     * until a user sync happened to run for an unrelated reason.
+     * A group's membership is only as fresh as the last full user sync
+     * (vo_group_ids is a per-user cache that only a user sync refreshes,
+     * never a group sync). A group whose last_synced predates that hasn't
+     * been re-checked against the freshest data yet - not "wrong", just
+     * not yet confirmed. No last_synced at all is always stale.
      *
-     * Deliberately not "the group is actually wrong" - just "not yet
-     * confirmed against the freshest known user data". A group with no
-     * last_synced at all is always considered stale (never confirmed).
-     *
-     * $lastSynced (a DATETIME column, compared via strtotime()) and
-     * last_full_user_sync_at (a raw unix timestamp) are only comparable
-     * because every writer of both values agrees on naive UTC - NC pins
-     * date_default_timezone_set('UTC') itself, and both last_synced writers
-     * (UserVOAuth::updateVOMetadata(), GroupSyncService's sync body) emit
-     * UTC datetimes with no timezone marker. A different default timezone
-     * would skew this comparison silently.
+     * $lastSynced (DATETIME, via strtotime()) and last_full_user_sync_at
+     * (unix timestamp) are comparable because NC pins UTC and both
+     * last_synced writers emit naive UTC datetimes.
      */
     private function isPossiblyStale(?string $lastSynced): bool {
         $lastFullUserSyncAt = $this->config->getAppValue('user_vo', 'last_full_user_sync_at', '');

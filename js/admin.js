@@ -131,13 +131,8 @@ function renderGroupStatusBadge(group) {
     return '<span class="vo-badge vo-badge-warning">' + escapeHtml(t('user_vo', 'Not created')) + '</span>';
 }
 
-// A managed group's membership was last confirmed no later than its own
-// last_synced timestamp - but that's only as fresh as the last full user
-// sync (vo_group_ids is a per-user cache the group-sync buttons never
-// refresh themselves - see GroupManagementService::isPossiblyStale() for
-// the full reasoning). Shown alongside the status badge, not instead of it -
-// this is "not yet re-checked against newer data", not a problem with the
-// group itself.
+// See GroupManagementService::isPossiblyStale(). Shown alongside the status
+// badge, not instead of it - "not yet re-checked", not a problem.
 function renderStaleBadge(group) {
     if (!group.possibly_stale) {
         return '';
@@ -1341,25 +1336,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Mutual exclusion across the three main sync actions (Full Resync,
-    // Sync All Users, Sync All Groups, plus the two shortcut buttons that
-    // just forward to the latter two), so an admin can't start a user sync
-    // and a group sync at the same time from here - that exact interleaving
-    // can make last_full_user_sync_at land after some groups' own
-    // last_synced, producing a misleading "possibly stale" (or "not stale")
-    // result for groups whose sync just happened to race it. Looked up
-    // fresh by id (not the buttons' own later-declared consts), so this
-    // works regardless of where in the file it's called from - a plain
-    // function declaration is hoisted, so definition order relative to its
-    // callers doesn't matter either.
-    //
-    // NOT exhaustive: "Sync Selected Groups" (bulk-sync-groups) and each
-    // row's individual sync button also write last_synced and aren't
-    // included here, so the same race is still reachable through those.
-    // The nightly cron job and the 5-minute dirty-group sweep are
-    // unaffected by any of this UI-side locking regardless - this only
-    // closes the race between actions a single admin triggers by hand in
-    // the same browser tab.
+    // Mutual exclusion between Full Resync, Sync All Users, and Sync All
+    // Groups (plus their shortcuts) - running a user sync and a group sync
+    // at the same time can make last_full_user_sync_at land after some
+    // groups' own last_synced, producing a misleading staleness result.
+    // Does not cover "Sync Selected Groups" or per-row sync buttons, or the
+    // nightly cron/sweep - only the actions a single admin triggers here.
     function setSyncActionsBusy(busy) {
         ['full-resync', 'sync-all-users', 'sync-all-groups', 'sync-all-users-shortcut', 'sync-all-groups-shortcut'].forEach(function(id) {
             const el = document.getElementById(id);
@@ -1369,19 +1351,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Full Resync: users first, then groups, in that order - a group sync
-    // alone only reconciles NC group membership against each user's already-
-    // cached VereinOnline group list; it never refreshes that cache itself.
-    // A newly created VO group, or a membership change made in VO, won't be
-    // picked up until a user sync has run past it - this is the single
-    // action that gets both steps right without the admin needing to know
-    // that dependency exists. Deliberately a fresh, self-contained request
-    // chain rather than reusing syncAllUsersButton/syncAllGroupsButton's own
-    // click handlers - those also drive their section's detailed results
-    // table, which this top-level action doesn't need to manage (the
-    // managed-groups table is still refreshed below, if it's the active
-    // view, so newly-cleared staleness badges are visible without a manual
-    // reload).
+    // Full Resync: users first, then groups - group sync alone only
+    // reconciles against each user's already-cached VO group list, it never
+    // refreshes that cache. A self-contained request chain rather than
+    // reusing the other two buttons' handlers, which also drive their own
+    // results tables that this top-level action doesn't need to manage.
     const fullResyncButton = document.getElementById('full-resync');
     const fullResyncStatus = document.getElementById('full-resync-status');
     if (fullResyncButton) {
@@ -1454,12 +1428,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         fullResyncStatus.className = 'sync-status success';
                     }
 
-                    // currentViewType/loadAllVOGroupsButton/loadManagedGroupsButton
-                    // are declared further down in this same DOMContentLoaded
-                    // handler - safe to reference here despite that: this
-                    // callback only runs after both network round-trips above
-                    // complete, long after the handler's synchronous top-level
-                    // body (which declares them) has already finished.
+                    // Declared further down this file, but safe to reference
+                    // here - this callback only runs after the fetches above
+                    // resolve, well after the rest of the file has run.
                     if (currentViewType === 'managed' && loadManagedGroupsButton) {
                         loadManagedGroupsButton.click();
                     } else if (currentViewType === 'all' && loadAllVOGroupsButton) {
@@ -1477,13 +1448,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Thin proxies onto the canonical "Sync from VO" / "Sync All Managed
-    // Groups" buttons (declared further down, in their own sections) - reuse
-    // those buttons' own tested click handlers (including each section's
-    // detailed results-table rendering) rather than duplicating any of that
-    // logic here. Looked up by id at click time, not the later-declared
-    // consts for those buttons, so declaration order in this file doesn't
-    // matter.
+    // Forward to the canonical "Sync from VO" / "Sync All Managed Groups"
+    // buttons further down, reusing their own click handlers.
     const syncAllUsersShortcut = document.getElementById('sync-all-users-shortcut');
     if (syncAllUsersShortcut) {
         syncAllUsersShortcut.addEventListener('click', function() {

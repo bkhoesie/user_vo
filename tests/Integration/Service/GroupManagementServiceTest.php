@@ -458,14 +458,7 @@ class GroupManagementServiceTest extends TestCase {
 		$this->assertFalse($newGroup['is_managed']);
 	}
 
-	/**
-	 * fetchAllVOGroups() computes possibly_stale via the same
-	 * isPossiblyStale() helper as fetchManagedGroups() (tested extensively
-	 * below), but reads last_synced from a different query (SELECT * ...
-	 * vs. the explicit column list there) - this pins that the wiring is
-	 * actually correct at this second call site too, not just that the
-	 * shared helper's logic is right in isolation.
-	 */
+	/** fetchAllVOGroups() shares isPossiblyStale() with fetchManagedGroups() but reads last_synced via a different query - pins that wiring too. */
 	public function testFetchAllVOGroupsFlagsPossiblyStaleManagedGroup(): void {
 		$config = \OC::$server->get(\OCP\IConfig::class);
 		$this->createTestGroup('test_allgroups_stale', 'Stale In All Groups View', '1');
