@@ -139,4 +139,92 @@ describe('interactive DOM wiring (jsdom integration - loads the real admin.js)',
 
         expect(document.getElementById('full-resync').disabled).toBe(true);
     });
+
+    /**
+     * Unlike the tests above, these use a fetch mock that actually resolves
+     * (createAdminPage()'s fetch override, per-test rather than the shared
+     * never-resolving beforeEach one) - needed to reach Full Resync's own
+     * completion handling, not just confirm the requests were sent.
+     */
+    describe('Full Resync completion handling (resolving fetch)', () => {
+        function mockResponse(body) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+        }
+
+        function flushPromiseChain() {
+            // Full Resync's chain is response->json->userData->fetch->
+            // response->json->groupData->... - several microtask hops deep.
+            // A single macrotask tick runs after every pending microtask
+            // has already drained, so one is enough regardless of how many
+            // .then()s are chained ahead of it.
+            return new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        test('reports a warning, not a false success, when some users/groups fail', async () => {
+            dom.window.close();
+            const resolvingFetch = jest.fn((url) => {
+                if (url.includes('sync-from-vo')) {
+                    return mockResponse({ success: true, summary: { success: 3, failed: 2 }, results: [] });
+                }
+                if (url.includes('sync-all-groups')) {
+                    return mockResponse({ success: true, summary: { total: 5, succeeded: 4, failed: 1 }, results: [] });
+                }
+                return new Promise(() => {});
+            });
+            ({ dom, window, document } = createAdminPage({ fetch: resolvingFetch }));
+
+            document.getElementById('full-resync').click();
+            await flushPromiseChain();
+
+            const status = document.getElementById('full-resync-status');
+            expect(status.className).toContain('warning');
+            expect(status.textContent).toContain('2');
+            expect(status.textContent).toContain('1');
+        });
+
+        test('re-enables the sync actions once the chain settles, on both the success and warning paths', async () => {
+            dom.window.close();
+            const resolvingFetch = jest.fn((url) => {
+                if (url.includes('sync-from-vo')) {
+                    return mockResponse({ success: true, summary: { success: 5, failed: 0 }, results: [] });
+                }
+                if (url.includes('sync-all-groups')) {
+                    return mockResponse({ success: true, summary: { total: 5, succeeded: 5, failed: 0 }, results: [] });
+                }
+                return new Promise(() => {});
+            });
+            ({ dom, window, document } = createAdminPage({ fetch: resolvingFetch }));
+
+            document.getElementById('full-resync').click();
+            expect(document.getElementById('sync-all-users').disabled).toBe(true);
+
+            await flushPromiseChain();
+
+            expect(document.getElementById('full-resync').disabled).toBe(false);
+            expect(document.getElementById('sync-all-users').disabled).toBe(false);
+            expect(document.getElementById('sync-all-groups').disabled).toBe(false);
+            const status = document.getElementById('full-resync-status');
+            expect(status.className).toContain('success');
+        });
+
+        test('re-enables the sync actions when the user-sync step itself fails', async () => {
+            dom.window.close();
+            const resolvingFetch = jest.fn((url) => {
+                if (url.includes('sync-from-vo')) {
+                    return mockResponse({ success: false, error: 'VO unreachable' });
+                }
+                return new Promise(() => {});
+            });
+            ({ dom, window, document } = createAdminPage({ fetch: resolvingFetch }));
+
+            document.getElementById('full-resync').click();
+            await flushPromiseChain();
+
+            expect(document.getElementById('full-resync').disabled).toBe(false);
+            expect(document.getElementById('sync-all-users').disabled).toBe(false);
+            const status = document.getElementById('full-resync-status');
+            expect(status.className).toContain('error');
+            expect(status.textContent).toContain('VO unreachable');
+        });
+    });
 });

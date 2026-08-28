@@ -774,7 +774,14 @@
 }
 
 .sync-status.warning {
-    color: #ff8c00;
+    display: inline-block;
+    padding: 6px 12px;
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+    border-radius: 4px;
+    font-weight: 500;
+    margin-left: 10px;
 }
 
 .sync-status.error {
@@ -967,6 +974,12 @@
         border-color: #34d399;
     }
 
+    .sync-status.warning {
+        background-color: #3a331e;
+        color: #fbbf24;
+        border-color: #fbbf24;
+    }
+
     .sync-status.error {
         background-color: #3a1e1e;
         color: #f87171;
@@ -1066,6 +1079,12 @@
     background-color: #1e3a2f;
     color: #34d399;
     border-color: #34d399;
+}
+
+[data-theme-dark] .sync-status.warning {
+    background-color: #3a331e;
+    color: #fbbf24;
+    border-color: #fbbf24;
 }
 
 [data-theme-dark] .sync-status.error {

@@ -1341,15 +1341,25 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Shared mutual exclusion across every top-level sync action, so an
-    // admin can't start a user sync and a group sync at the same time -
-    // that exact interleaving can make last_full_user_sync_at land after
-    // some groups' own last_synced, producing a misleading "possibly stale"
-    // (or "not stale") result for groups whose sync just happened to race
-    // it. Looked up fresh by id (not the buttons' own later-declared
-    // consts), so this works regardless of where in the file it's called
-    // from - a plain function declaration is hoisted, so definition order
-    // relative to its callers doesn't matter either.
+    // Mutual exclusion across the three main sync actions (Full Resync,
+    // Sync All Users, Sync All Groups, plus the two shortcut buttons that
+    // just forward to the latter two), so an admin can't start a user sync
+    // and a group sync at the same time from here - that exact interleaving
+    // can make last_full_user_sync_at land after some groups' own
+    // last_synced, producing a misleading "possibly stale" (or "not stale")
+    // result for groups whose sync just happened to race it. Looked up
+    // fresh by id (not the buttons' own later-declared consts), so this
+    // works regardless of where in the file it's called from - a plain
+    // function declaration is hoisted, so definition order relative to its
+    // callers doesn't matter either.
+    //
+    // NOT exhaustive: "Sync Selected Groups" (bulk-sync-groups) and each
+    // row's individual sync button also write last_synced and aren't
+    // included here, so the same race is still reachable through those.
+    // The nightly cron job and the 5-minute dirty-group sweep are
+    // unaffected by any of this UI-side locking regardless - this only
+    // closes the race between actions a single admin triggers by hand in
+    // the same browser tab.
     function setSyncActionsBusy(busy) {
         ['full-resync', 'sync-all-users', 'sync-all-groups', 'sync-all-users-shortcut', 'sync-all-groups-shortcut'].forEach(function(id) {
             const el = document.getElementById(id);

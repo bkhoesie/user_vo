@@ -114,16 +114,25 @@ class UserSyncService {
             // (its last group sync predates this) - see
             // GroupManagementService's use of this key.
             //
-            // Only stamped when every user actually succeeded ($result's
-            // top-level 'success' is true even if every single user failed -
-            // see processSyncLoop()'s own contract) - otherwise a VO outage
-            // mid-sync would leave every cached vo_group_ids untouched while
-            // still telling every managed group it can trust this as a fresh
-            // baseline, the exact false-freshness signal this key exists to
-            // prevent. Not gated on 'skipped' too: a skipped user has no
-            // vo_user_id yet and can't be a group member either way, so
-            // their presence shouldn't block the stamp.
-            if (($result['summary']['failed'] ?? 0) === 0) {
+            // Only stamped when every user's data was actually refreshed
+            // ($result's top-level 'success' is true even if every single
+            // user failed - see processSyncLoop()'s own contract) -
+            // otherwise a VO outage mid-sync would leave every cached
+            // vo_group_ids untouched while still telling every managed
+            // group it can trust this as a fresh baseline, the exact
+            // false-freshness signal this key exists to prevent.
+            //
+            // Gated on 'api_failures', not the broader 'failed' - 'failed'
+            // also counts real-but-permanent per-user states (deleted in
+            // VO, no VO login credentials), which aren't sync failures and
+            // would otherwise block this stamp forever on any install with
+            // even one such member, silently disabling the whole staleness
+            // feature instead of fixing the false-freshness bug this
+            // guard was written for. Not gated on 'skipped' either: a
+            // skipped user has no vo_user_id yet and can't be a group
+            // member either way, so their presence shouldn't block the
+            // stamp.
+            if (($result['summary']['api_failures'] ?? 0) === 0) {
                 $this->config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
             }
 
@@ -426,6 +435,20 @@ class UserSyncService {
         $results = [];
         $successCount = 0;
         $failureCount = 0;
+        // A narrower count than $failureCount: only genuine API/transport
+        // failures (VO unreachable, a malformed/error response) where this
+        // user's vo_group_ids cache was NOT actually refreshed this round.
+        // Deliberately excludes 'no_login' and deleted-in-VO, which
+        // $failureCount counts too (for the admin-facing summary/results
+        // table - both are real, permanent per-user states worth
+        // surfacing there) but which are successfully-determined outcomes,
+        // not sync failures - a member who has always had no VO login
+        // credentials would otherwise count as "failed" on every single
+        // sync forever. syncAllUsers() gates last_full_user_sync_at on
+        // this narrower count specifically so that one such permanent
+        // per-user state doesn't permanently block every managed group's
+        // staleness check from ever clearing again.
+        $apiFailureCount = 0;
         $skippedCount = 0;
         $photoErrorCount = 0;
 
@@ -478,6 +501,7 @@ class UserSyncService {
                     'message' => 'User not found in VO'
                 ];
                 $failureCount++;
+                $apiFailureCount++;
                 continue;
             }
 
@@ -504,6 +528,13 @@ class UserSyncService {
                     'message' => $message
                 ];
                 $failureCount++;
+                // 'no_login' is a real, potentially-permanent per-user state
+                // (this VO member simply has no login credentials), not a
+                // sync failure - only 'api_error' means this user's data
+                // genuinely wasn't refreshed.
+                if ($errorType === 'api_error') {
+                    $apiFailureCount++;
+                }
                 continue;
             }
 
@@ -566,6 +597,10 @@ class UserSyncService {
                         'message' => 'User marked as deleted in VO'
                     ];
                     $failureCount++; // Count as failure for summary purposes
+                    // Not $apiFailureCount++ - the sync itself succeeded (we're in
+                    // the $success-or-$isDeleted branch); "deleted in VO" is a
+                    // real, potentially permanent per-user state, not a failure
+                    // to refresh this user's data.
                 } else {
                     $results[] = [
                         'uid' => $uid,
@@ -599,6 +634,7 @@ class UserSyncService {
                     'message' => 'Sync method returned false'
                 ];
                 $failureCount++;
+                $apiFailureCount++;
             }
         }
 
@@ -607,6 +643,10 @@ class UserSyncService {
             'total' => $successCount + $failureCount + $skippedCount,
             $isFullSync ? 'success' : 'synced' => $successCount,
             'failed' => $failureCount,
+            // Narrower than 'failed' above - see $apiFailureCount's own
+            // comment near this method's start. This is what
+            // syncAllUsers() gates last_full_user_sync_at on.
+            'api_failures' => $apiFailureCount,
             'skipped' => $skippedCount,
             'photo_errors' => $photoErrorCount
         ];

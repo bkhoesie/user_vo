@@ -238,6 +238,44 @@ class UserSyncServiceTest extends TestCase {
 	}
 
 	/**
+	 * Regression test for a second issue an independent review found in the
+	 * first fix: 'failed' also counts real-but-permanent per-user states
+	 * (deleted in VO, no VO login credentials) that processSyncLoop()
+	 * intentionally still calls successful for summary purposes - those
+	 * aren't sync failures, and gating the stamp on 'failed' would mean an
+	 * install with even one such member could never stamp this timestamp
+	 * again, silently disabling the entire staleness feature. Deleted-in-VO
+	 * is exercised here; 'no_login' goes through the same api_failures
+	 * exclusion in processSyncLoop() and isn't separately re-tested.
+	 */
+	public function testSyncAllUsersStampsTimestampEvenWhenAUserIsDeletedInVO(): void {
+		$config = \OC::$server->get(IConfig::class);
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+
+		$uid = self::UID_PREFIX . 'fullsyncdeleted1';
+		$this->insertUser($uid, '1');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchUserDataFromVO')->willReturn([
+			'username' => $uid, 'firstname' => 'Gone', 'lastname' => 'User', '_deleted' => true,
+		]);
+		$backend->method('syncUserData')->willReturn(['success' => true, 'photo_error' => null]);
+
+		$before = time();
+		$result = $this->service->syncAllUsers($backend);
+		$after = time();
+
+		$this->assertGreaterThan(0, $result['summary']['failed'], 'Precondition: deleted-in-VO is still counted under the broad failed count');
+		$this->assertEquals(0, $result['summary']['api_failures'], 'Precondition: but not as an api_failure');
+
+		$stamped = (int)$config->getAppValue('user_vo', 'last_full_user_sync_at', '0');
+		$this->assertGreaterThanOrEqual($before, $stamped);
+		$this->assertLessThanOrEqual($after, $stamped);
+
+		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
+	}
+
+	/**
 	 * Only syncAllUsers() (a full sweep of every known user) may stamp this
 	 * timestamp - syncSelectedUsers() only refreshes some users, and
 	 * stamping it here would give every managed group a false "confirmed
