@@ -2,6 +2,7 @@
 namespace OCA\UserVO\Tests\Unit;
 
 use OCA\UserVO\Service\ApiClient;
+use OCA\UserVO\Service\Exception\VoGroupDataUnusableException;
 use OCA\UserVO\UserVOAuth;
 use Test\TestCase;
 
@@ -346,5 +347,73 @@ class UserVOAuthTest extends TestCase {
 
 		$this->assertNotNull($groups);
 		$this->assertEquals('1', $groups[0]['id']);
+	}
+
+	// --- fetchGroupMembers() ---
+	//
+	// Split failure handling (see the plan/CLAUDE.md's "Group Membership
+	// Sync" section): a transport/HTTP-level failure (null from makeRequest())
+	// returns null - the ONLY signal circuit breakers upstream treat as
+	// "VO looks unreachable". A malformed-but-present response throws
+	// VoGroupDataUnusableException instead - a per-group problem, deliberately
+	// never counted toward that same breaker. A well-formed EMPTY list is a
+	// third, valid outcome - VO's own report that this group currently has
+	// zero direct members - and must be returned normally, not treated as
+	// either failure shape (revision 1 of the underlying design conflated
+	// this with failure; that's the bug this test guards against).
+
+	public function testFetchGroupMembersReturnsNullOnTransportFailure(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(fn() => null));
+
+		$this->assertNull($auth->fetchGroupMembers('123'));
+	}
+
+	public function testFetchGroupMembersReturnsWellFormedEmptyListNormally(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(fn() => []));
+
+		$this->assertSame([], $auth->fetchGroupMembers('123'));
+	}
+
+	public function testFetchGroupMembersReturnsDataForAWellFormedList(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => [['id' => '1', 'name' => 'Doe, Jane']]
+		));
+
+		$members = $auth->fetchGroupMembers('123');
+
+		$this->assertNotNull($members);
+		$this->assertEquals('1', $members[0]['id']);
+	}
+
+	public function testFetchGroupMembersThrowsOnErrorEnvelopeResponse(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => ['error' => 'Rate limited']
+		));
+
+		$this->expectException(VoGroupDataUnusableException::class);
+		$auth->fetchGroupMembers('123');
+	}
+
+	public function testFetchGroupMembersThrowsOnListMissingId(): void {
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			fn() => [['name' => 'No ID Member']]
+		));
+
+		$this->expectException(VoGroupDataUnusableException::class);
+		$auth->fetchGroupMembers('123');
+	}
+
+	public function testFetchGroupMembersUsesTheGruppeFilter(): void {
+		$capturedData = null;
+		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(
+			function ($url, $data) use (&$capturedData) {
+				$capturedData = $data;
+				return [];
+			}
+		));
+
+		$auth->fetchGroupMembers('6298');
+
+		$this->assertEquals(['filter' => 'gruppe=6298'], $capturedData);
 	}
 }

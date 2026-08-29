@@ -189,4 +189,119 @@ class VoApiContractTest extends TestCase {
 			$this->assertContains($expectedId, $groupIds, "Test member's group $expectedId should appear in the GetGroups listing");
 		}
 	}
+
+	// --- GetMembers(filter=gruppe=<id>): the direct-per-group fetch that
+	// replaced the old vo_group_ids cache-scan. Codifies the empirical
+	// findings from the redesign's own investigation into the API's actual
+	// contract, so a future VO change to any of this is caught here rather
+	// than only discovered in production. ---
+
+	public function testGetMembersWithGroupFilterReturnsTheTestMembersOwnGroup(): void {
+		$memberId = $this->resolveTestMemberId();
+		$backend = $this->createBackend();
+
+		$memberData = $backend->fetchUserDataFromVO($memberId);
+		$groupIds = array_filter(explode(',', $memberData['group_ids'] ?? ''));
+		$this->assertNotEmpty($groupIds, "Need at least one of the test member's group IDs to filter by");
+		$groupId = reset($groupIds);
+
+		$members = $backend->fetchGroupMembers($groupId);
+
+		$this->assertIsArray($members);
+		$ids = array_column($members, 'id');
+		$this->assertContains($memberId, $ids, "GetMembers(filter=gruppe=$groupId) should include the test member, a direct member of that group");
+	}
+
+	/**
+	 * A group's direct-member filter must not implicitly include members of
+	 * its descendant groups - verified this redesign's own investigation
+	 * against a real parent/child hierarchy in this org (a parent group with
+	 * zero direct members of its own, all members living in its children).
+	 * Rediscovers such a pair at runtime rather than hardcoding VO-internal
+	 * IDs, so this stays valid if the org's test data changes shape; skips
+	 * (doesn't fail) if no parent/child pair with a non-empty child
+	 * currently exists to check.
+	 */
+	public function testGetMembersWithGroupFilterDoesNotIncludeDescendantGroupMembers(): void {
+		$backend = $this->createBackend();
+		$groups = $backend->fetchAllGroups();
+		$this->assertIsArray($groups);
+
+		$childrenByParent = [];
+		foreach ($groups as $group) {
+			if (!empty($group['parentid'])) {
+				$childrenByParent[$group['parentid']][] = $group['id'];
+			}
+		}
+
+		foreach ($childrenByParent as $parentId => $childIds) {
+			$parentMembers = $backend->fetchGroupMembers($parentId);
+			$this->assertIsArray($parentMembers, "GetMembers(filter=gruppe=$parentId) should return a well-formed list, never an error envelope");
+			$parentMemberIds = array_column($parentMembers, 'id');
+
+			foreach ($childIds as $childId) {
+				$childMembers = $backend->fetchGroupMembers($childId);
+				$this->assertIsArray($childMembers);
+				if (empty($childMembers)) {
+					continue;
+				}
+
+				$overlap = array_intersect(array_column($childMembers, 'id'), $parentMemberIds);
+				$this->assertEmpty($overlap, "Parent group $parentId's direct-member filter must not include child group $childId's members: " . implode(', ', $overlap));
+				return; // Found and checked one usable pair - that's the contract this test exists to pin.
+			}
+		}
+
+		$this->markTestSkipped('No parent group with a non-empty child group currently exists in this test org to verify against.');
+	}
+
+	/**
+	 * The exact scenario the deleted_in_vo skip rule (GroupSyncService) is
+	 * built around: a filter for a group id that no longer exists in VO at
+	 * all must come back as a well-formed empty list, not an error - this is
+	 * precisely what makes that response indistinguishable from "this group
+	 * genuinely has zero members right now", and why the skip rule exists.
+	 */
+	public function testGetMembersWithNonexistentGroupIdReturnsEmptyArrayNotAnError(): void {
+		$backend = $this->createBackend();
+
+		$members = $backend->fetchGroupMembers('a_deliberately_nonexistent_group_id_zzz_999999');
+
+		$this->assertIsArray($members, 'A nonexistent group id must produce a well-formed empty list, not null/an error envelope');
+		$this->assertEmpty($members);
+	}
+
+	/**
+	 * Pins a finding from the redesign's investigation, corrected against
+	 * this test run's actual live response (an earlier draft of this test
+	 * assumed the opposite - that geloescht was never returned): GetMembers
+	 * DOES include a 'geloescht' field per member when explicitly requested
+	 * via the felder parameter, as a string ("0"/"1"), not a bool - relevant
+	 * for any future code that might want to filter by it via felder rather
+	 * than assuming VO's own deletion state isn't observable through this
+	 * endpoint. fetchGroupMembers() itself doesn't currently request felder
+	 * at all, so this doesn't affect its own contract.
+	 */
+	public function testGetMembersIncludesAGeloeschtFieldAsAStringWhenRequested(): void {
+		$memberId = $this->resolveTestMemberId();
+		$memberData = $this->createBackend()->fetchUserDataFromVO($memberId);
+		$groupIds = array_filter(explode(',', $memberData['group_ids'] ?? ''));
+		$this->assertNotEmpty($groupIds);
+		$groupId = reset($groupIds);
+
+		$apiClient = new ApiClient(\OC::$server->get(LoggerInterface::class), \OC::$server->get(IClientService::class));
+		$token = $apiClient->createToken(self::$env['api_username'], self::$env['api_password']);
+		$result = $apiClient->makeRequest(
+			rtrim(self::$env['url'], '/') . '/?api=GetMembers',
+			['filter' => "gruppe=$groupId", 'felder' => 'id,name,geloescht'],
+			$token
+		);
+
+		$this->assertIsArray($result);
+		$this->assertNotEmpty($result);
+		foreach ($result as $member) {
+			$this->assertArrayHasKey('geloescht', $member, 'An explicitly felder-requested geloescht field should be present');
+			$this->assertIsString($member['geloescht'], 'geloescht comes back as a string ("0"/"1"), not a native bool - relevant to any future code parsing it');
+		}
+	}
 }

@@ -1898,7 +1898,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (groups.length === 0) {
             const row = document.createElement('tr');
-            row.innerHTML = `<td colspan="10" style="text-align: center; padding: 20px;">${escapeHtml(t('user_vo', 'No groups found.'))}</td>`;
+            row.innerHTML = `<td colspan="12" style="text-align: center; padding: 20px;">${escapeHtml(t('user_vo', 'No groups found.'))}</td>`;
             groupsList.appendChild(row);
             return;
         }
@@ -1935,6 +1935,14 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!isPlaceholder && group.member_count !== null && group.member_count !== undefined) {
                 voMemberCountDisplay = (group.vo_member_count || 0).toString();
                 nonVoMemberCountDisplay = (group.non_vo_member_count || 0).toString();
+            }
+            // VO's own reported total for this group, independent of whether those
+            // members have NC accounts yet - can differ from vo_member_count above
+            // (which only counts current NC group members with the VO backend).
+            // Populated separately from member_count, so checked on its own.
+            let voGroupSizeDisplay = '-';
+            if (!isPlaceholder && group.vo_group_size !== null && group.vo_group_size !== undefined) {
+                voGroupSizeDisplay = group.vo_group_size.toString();
             }
 
             // Build indented group name with visual indicator
@@ -2011,6 +2019,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td><span class="vo-text-muted">—</span></td>
                     <td><span class="vo-text-muted">—</span></td>
                     <td><span class="vo-text-muted">—</span></td>
+                    <td><span class="vo-text-muted">—</span></td>
                 `;
             } else {
                 row.innerHTML = `
@@ -2023,6 +2032,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td>${renderGroupStatusBadge(group)}${renderStaleBadge(group)}</td>
                     <td>${escapeHtml(voMemberCountDisplay)}</td>
                     <td>${escapeHtml(nonVoMemberCountDisplay)}</td>
+                    <td title="${escapeHtml(t('user_vo', 'Total members VO reports for this group, including any not yet linked to an NC account'))}">${escapeHtml(voGroupSizeDisplay)}</td>
                     <td>${escapeHtml(formatDateTime(group.last_synced))}</td>
                     <td>${renderGroupActions(group)}</td>
                 `;

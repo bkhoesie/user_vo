@@ -282,6 +282,12 @@ class UserProvisioningService {
             $groupsSynced = 0;
             $groupsFailed = 0;
             $groupSyncError = null;
+            // Distinct from a per-group failure: VO looked unavailable partway
+            // through this user's own group batch - bulkCreateAccounts() uses
+            // this to stop attempting group sync for remaining users in the
+            // same run, rather than re-discovering the same outage once per
+            // user via its own fresh 2-strike breaker.
+            $groupSyncStoppedEarly = false;
 
             try {
                 $voGroupIds = !empty($memberData['group_ids'])
@@ -295,6 +301,7 @@ class UserProvisioningService {
                     if ($result['success']) {
                         $groupsSynced = $result['synced'] ?? 0;
                         $groupsFailed = $result['failed'] ?? 0;
+                        $groupSyncStoppedEarly = $result['stopped_early'] ?? false;
 
                         $this->logger->info('Synced groups during pre-provisioning', [
                             'app' => 'user_vo',
@@ -333,7 +340,8 @@ class UserProvisioningService {
                 'message' => "Account '$ncUsername' created successfully",
                 'groups_synced' => $groupsSynced,
                 'groups_failed' => $groupsFailed,
-                'group_sync_error' => $groupSyncError
+                'group_sync_error' => $groupSyncError,
+                'group_sync_stopped_early' => $groupSyncStoppedEarly
             ];
 
         } catch (\Exception $e) {
@@ -392,6 +400,23 @@ class UserProvisioningService {
                     'vo_user_id' => $voUserId,
                     'error' => $result['error'] ?? 'Unknown error'
                 ];
+            }
+
+            if (!empty($result['group_sync_stopped_early'])) {
+                // VO looked unavailable partway through this user's own group
+                // sync - every remaining user's own createAccountFromVO() call
+                // would very likely fail identically (it starts with its own
+                // VO API call, fetchUserDataFromVO()), so stop the whole batch
+                // here rather than grinding through each remaining id only to
+                // rediscover the same outage. Matches how the other batch
+                // callers (the sweep job, syncAllManagedGroups(), bulk group
+                // creation) all respond to this signal - stop the batch, don't
+                // degrade to a partial per-item fallback. Any account not
+                // reached this run is simply provisioned on a later attempt.
+                $this->logger->warning('Bulk account provisioning: stopping early - VO API appears unavailable', [
+                    'app' => 'user_vo',
+                ]);
+                break;
             }
         }
 

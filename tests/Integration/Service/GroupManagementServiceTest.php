@@ -166,6 +166,7 @@ class GroupManagementServiceTest extends TestCase {
 		$backend->method('fetchAllGroups')->willReturn([
 			['id' => 'test_dirty_after_create', 'name' => 'Test Dirty After Create', 'parentid' => null, 'pos' => 1],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$result = $this->service->createGroup('test_dirty_after_create', $backend);
 		$this->assertTrue($result['success'], $result['error'] ?? '');
@@ -991,6 +992,7 @@ class GroupManagementServiceTest extends TestCase {
 				'pos' => 2
 			]
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$result = $this->service->bulkCreateGroups(['test_bulk_sync1', 'test_bulk_sync2'], $backend);
 
@@ -1045,6 +1047,38 @@ class GroupManagementServiceTest extends TestCase {
 
 		// Verify skipped group ID
 		$this->assertEquals('test_existing_bulk', $result['skipped'][0]['vo_group_id']);
+	}
+
+	/**
+	 * The auto-sync breaker inside bulkCreateGroups() must stop spending a
+	 * live VO call on every remaining group's auto-sync after 2 consecutive
+	 * VO-unavailable (503) results - each group is still created either way
+	 * (a local, non-VO operation), only the auto-sync attempt is skipped.
+	 */
+	public function testBulkCreateGroupsSkipsAutoSyncAfterTwoConsecutiveApiUnavailableFailures(): void {
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->getMock();
+
+		$voGroupIds = ['test_bulk_breaker1', 'test_bulk_breaker2', 'test_bulk_breaker3'];
+		$backend->method('fetchAllGroups')->willReturn(array_map(
+			fn ($id) => ['id' => $id, 'name' => 'Bulk Breaker ' . $id, 'parentid' => null, 'pos' => 1],
+			$voGroupIds
+		));
+		// Transport-level failure for every group's auto-sync attempt.
+		$backend->method('fetchGroupMembers')->willReturn(null);
+
+		$result = $this->service->bulkCreateGroups($voGroupIds, $backend);
+
+		$this->assertCount(3, $result['created'], 'All three groups must still be created - only their auto-sync is affected');
+		$this->assertFalse($result['created'][0]['synced']);
+		$this->assertFalse($result['created'][1]['synced']);
+		$this->assertFalse($result['created'][2]['synced']);
+		$this->assertStringContainsString(
+			'Skipped',
+			$result['created'][2]['sync_error'],
+			'The 3rd group must be skipped by the breaker rather than genuinely attempted and failed'
+		);
 	}
 
 	/**

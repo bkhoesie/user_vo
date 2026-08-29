@@ -18,6 +18,7 @@ use OCA\UserVO\Service\ApiClient;
 use OCA\UserVO\Service\AuditLogService;
 use OCA\UserVO\Service\ConfigService;
 use OCA\UserVO\Service\GroupSyncLedgerService;
+use OCA\UserVO\Service\Exception\VoGroupDataUnusableException;
 
 class UserVOAuth extends Base {
     /** Fresh cache lifetime for fetchAllGroups(allowCached: true). */
@@ -275,6 +276,48 @@ class UserVOAuth extends Base {
         }
 
         return $listResponse;
+    }
+
+    /**
+     * Fetch the direct members of a single VO group via GetMembers' `gruppe=<id>`
+     * filter - VO's own ground truth for that group's membership, independent of
+     * any NC user's own sync state. Verified against the real production API:
+     * only returns members explicitly/directly assigned to this exact group id -
+     * no hierarchy expansion to/from parent or child groups.
+     *
+     * @param string $voGroupId
+     * @return array|null Null only on a transport/HTTP-level failure (network
+     *     error, auth failure, non-200, non-array JSON) - genuinely transient
+     *     and plausibly VO-wide; callers convert this into VoApiUnavailableException.
+     *     A well-formed empty array ([]) is a real, trusted result (VO reports
+     *     zero direct members for this group right now), not a failure.
+     * @throws VoGroupDataUnusableException When VO responds (HTTP 200) with a
+     *     payload that isn't a real member list for this specific group - an
+     *     error envelope scoped to this one filtered request, not evidence VO
+     *     itself is unreachable. Deliberately a different signal than a null
+     *     return, so a group that permanently produces this response can never
+     *     be mistaken for a VO-wide outage by a circuit breaker.
+     */
+    public function fetchGroupMembers(string $voGroupId): ?array {
+        $token = 'A/' . $this->username . '/' . md5($this->password);
+        $url = $this->apiUrl . "/?api=GetMembers";
+        $response = $this->makeRequest($url, ['filter' => "gruppe=$voGroupId"], $token);
+
+        if ($response === null) {
+            logger('user_vo')->error("Failed to fetch group members from VO", [
+                'vo_group_id' => $voGroupId,
+                'response_shape' => self::describeUnexpectedShape($response),
+            ]);
+            return null;
+        }
+        if (!self::isWellFormedVOList($response)) {
+            logger('user_vo')->error("VO returned an unusable response for group members", [
+                'vo_group_id' => $voGroupId,
+                'response_shape' => self::describeUnexpectedShape($response),
+            ]);
+            throw new VoGroupDataUnusableException("VO returned a malformed response for group $voGroupId");
+        }
+        return $response;
     }
 
     /**
@@ -971,11 +1014,25 @@ class UserVOAuth extends Base {
     /**
      * Sync user's group memberships at login time
      *
-     * Performs full sync (metadata + membership) for all managed VO groups that this user
-     * is or was a member of. This ensures:
+     * Performs full sync (metadata + membership) only for managed VO groups
+     * whose membership actually changed for this user - not every group they
+     * currently belong to. Group sync now costs a live VO API call per group
+     * (fetchGroupMembers()), so re-syncing every unchanged group on every
+     * login/session-revalidation (which reaches this same code path) would be
+     * a sustained, unbounded rate of VO calls for zero benefit in the
+     * overwhelming common case where nothing changed. This ensures:
      * - User is added to groups they should be in (after login vo_group_ids)
      * - User is removed from groups they shouldn't be in anymore (comparing NC membership)
      * - Group metadata is updated (display names, sync timestamps, member counts)
+     *   for exactly the groups synced this call - an unchanged group's
+     *   metadata simply goes stale until the next nightly/sweep/manual sync,
+     *   same as its membership would.
+     *
+     * $oldVoGroupIds is derived from the user's *actual current NC group
+     * memberships* (not a cached VO snapshot) specifically so a manually
+     * added/removed NC group membership for this user still self-heals on
+     * their next login - diffing against a cached value instead would
+     * silently break that property.
      *
      * @param string $uid NC username
      * @param array $voUserData User data from VO API
@@ -1013,11 +1070,19 @@ class UserVOAuth extends Base {
                 $oldVoGroupIds = array_map(fn($r) => $r['vo_group_id'], $rows);
             }
 
-            // Combine: sync all groups user is/was in (union of old and new)
-            $allGroupIdsToSync = array_unique(array_merge($oldVoGroupIds, $newVoGroupIds));
+            // Only groups whose membership for THIS user actually changed -
+            // not the full union of every group they're/were in. Each synced
+            // group ID still triggers a full reconciliation for that group
+            // (not just this user's own status), so a group unchanged for
+            // this user but changed for someone else is still correctly
+            // caught by that other user's own login, or by the
+            // nightly/sweep triggers - never this login event's job.
+            $addedGroupIds = array_diff($newVoGroupIds, $oldVoGroupIds);
+            $removedGroupIds = array_diff($oldVoGroupIds, $newVoGroupIds);
+            $changedGroupIds = array_unique(array_merge($addedGroupIds, $removedGroupIds));
 
-            if (empty($allGroupIdsToSync)) {
-                logger('user_vo')->debug("User has no VO groups to sync (old or new), skipping login-time group sync", [
+            if (empty($changedGroupIds)) {
+                logger('user_vo')->debug("No VO group membership changes for this user, skipping login-time group sync", [
                     'uid' => $uid
                 ]);
                 return;
@@ -1027,7 +1092,7 @@ class UserVOAuth extends Base {
             $groupSyncService = \OC::$server->get(\OCA\UserVO\Service\GroupSyncService::class);
             // Never block a login on group-sync lock contention - skip a
             // group this time if another sync already holds its lease.
-            $result = $groupSyncService->syncGroupsByIds($allGroupIdsToSync, $this, nonBlocking: true);
+            $result = $groupSyncService->syncGroupsByIds($changedGroupIds, $this, nonBlocking: true);
 
             if ($result['success']) {
                 logger('user_vo')->info("Login-time group sync completed", [
@@ -1035,7 +1100,11 @@ class UserVOAuth extends Base {
                     'synced' => $result['synced'],
                     'failed' => $result['failed'],
                     'skipped' => $result['skipped'],
-                    'total_groups' => count($allGroupIdsToSync),
+                    // stopped_early: VO looked unavailable partway through this
+                    // batch - some of $changedGroupIds may not have been
+                    // attempted at all, distinct from a per-group failure.
+                    'stopped_early' => $result['stopped_early'] ?? false,
+                    'changed_groups' => count($changedGroupIds),
                     'old_groups' => count($oldVoGroupIds),
                     'new_groups' => count($newVoGroupIds)
                 ]);

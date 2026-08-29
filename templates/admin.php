@@ -393,6 +393,7 @@ style('user_vo', 'admin');
                         <th><?php p($l->t('Status')); ?></th>
                         <th><?php p($l->t('VO Members')); ?></th>
                         <th><?php p($l->t('Non-VO Members')); ?></th>
+                        <th title="<?php p($l->t('Total members VO reports for this group, including any not yet linked to an NC account')); ?>"><?php p($l->t('VO Reports')); ?></th>
                         <th><?php p($l->t('Last Synced')); ?></th>
                         <th><?php p($l->t('Actions')); ?></th>
                     </tr>

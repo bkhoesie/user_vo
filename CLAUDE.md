@@ -497,9 +497,11 @@ membership actually changed for *someone*; login-triggered sync only touches gro
 currently-logging-in user belongs to. A group with no active members, or whose membership simply
 hasn't changed even though its members log in constantly, is invisible to both - its metadata
 (display name, VO hierarchy/position) and membership would drift indefinitely without this
-periodic, unconditional resync of every managed group. Group sync also depends on user sync having
-refreshed `vo_group_ids` first, so enabling only the group toggle has limited value on its own.
-Enable both for full coverage.
+periodic, unconditional resync of every managed group. Group sync fetches each group's membership
+directly from VO and no longer depends on user sync having refreshed `vo_group_ids` first, so
+enabling only the group toggle is meaningful on its own now - but user sync still needs to run
+too, for the (unrelated) reasons covered elsewhere: display name/email/photo sync, and keeping
+`vo_group_ids` fresh for the ledger's own dirty-marking trigger.
 
 ### Background Job Management
 
@@ -510,31 +512,74 @@ The nightly sync is implemented as a Nextcloud background job (`lib/Cron/SyncUse
 - Stores execution tracking in app config (no additional database tables)
 - Handles errors gracefully and logs detailed information
 
+### Group Membership Sync: direct VO fetch, not a cached-column scan
+
+Group membership sync (`GroupSyncService::syncSingleGroupFullLocked()`) determines a managed
+group's expected members by calling VereinOnline directly per group -
+`GetMembers(filter: "gruppe=<vo_group_id>")` (`UserVOAuth::fetchGroupMembers()`) - VO's own ground
+truth, resolved to NC uids via the indexed `vo_user_id` column. It does **not** read the per-user
+cached `vo_group_ids` column for this (that column is still written on login/user-sync and still
+drives the ledger's dirty-marking below, just no longer trusted as the *membership* source).
+Group correctness therefore no longer depends on any individual user's sync recency.
+
+**Two failure signals, deliberately not conflated:**
+- `VoApiUnavailableException` - a transport/HTTP-level failure (VO plausibly unreachable). The
+  only signal a batch sync's circuit breaker (`ConsecutiveFailureBreaker`, shared by the sweep
+  job, `syncAllManagedGroups()`, bulk group creation, and the two blocking `syncGroupsByIds()`
+  callers) counts toward stopping early - 2 consecutive occurrences trips it. The login path
+  (always non-blocking) breaks on the very first occurrence instead, since it's small and
+  latency-sensitive.
+- `VoGroupDataUnusableException` - VO answered but with an unusable payload for one specific
+  group's filtered query (e.g. an error envelope). Never counted toward the breaker: a group that
+  permanently produces this response must not be mistaken for a VO-wide outage and abort an
+  otherwise-healthy batch run.
+
+**`deleted_in_vo` groups are skipped entirely on live sync paths**, not reconciled: verified
+against the real API, `GetMembers` for a VO id that no longer exists returns a well-formed `[]`,
+indistinguishable by itself from "this group genuinely has zero members right now" - trusting it
+would silently wipe real membership for a group that's merely gone from VO's own listing. The
+login path (which can never reliably detect a *new* deletion, since its group listing may be
+cached) instead treats **any** empty result as untrusted and defers to a later live sync, rather
+than consulting `deleted_in_vo` at all.
+
+**New column `vo_group_size`**: VO's own reported member count for a group, distinct from the
+existing `vo_member_count` (an NC-side count of *current NC group members* with the VO backend) -
+they diverge whenever a VO group member has never logged into NC.
+
 ### Group Sync Ledger and Sweep
 
 A per-group dirty/clean sequence ledger (`dirty_seq`/`clean_seq` columns on `user_vo_groups`,
-managed by `GroupSyncLedgerService`) closes a race the per-group sync lease alone doesn't: a
-user's own VO-metadata write isn't synchronized with a concurrent full group sync's read of VO
-membership for that group, so a write landing in that window could otherwise be silently lost
-until the next full sync of that group.
+managed by `GroupSyncLedgerService`) is now purely a scheduling trigger - "VO reported a
+membership change for someone, this group is worth resyncing soon" - not a race-prevention
+mechanism. (It originally also closed a read/write race against the cached `vo_group_ids` column;
+since group sync no longer reads that column at all, that specific race no longer exists - see
+`GroupSyncLedgerService`'s class doc-comment.)
 
 - **Writer side**: `UserVOAuth::updateVOMetadata()` marks the symmetric difference of a user's old
   and new VO group IDs dirty, in the same transaction as the metadata write itself - only groups
-  whose membership actually changed, not every group the user belongs to.
+  whose membership actually changed, not every group the user belongs to. The login path also
+  explicitly re-dirties a group itself when its own empty-result-distrust rule (above) skips
+  reconciling it, since a VO-side no-op wouldn't otherwise mark it dirty on its own.
 - **Reader side**: `GroupSyncService::syncSingleGroupFullLocked()` captures `dirty_seq` right
-  after acquiring the group's sync lease (before reading VO membership), and advances
+  after acquiring the group's sync lease (before the live membership fetch), and advances
   `clean_seq` to that value on successful completion - but only if the lease is still held by
-  the same token, so a sync whose lease was reassigned mid-body can't falsely claim clean.
+  the same token (a sync whose lease was reassigned mid-body can't falsely claim clean), and never
+  on the login path (`$mayAdvanceClean`), since a login's fetch may race a slower-propagating VO
+  read that a later live sync should still get the chance to confirm.
 - **Sweep job**: `lib/Cron/GroupSyncSweepJob.php` runs every 5 minutes (`enable_group_sync_sweep`
   config key, default enabled), resyncing any group where `dirty_seq > clean_seq` through the
   same lease-protected `syncSingleGroupById()` entry point every other caller uses. Costs one
-  indexed query and nothing else when nothing is dirty - no backend built, no VO API call.
+  indexed query and nothing else when nothing is dirty - no backend built, no VO API call. Ordered
+  by `last_sync_attempt_at ASC` (stamped on every attempt, success or failure - not `last_synced`,
+  which only advances on success), specifically so a permanently-failing group can't camp at the
+  head of every batch and starve the rest.
 - **Backfill**: `Migration/ForceInitialGroupSweep` (a post-migration repair step) marks every
   pre-existing managed group dirty once on upgrade, so drift that predates the ledger gets
   repaired too, not just drift from then on.
 
-See `GroupSyncLedgerService`'s class doc-comment and the `Version1005Date20260803000000`
-migration for the full interleaving argument.
+See `GroupSyncLedgerService`'s class doc-comment for the full current design, and the
+`Version1005Date20260803000000` migration for the original interleaving argument that motivated
+the ledger (a historical record - group sync no longer reads the column that race was about).
 
 ## Audit Log
 

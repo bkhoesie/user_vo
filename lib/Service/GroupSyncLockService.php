@@ -27,9 +27,11 @@ use OCP\IDBConnection;
  *
  * The default lease is deliberately generous (see LEASE_SECONDS) rather than
  * tight, since a too-short lease is what creates the overrun scenario above
- * in the first place - there's no VO network I/O under the lock, but a
- * large group's auto-sync-after-creation can still do one NC group-API call
- * per member.
+ * in the first place. VO network I/O *does* now happen under the lock - one
+ * fetchGroupMembers() call per sync (~0.2s typical, up to ~15s worst case,
+ * see ApiClient's timeout) - a change from this service's original design,
+ * but still comfortably inside a 300s lease alongside the one NC group-API
+ * call per member a large group's auto-sync-after-creation can also do.
  *
  * Assumes the group's row in user_vo_groups already exists - true for every
  * current caller, which all look the group up from that table first.
