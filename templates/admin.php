@@ -191,7 +191,7 @@ style('user_vo', 'admin');
 
         <div class="vo-notice">
             <span class="icon icon-info"></span>
-            <?php p($l->t('Group sync updates group metadata (name, hierarchy) and fetches each group\'s membership live from VereinOnline. It can only add a VereinOnline member to a group if they already have a Nextcloud account - a member who has never logged in and was never synced has no account yet to add. Run a user sync first (or use "Full Resync" below) to create accounts for new members, then sync the affected group(s).')); ?>
+            <?php p($l->t('Group sync updates group metadata (name, hierarchy) and fetches each group\'s membership live from VereinOnline - it does not depend on a prior user sync. It can only add a VereinOnline member to a group if they already have a Nextcloud account, though: accounts are created only by a member\'s own first login or by pre-provisioning them below, never by a sync. Pre-provision (or wait for their first login), then sync the affected group(s).')); ?>
         </div>
 
         <h4><?php p($l->t('Sync Options')); ?></h4>
