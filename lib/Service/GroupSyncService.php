@@ -144,7 +144,7 @@ class GroupSyncService {
 
             // Fetch all VO groups to build the group map (needed for metadata sync).
             // Login-time (non-blocking) callers may get a short-lived cached result.
-            // Membership no longer depends on this listing at all (it comes from a
+            // Membership doesn't depend on this listing at all (it comes from a
             // separate, always-live fetchGroupMembers() call per group) - this map
             // is used only for cosmetic metadata (display name, hierarchy) and for
             // $mayDetectDeletion's live-vs-cached distinction, so a stale metadata
@@ -882,28 +882,14 @@ class GroupSyncService {
             }
 
             if (!$mayDetectDeletion && empty($voMembers)) {
-                // Login path only (mayDetectDeletion is false only there).
-                // The login path has weaker guarantees everywhere else
-                // already (a bounded wait budget, a possibly-cached group
-                // listing, no reliable deletion-detection) - so it gets one
-                // rule instead of several: an empty result is never
-                // actionable here, treated the same as a fetch failure.
-                // Leave membership, vo_group_size, and deleted_in_vo (never
-                // touched on this path at all) untouched.
-                //
-                // The group must be explicitly re-dirtied, not just left
-                // however dirty it already was: dirty-marking is driven
-                // exclusively by UserVOAuth::updateVOMetadata()'s own VO-side
-                // diff, a different signal than this login's NC-side diff
-                // (see UserVOAuth::syncUserGroupsOnLogin()) - they normally
-                // agree, but diverge exactly in the self-heal case that diff
-                // exists to protect (an NC-side edit VO itself never saw). If
-                // nothing about this group's VO-side state changed, nothing
-                // marked it dirty, so "leave it dirty for a later sync to
-                // confirm" would silently do nothing without this explicit
-                // call - degrading a structurally-near-empty managed group's
-                // self-heal from the sweep's <=5-minute cadence to the
-                // nightly sync's <=24h cadence.
+                // Login path only. An empty result here is untrusted, same as
+                // a fetch failure: leave membership, vo_group_size, and
+                // deleted_in_vo untouched. Explicitly re-dirty rather than
+                // rely on the usual trigger (UserVOAuth::updateVOMetadata()'s
+                // VO-side diff), which won't fire if nothing changed on VO's
+                // side - exactly the self-heal case (an NC-side edit VO never
+                // saw) this call protects from degrading to the nightly
+                // sync's cadence.
                 $this->ledgerService->markDirty([$voGroupId]);
 
                 $updateQb->executeStatement();

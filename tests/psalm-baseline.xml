@@ -265,9 +265,6 @@
     </UndefinedFunction>
   </file>
   <file src="lib/Service/GroupManagementService.php">
-    <DeprecatedMethod>
-      <code><![CDATA[getAppValue]]></code>
-    </DeprecatedMethod>
     <MissingDependency>
       <code><![CDATA[UserVOAuth]]></code>
       <code><![CDATA[UserVOAuth]]></code>

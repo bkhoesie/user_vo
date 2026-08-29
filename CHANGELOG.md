@@ -8,10 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- "Full Resync" button (users, then groups, in the right order) on a new admin overview section,
-  with an explanation of why group sync alone can miss new VereinOnline group members
-- Managed groups now show a "Possibly stale" badge when a user sync has completed since the
-  group's own membership was last confirmed
+- "Full Resync" button on a new admin overview section, syncing users and groups in one click
 - Managed groups now show VereinOnline's own reported member count ("VO Reports" column),
   independent of how many of those members have ever logged into Nextcloud
 

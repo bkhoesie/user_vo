@@ -549,11 +549,8 @@ they diverge whenever a VO group member has never logged into NC.
 ### Group Sync Ledger and Sweep
 
 A per-group dirty/clean sequence ledger (`dirty_seq`/`clean_seq` columns on `user_vo_groups`,
-managed by `GroupSyncLedgerService`) is now purely a scheduling trigger - "VO reported a
-membership change for someone, this group is worth resyncing soon" - not a race-prevention
-mechanism. (It originally also closed a read/write race against the cached `vo_group_ids` column;
-since group sync no longer reads that column at all, that specific race no longer exists - see
-`GroupSyncLedgerService`'s class doc-comment.)
+managed by `GroupSyncLedgerService`) is a pure scheduling trigger - "VO reported a membership
+change for someone, this group is worth resyncing soon."
 
 - **Writer side**: `UserVOAuth::updateVOMetadata()` marks the symmetric difference of a user's old
   and new VO group IDs dirty, in the same transaction as the metadata write itself - only groups
@@ -577,9 +574,7 @@ since group sync no longer reads that column at all, that specific race no longe
   pre-existing managed group dirty once on upgrade, so drift that predates the ledger gets
   repaired too, not just drift from then on.
 
-See `GroupSyncLedgerService`'s class doc-comment for the full current design, and the
-`Version1005Date20260803000000` migration for the original interleaving argument that motivated
-the ledger (a historical record - group sync no longer reads the column that race was about).
+See `GroupSyncLedgerService`'s class doc-comment for the full design.
 
 ## Audit Log
 

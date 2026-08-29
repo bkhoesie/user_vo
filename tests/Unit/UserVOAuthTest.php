@@ -351,16 +351,15 @@ class UserVOAuthTest extends TestCase {
 
 	// --- fetchGroupMembers() ---
 	//
-	// Split failure handling (see the plan/CLAUDE.md's "Group Membership
-	// Sync" section): a transport/HTTP-level failure (null from makeRequest())
+	// Split failure handling (see CLAUDE.md's "Group Membership Sync"
+	// section): a transport/HTTP-level failure (null from makeRequest())
 	// returns null - the ONLY signal circuit breakers upstream treat as
 	// "VO looks unreachable". A malformed-but-present response throws
 	// VoGroupDataUnusableException instead - a per-group problem, deliberately
 	// never counted toward that same breaker. A well-formed EMPTY list is a
 	// third, valid outcome - VO's own report that this group currently has
 	// zero direct members - and must be returned normally, not treated as
-	// either failure shape (revision 1 of the underlying design conflated
-	// this with failure; that's the bug this test guards against).
+	// either failure shape.
 
 	public function testFetchGroupMembersReturnsNullOnTransportFailure(): void {
 		$auth = $this->createAuthWithMockedApiClient($this->mockApiClient(fn() => null));

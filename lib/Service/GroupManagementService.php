@@ -53,33 +53,6 @@ class GroupManagementService {
     }
 
     /**
-     * A group's membership is only as fresh as the last full user sync
-     * (vo_group_ids is a per-user cache that only a user sync refreshes,
-     * never a group sync). A group whose last_synced predates that hasn't
-     * been re-checked against the freshest data yet - not "wrong", just
-     * not yet confirmed. No last_synced at all is always stale.
-     *
-     * $lastSynced (DATETIME, via strtotime()) and last_full_user_sync_at
-     * (unix timestamp) are comparable because NC pins UTC and both
-     * last_synced writers emit naive UTC datetimes.
-     */
-    private function isPossiblyStale(?string $lastSynced): bool {
-        $lastFullUserSyncAt = $this->config->getAppValue('user_vo', 'last_full_user_sync_at', '');
-        if ($lastFullUserSyncAt === '') {
-            // No full user sync has ever completed - nothing to compare
-            // against, so don't flag every single group as stale on a
-            // fresh install before the first sync has even had a chance to
-            // run.
-            return false;
-        }
-        if ($lastSynced === null) {
-            return true;
-        }
-        $lastSyncedTimestamp = strtotime($lastSynced);
-        return $lastSyncedTimestamp === false || $lastSyncedTimestamp < (int)$lastFullUserSyncAt;
-    }
-
-    /**
      * Fetch all groups from VereinOnline with managed status
      *
      * @param UserVOAuth $backend Backend instance for API access
@@ -223,7 +196,6 @@ class GroupManagementService {
                     'vo_member_count' => $isManaged ? (int)$dbRow['vo_member_count'] : null,
                     'non_vo_member_count' => $isManaged ? (int)$dbRow['non_vo_member_count'] : null,
                     'vo_group_size' => ($isManaged && $dbRow['vo_group_size'] !== null) ? (int)$dbRow['vo_group_size'] : null,
-                    'possibly_stale' => $isManaged ? $this->isPossiblyStale($dbRow['last_synced']) : false,
                     'backend_conflict' => $backendConflict,
                     'conflicting_backends' => $conflictingBackends,
                 ];
@@ -339,7 +311,6 @@ class GroupManagementService {
                     'vo_member_count' => (int)$group['vo_member_count'],
                     'non_vo_member_count' => (int)$group['non_vo_member_count'],
                     'vo_group_size' => $group['vo_group_size'] !== null ? (int)$group['vo_group_size'] : null,
-                    'possibly_stale' => $this->isPossiblyStale($group['last_synced']),
                     'is_managed' => true,  // All groups from this endpoint are managed
                     // A tracking row whose NC group is gone - e.g. an admin
                     // deleted it directly via NC's own UI and
@@ -413,10 +384,9 @@ class GroupManagementService {
             }
         }
 
-        // Auto-syncing a newly-created group below now costs one live VO API
-        // call (fetchGroupMembers()), not the ~free DB scan it used to be - a
-        // VO outage during a large bulk-create shouldn't wait
-        // (group count) x up to 15s with no early exit.
+        // Auto-syncing a newly-created group below costs one live VO API call
+        // (fetchGroupMembers()) - a VO outage during a large bulk-create
+        // shouldn't wait (group count) x up to 15s with no early exit.
         $breaker = new ConsecutiveFailureBreaker();
         $skipAutoSync = false;
 

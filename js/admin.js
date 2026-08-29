@@ -131,16 +131,6 @@ function renderGroupStatusBadge(group) {
     return '<span class="vo-badge vo-badge-warning">' + escapeHtml(t('user_vo', 'Not created')) + '</span>';
 }
 
-// See GroupManagementService::isPossiblyStale(). Shown alongside the status
-// badge, not instead of it - "not yet re-checked", not a problem.
-function renderStaleBadge(group) {
-    if (!group.possibly_stale) {
-        return '';
-    }
-    const tooltipText = t('user_vo', 'A user sync has completed since this group\'s membership was last confirmed - its member list may not reflect the latest VereinOnline data yet. Run a user sync, then sync this group again.');
-    return ' <span class="vo-badge vo-badge-warning" title="' + escapeHtml(tooltipText) + '">⚠ ' + escapeHtml(t('user_vo', 'Possibly stale')) + '</span>';
-}
-
 // Helper function to render group actions
 function renderGroupActions(group) {
     if (group.nc_group_missing) {
@@ -398,7 +388,6 @@ if (typeof module !== 'undefined' && module.exports) {
         generateSyncSummaryHTML,
         generatePhotoErrorsHTML,
         renderGroupStatusBadge,
-        renderStaleBadge,
         renderGroupActions,
         addPlaceholdersForMissingParents,
         sortGroupsHierarchically,
@@ -1337,11 +1326,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Mutual exclusion between Full Resync, Sync All Users, and Sync All
-    // Groups (plus their shortcuts) - running a user sync and a group sync
-    // at the same time can make last_full_user_sync_at land after some
-    // groups' own last_synced, producing a misleading staleness result.
-    // Does not cover "Sync Selected Groups" or per-row sync buttons, or the
-    // nightly cron/sweep - only the actions a single admin triggers here.
+    // Groups (plus their shortcuts) - avoids overlapping admin-triggered
+    // syncs. Does not cover "Sync Selected Groups" or per-row sync buttons,
+    // or the nightly cron/sweep.
     function setSyncActionsBusy(busy) {
         ['full-resync', 'sync-all-users', 'sync-all-groups', 'sync-all-users-shortcut', 'sync-all-groups-shortcut'].forEach(function(id) {
             const el = document.getElementById(id);
@@ -1351,11 +1338,10 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Full Resync: users first, then groups - group sync alone only
-    // reconciles against each user's already-cached VO group list, it never
-    // refreshes that cache. A self-contained request chain rather than
-    // reusing the other two buttons' handlers, which also drive their own
-    // results tables that this top-level action doesn't need to manage.
+    // Full Resync: a one-click convenience for both sync actions. A
+    // self-contained request chain rather than reusing the other two
+    // buttons' handlers, which also drive their own results tables that
+    // this top-level action doesn't need to manage.
     const fullResyncButton = document.getElementById('full-resync');
     const fullResyncStatus = document.getElementById('full-resync-status');
     if (fullResyncButton) {
@@ -2029,7 +2015,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td>${escapeHtml(group.vo_group_id)}</td>
                     <td>${escapeHtml(group.nc_display_name || '-')}</td>
                     <td>${escapeHtml(group.nc_group_id || '-')}</td>
-                    <td>${renderGroupStatusBadge(group)}${renderStaleBadge(group)}</td>
+                    <td>${renderGroupStatusBadge(group)}</td>
                     <td>${escapeHtml(voMemberCountDisplay)}</td>
                     <td>${escapeHtml(nonVoMemberCountDisplay)}</td>
                     <td title="${escapeHtml(t('user_vo', 'Total members VO reports for this group, including any not yet linked to an NC account'))}">${escapeHtml(voGroupSizeDisplay)}</td>

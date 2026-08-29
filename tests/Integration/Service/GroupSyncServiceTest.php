@@ -959,17 +959,15 @@ class GroupSyncServiceTest extends TestCase {
 	}
 
 	/**
-	 * Headline regression test for the dirty/clean ledger's core guarantee,
-	 * re-aimed for the direct-fetch membership design (this used to drive the
-	 * race via a concurrent write to the now-unused vo_group_ids column - see
-	 * git history for the pre-redesign version). syncSingleGroupFullLocked()
-	 * captures seqAtStart right after acquiring the group's lease, before its
-	 * own live membership fetch. If VO reports a change affecting this same
-	 * group for a *different* user while this sync is still in flight (that
-	 * user's own login dirty-marking the group), this sync's own snapshot -
-	 * already read before that new mark landed - must not claim clean past
-	 * it: the group must end dirty, not falsely clean, so the sweep picks up
-	 * what this sync's own fetch could have missed.
+	 * Headline regression test for the dirty/clean ledger's core guarantee.
+	 * syncSingleGroupFullLocked() captures seqAtStart right after acquiring
+	 * the group's lease, before its own live membership fetch. If VO reports
+	 * a change affecting this same group for a *different* user while this
+	 * sync is still in flight (that user's own login dirty-marking the
+	 * group), this sync's own snapshot - already read before that new mark
+	 * landed - must not claim clean past it: the group must end dirty, not
+	 * falsely clean, so the sweep picks up what this sync's own fetch could
+	 * have missed.
 	 *
 	 * PHPUnit can't run genuinely concurrent syncs (same caveat as
 	 * testNonBlockingSyncNeverMutatesMembershipWhileGroupIsLocked above), so
@@ -1316,9 +1314,8 @@ class GroupSyncServiceTest extends TestCase {
 	 * The login path never consults deleted_in_vo at all (neither reading
 	 * nor writing it) - it always calls fetchGroupMembers(), and an empty
 	 * result is then handled by the general empty-distrust rule, not by
-	 * deletion detection. This is the structural fix for round 6's blocker:
-	 * the login path's decision must not depend on cache freshness or flag
-	 * timing at all.
+	 * deletion detection. Its decision must not depend on cache freshness or
+	 * flag timing at all.
 	 */
 	public function testLoginSyncOfAlreadyDeletedGroupStillCallsFetchGroupMembers(): void {
 		$voGroupId = 'test_login_already_deleted';
@@ -1347,9 +1344,8 @@ class GroupSyncServiceTest extends TestCase {
 	}
 
 	/**
-	 * Regression test for round 5's original blocker, restated for the final
-	 * design: a live sync sets deleted_in_vo=1, then a login-triggered sync of
-	 * the SAME group runs next. The flag must survive - a login sync has no
+	 * A live sync sets deleted_in_vo=1, then a login-triggered sync of the
+	 * SAME group runs next. The flag must survive - a login sync has no
 	 * basis to conclude the group came back (it never even reads the flag),
 	 * so if the metadata write it performs unconditionally cleared it, the
 	 * *next* sync of any kind would wrongly treat the group as no-longer-
@@ -1602,10 +1598,10 @@ class GroupSyncServiceTest extends TestCase {
 	/**
 	 * A VoGroupDataUnusableException (a per-group data problem) must never
 	 * trip the circuit breaker, no matter how many groups produce it in the
-	 * same batch - the actual N>=2 starvation scenario round 4 found. Uses
-	 * two such groups specifically, not one, since a threshold-based fix
-	 * (rejected in favor of this exception-type discrimination) would have
-	 * passed a single-group version of this test for the wrong reason.
+	 * same batch. Uses two such groups specifically, not one, since a
+	 * threshold-based check would pass a single-group version of this test
+	 * for the wrong reason - only exception-type discrimination, not a
+	 * higher threshold, actually guarantees this.
 	 */
 	public function testSyncAllManagedGroupsNeverBreaksOnGroupDataProblems(): void {
 		$this->cleanupTestData();

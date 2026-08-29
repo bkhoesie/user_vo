@@ -8,21 +8,10 @@ use Psr\Log\LoggerInterface;
 
 /**
  * Per-group monotonic dirty/clean sequence ledger (see
- * Version1005Date20260803000000 migration for the schema and original B1
- * background).
- *
- * Originally closed a gap the sync lease (GroupSyncLockService) alone
- * couldn't: a user's own VO-metadata write to the cached vo_group_ids column
- * wasn't synchronized with a concurrent full sync's read of that same
- * column, so a write landing in that window could be silently lost until the
- * next full sync. Group sync no longer reads vo_group_ids at all - it fetches
- * each group's membership directly from VO - so that specific race is gone.
- * This ledger's role has narrowed to purely a scheduling trigger: "VO
- * reported a membership change for someone, this group is worth resyncing
- * soon" - still valuable (it's what lets GroupSyncSweepJob propagate a real
- * change within minutes instead of waiting for the next nightly sync), just
- * no longer preventing a lost write, since there's no longer a cached value
- * for a write and a read to race over.
+ * Version1005Date20260803000000 migration for the schema). A pure scheduling
+ * trigger: "VO reported a membership change for someone, this group is worth
+ * resyncing soon" - what lets GroupSyncSweepJob propagate a real change
+ * within minutes instead of waiting for the next nightly sync.
  *
  * markDirty() is called by the metadata writer (UserVOAuth::updateVOMetadata())
  * whenever a write may have changed a group's membership predicate, and (on

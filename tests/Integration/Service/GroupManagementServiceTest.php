@@ -53,12 +53,6 @@ class GroupManagementServiceTest extends TestCase {
 			$group->delete();
 		}
 
-		// Unconditional, not just in the specific tests that set it - a
-		// failed assertion partway through one of the possibly_stale tests
-		// would otherwise skip its own inline cleanup and leak a stamped
-		// value into whichever test runs next.
-		\OC::$server->get(\OCP\IConfig::class)->deleteAppValue('user_vo', 'last_full_user_sync_at');
-
 		parent::tearDown();
 	}
 
@@ -459,48 +453,6 @@ class GroupManagementServiceTest extends TestCase {
 		$this->assertFalse($newGroup['is_managed']);
 	}
 
-	/** fetchAllVOGroups() shares isPossiblyStale() with fetchManagedGroups() but reads last_synced via a different query - pins that wiring too. */
-	public function testFetchAllVOGroupsFlagsPossiblyStaleManagedGroup(): void {
-		$config = \OC::$server->get(\OCP\IConfig::class);
-		$this->createTestGroup('test_allgroups_stale', 'Stale In All Groups View', '1');
-		$this->setGroupLastSynced('test_allgroups_stale', new \DateTime('-2 hours'));
-		$config->setAppValue('user_vo', 'last_full_user_sync_at', (string)(time() - 3600));
-
-		$backend = $this->getMockBuilder(UserVOAuth::class)
-			->disableOriginalConstructor()
-			->getMock();
-		$backend->method('fetchAllGroups')->willReturn([
-			['id' => 'test_allgroups_stale', 'name' => 'Stale In All Groups View', 'parentid' => null, 'pos' => 1],
-		]);
-
-		$result = $this->service->fetchAllVOGroups($backend);
-		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_allgroups_stale'));
-		$this->assertNotFalse($group);
-		$this->assertTrue($group['possibly_stale']);
-
-		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
-	}
-
-	public function testFetchAllVOGroupsDoesNotFlagUnmanagedGroupAsPossiblyStale(): void {
-		$config = \OC::$server->get(\OCP\IConfig::class);
-		$config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
-
-		$backend = $this->getMockBuilder(UserVOAuth::class)
-			->disableOriginalConstructor()
-			->getMock();
-		$backend->method('fetchAllGroups')->willReturn([
-			['id' => 'test_allgroups_unmanaged', 'name' => 'Never Created', 'parentid' => null, 'pos' => 1],
-		]);
-
-		$result = $this->service->fetchAllVOGroups($backend);
-		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_allgroups_unmanaged'));
-		$this->assertNotFalse($group);
-		$this->assertFalse($group['is_managed']);
-		$this->assertFalse($group['possibly_stale']);
-
-		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
-	}
-
 	public function testFetchAllVOGroupsRecordsAuditLogEntryWhenVOFetchFails(): void {
 		$backend = $this->getMockBuilder(UserVOAuth::class)
 			->disableOriginalConstructor()
@@ -673,102 +625,6 @@ class GroupManagementServiceTest extends TestCase {
 		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_ncpresent'));
 		$this->assertNotFalse($group);
 		$this->assertFalse($group['nc_group_missing']);
-	}
-
-	// --- possibly_stale: has a full user sync run since this group was last confirmed? ---
-
-	public function testFetchManagedGroupsDoesNotFlagStaleWhenNoFullUserSyncHasEverRun(): void {
-		$config = \OC::$server->get(\OCP\IConfig::class);
-		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
-
-		// createTestGroup() leaves last_synced NULL - would look stale by
-		// timestamp comparison alone, but there's nothing to compare
-		// against yet (fresh install, no full sync has ever completed).
-		$this->createTestGroup('test_stale_nobaseline', 'No Baseline Yet', '1');
-
-		$backend = $this->getMockBuilder(UserVOAuth::class)
-			->disableOriginalConstructor()
-			->getMock();
-		$backend->method('fetchAllGroups')->willReturn([
-			['id' => 'test_stale_nobaseline', 'name' => 'No Baseline Yet', 'parentid' => null, 'pos' => 1],
-		]);
-
-		$result = $this->service->fetchManagedGroups($backend);
-		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_stale_nobaseline'));
-		$this->assertNotFalse($group);
-		$this->assertFalse($group['possibly_stale']);
-	}
-
-	public function testFetchManagedGroupsFlagsStaleWhenNeverSynced(): void {
-		$config = \OC::$server->get(\OCP\IConfig::class);
-		$config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
-
-		// last_synced stays NULL - this managed group has never had its
-		// membership confirmed against any VO data at all.
-		$this->createTestGroup('test_stale_neversynced', 'Never Synced', '1');
-
-		$backend = $this->getMockBuilder(UserVOAuth::class)
-			->disableOriginalConstructor()
-			->getMock();
-		$backend->method('fetchAllGroups')->willReturn([
-			['id' => 'test_stale_neversynced', 'name' => 'Never Synced', 'parentid' => null, 'pos' => 1],
-		]);
-
-		$result = $this->service->fetchManagedGroups($backend);
-		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_stale_neversynced'));
-		$this->assertNotFalse($group);
-		$this->assertTrue($group['possibly_stale']);
-
-		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
-	}
-
-	public function testFetchManagedGroupsFlagsStaleWhenLastSyncedPredatesFullUserSync(): void {
-		$config = \OC::$server->get(\OCP\IConfig::class);
-		$this->createTestGroup('test_stale_predates', 'Predates Full Sync', '1');
-		$this->setGroupLastSynced('test_stale_predates', new \DateTime('-2 hours'));
-
-		// A full user sync completed *after* this group's own last sync -
-		// its cached membership snapshot hasn't been re-checked against
-		// that fresher data yet.
-		$config->setAppValue('user_vo', 'last_full_user_sync_at', (string)(time() - 3600));
-
-		$backend = $this->getMockBuilder(UserVOAuth::class)
-			->disableOriginalConstructor()
-			->getMock();
-		$backend->method('fetchAllGroups')->willReturn([
-			['id' => 'test_stale_predates', 'name' => 'Predates Full Sync', 'parentid' => null, 'pos' => 1],
-		]);
-
-		$result = $this->service->fetchManagedGroups($backend);
-		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_stale_predates'));
-		$this->assertNotFalse($group);
-		$this->assertTrue($group['possibly_stale']);
-
-		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
-	}
-
-	public function testFetchManagedGroupsDoesNotFlagStaleWhenLastSyncedIsAfterFullUserSync(): void {
-		$config = \OC::$server->get(\OCP\IConfig::class);
-		$this->createTestGroup('test_stale_fresh', 'Freshly Synced', '1');
-		$this->setGroupLastSynced('test_stale_fresh', new \DateTime());
-
-		// The full user sync completed *before* this group's own last
-		// sync - its membership snapshot already reflects that data.
-		$config->setAppValue('user_vo', 'last_full_user_sync_at', (string)(time() - 3600));
-
-		$backend = $this->getMockBuilder(UserVOAuth::class)
-			->disableOriginalConstructor()
-			->getMock();
-		$backend->method('fetchAllGroups')->willReturn([
-			['id' => 'test_stale_fresh', 'name' => 'Freshly Synced', 'parentid' => null, 'pos' => 1],
-		]);
-
-		$result = $this->service->fetchManagedGroups($backend);
-		$group = current(array_filter($result['groups'], fn ($g) => $g['vo_group_id'] === 'test_stale_fresh'));
-		$this->assertNotFalse($group);
-		$this->assertFalse($group['possibly_stale']);
-
-		$config->deleteAppValue('user_vo', 'last_full_user_sync_at');
 	}
 
 	/**
@@ -1157,13 +1013,5 @@ class GroupManagementServiceTest extends TestCase {
 		if ($createNcGroup) {
 			$this->groupManager->createGroup($ncGroupId);
 		}
-	}
-
-	private function setGroupLastSynced(string $voGroupId, \DateTime $lastSynced): void {
-		$qb = $this->connection->getQueryBuilder();
-		$qb->update('user_vo_groups')
-			->set('last_synced', $qb->createNamedParameter($lastSynced, 'datetime'))
-			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
-			->executeStatement();
 	}
 }
