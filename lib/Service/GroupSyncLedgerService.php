@@ -8,19 +8,20 @@ use Psr\Log\LoggerInterface;
 
 /**
  * Per-group monotonic dirty/clean sequence ledger (see
- * Version1005Date20260803000000 migration for the schema and full B1
- * background). Closes the one remaining gap the sync lease
- * (GroupSyncLockService) doesn't: a user's own VO-metadata write isn't
- * synchronized with a concurrent full sync's read of VO membership for that
- * group, so a write landing in that window could otherwise be silently lost.
+ * Version1005Date20260803000000 migration for the schema). A pure scheduling
+ * trigger: "VO reported a membership change for someone, this group is worth
+ * resyncing soon" - what lets GroupSyncSweepJob propagate a real change
+ * within minutes instead of waiting for the next nightly sync.
  *
  * markDirty() is called by the metadata writer (UserVOAuth::updateVOMetadata())
- * whenever a write may have changed a group's membership predicate.
- * markCleanIfStillOwned() is called by a completed sync
- * (GroupSyncService::syncSingleGroupFullLocked()) with the dirty_seq value it
- * captured *before* its own read of VO membership - never after. dirty_seq >
- * clean_seq then means "this group needs a resync", which GroupSyncSweepJob
- * periodically acts on through the normal lease-protected sync path.
+ * whenever a write may have changed a group's membership predicate, and (on
+ * the login path only) when an untrusted empty group-fetch result needs a
+ * later live sync to confirm - see GroupSyncService::syncSingleGroupFullLocked().
+ * markCleanIfStillOwned() is called by a completed sync with the dirty_seq
+ * value it captured *before* its own read of VO membership - never after.
+ * dirty_seq > clean_seq then means "this group needs a resync", which
+ * GroupSyncSweepJob periodically acts on through the normal lease-protected
+ * sync path.
  *
  * Only the *comparison* dirty_seq > clean_seq is ever meaningful - the exact
  * counter values and how many increments happened are not. A boolean or
@@ -95,17 +96,30 @@ class GroupSyncLedgerService {
      *    calls to organically grow dirty_seq back past clean_seq, self-heal
      *    it immediately: any successful sync completion is exactly the right
      *    moment to notice and repair this, not just the next app upgrade.
+     *
+     * @param bool $mayAdvanceClean False only for a login-triggered sync,
+     *     which may have read VO data whose propagation into GetMembers
+     *     lags behind the GetMember-driven dirty-mark that triggered it (see
+     *     UserVOAuth::syncUserGroupsOnLogin()) - trusting such a sync to
+     *     advance clean_seq risks silently suppressing the sweep's retry.
+     *     Suppresses *only* the clean_seq advance below, not this whole
+     *     method: the lease-reassignment check and ledger self-heal further
+     *     down still run regardless, since disabling those on every
+     *     login-triggered sync would be an unrelated regression (removing
+     *     lease-expiry detection from that path entirely).
      */
-    public function markCleanIfStillOwned(string $voGroupId, string $lockToken, int $seqAtStart): void {
-        $qb = $this->connection->getQueryBuilder();
-        $qb->update('user_vo_groups')
-            ->set('clean_seq', $qb->createNamedParameter($seqAtStart, \PDO::PARAM_INT))
-            ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
-            ->andWhere($qb->expr()->eq('sync_lock_token', $qb->createNamedParameter($lockToken)))
-            ->andWhere($qb->expr()->lt('clean_seq', $qb->createNamedParameter($seqAtStart, \PDO::PARAM_INT)));
+    public function markCleanIfStillOwned(string $voGroupId, string $lockToken, int $seqAtStart, bool $mayAdvanceClean = true): void {
+        if ($mayAdvanceClean) {
+            $qb = $this->connection->getQueryBuilder();
+            $qb->update('user_vo_groups')
+                ->set('clean_seq', $qb->createNamedParameter($seqAtStart, \PDO::PARAM_INT))
+                ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+                ->andWhere($qb->expr()->eq('sync_lock_token', $qb->createNamedParameter($lockToken)))
+                ->andWhere($qb->expr()->lt('clean_seq', $qb->createNamedParameter($seqAtStart, \PDO::PARAM_INT)));
 
-        if ($qb->executeStatement() > 0) {
-            return;
+            if ($qb->executeStatement() > 0) {
+                return;
+            }
         }
 
         $selectQb = $this->connection->getQueryBuilder();
@@ -146,9 +160,17 @@ class GroupSyncLedgerService {
     }
 
     /**
-     * Finds groups needing a resync (dirty_seq > clean_seq), oldest-synced
-     * first so a hot group can't starve others out of the sweep's per-run
-     * batch.
+     * Finds groups needing a resync (dirty_seq > clean_seq), least-recently
+     * *attempted* first (not least-recently-synced) so a hot group can't
+     * starve others out of the sweep's per-run batch. This distinction
+     * matters specifically for a permanently-failing group: last_synced only
+     * advances on success, so ordering by it would leave such a group parked
+     * at the head of every future batch forever, breaking the sweep's
+     * "VO looks down" circuit breaker on it every tick and starving every
+     * other dirty group behind it. last_sync_attempt_at advances on every
+     * attempt regardless of outcome (see the Version1007 migration), so a
+     * group that just failed moves to the back of the next call's results
+     * exactly like one that just succeeded.
      *
      * @return string[] VO group IDs.
      */
@@ -157,7 +179,7 @@ class GroupSyncLedgerService {
         $qb->select('vo_group_id')
             ->from('user_vo_groups')
             ->where($qb->expr()->gt('dirty_seq', 'clean_seq'))
-            ->orderBy('last_synced', 'ASC')
+            ->orderBy('last_sync_attempt_at', 'ASC')
             ->setMaxResults($limit);
 
         $result = $qb->executeQuery();

@@ -44,17 +44,22 @@ class GroupSyncLedgerServiceTest extends TestCase {
 			->executeStatement();
 	}
 
-	private function insertTestGroupRow(string $voGroupId, ?\DateTime $lastSynced = null): void {
+	private function insertTestGroupRow(string $voGroupId, ?\DateTime $lastSynced = null, ?int $lastSyncAttemptAt = null): void {
 		$qb = $this->connection->getQueryBuilder();
-		$qb->insert('user_vo_groups')
-			->values([
-				'vo_group_id' => $qb->createNamedParameter($voGroupId),
-				'vo_group_name' => $qb->createNamedParameter('Test Ledger Group'),
-				'nc_group_id' => $qb->createNamedParameter('uservo_' . $voGroupId),
-				'deleted_in_vo' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
-				'last_synced' => $qb->createNamedParameter($lastSynced, 'datetime'),
-			])
-			->executeStatement();
+		$values = [
+			'vo_group_id' => $qb->createNamedParameter($voGroupId),
+			'vo_group_name' => $qb->createNamedParameter('Test Ledger Group'),
+			'nc_group_id' => $qb->createNamedParameter('uservo_' . $voGroupId),
+			'deleted_in_vo' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			'last_synced' => $qb->createNamedParameter($lastSynced, 'datetime'),
+		];
+		// findDirtyGroups() orders by last_sync_attempt_at, not last_synced -
+		// only set when a test actually cares about that ordering; otherwise
+		// leave it at the column's own NOT NULL default (0).
+		if ($lastSyncAttemptAt !== null) {
+			$values['last_sync_attempt_at'] = $qb->createNamedParameter($lastSyncAttemptAt, \PDO::PARAM_INT);
+		}
+		$qb->insert('user_vo_groups')->values($values)->executeStatement();
 	}
 
 	private function setLockToken(string $voGroupId, ?string $token): void {
@@ -274,9 +279,14 @@ class GroupSyncLedgerServiceTest extends TestCase {
 	}
 
 	public function testFindDirtyGroupsOrdersOldestSyncedFirst(): void {
-		$this->insertTestGroupRow(self::GROUP_A, new \DateTime('2026-01-03'));
-		$this->insertTestGroupRow(self::GROUP_B, new \DateTime('2026-01-01'));
-		$this->insertTestGroupRow(self::GROUP_C, new \DateTime('2026-01-02'));
+		// last_sync_attempt_at, not last_synced, drives this ordering - see
+		// GroupSyncLedgerService::findDirtyGroups()'s own doc-comment for why:
+		// it advances on every attempt (success or failure), unlike
+		// last_synced (success only), specifically so a permanently-failing
+		// group can't camp at the head of every batch.
+		$this->insertTestGroupRow(self::GROUP_A, null, 300);
+		$this->insertTestGroupRow(self::GROUP_B, null, 100);
+		$this->insertTestGroupRow(self::GROUP_C, null, 200);
 		$this->service->markDirty([self::GROUP_A, self::GROUP_B, self::GROUP_C]);
 
 		// Filter to just our own groups (preserving relative order) - a shared

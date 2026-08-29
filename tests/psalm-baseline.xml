@@ -85,6 +85,7 @@
       <code><![CDATA[logger('user_vo')]]></code>
       <code><![CDATA[logger('user_vo')]]></code>
       <code><![CDATA[logger('user_vo')]]></code>
+      <code><![CDATA[logger('user_vo')]]></code>
     </UndefinedFunction>
   </file>
   <file src="lib/Cron/SyncUsersJob.php">
@@ -216,6 +217,14 @@
       <code><![CDATA[$table]]></code>
     </UndefinedDocblockClass>
   </file>
+  <file src="lib/Migration/Version1007Date20260829000000.php">
+    <UndefinedDocblockClass>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+      <code><![CDATA[$table]]></code>
+    </UndefinedDocblockClass>
+  </file>
   <file src="lib/Service/AuditLogService.php">
     <UndefinedFunction>
       <code><![CDATA[logger('user_vo')]]></code>
@@ -251,9 +260,6 @@
     </UndefinedFunction>
   </file>
   <file src="lib/Service/GroupManagementService.php">
-    <DeprecatedMethod>
-      <code><![CDATA[getAppValue]]></code>
-    </DeprecatedMethod>
     <MissingDependency>
       <code><![CDATA[UserVOAuth]]></code>
       <code><![CDATA[UserVOAuth]]></code>
@@ -272,10 +278,12 @@
       <code><![CDATA[UserVOAuth]]></code>
       <code><![CDATA[UserVOAuth]]></code>
       <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
+      <code><![CDATA[UserVOAuth]]></code>
     </MissingDependency>
-    <UndefinedFunction>
-      <code><![CDATA[logger('user_vo')]]></code>
-    </UndefinedFunction>
+    <UndefinedClass>
+      <code><![CDATA[\Doctrine\DBAL\Connection]]></code>
+    </UndefinedClass>
   </file>
   <file src="lib/Service/UserAccountService.php">
     <UndefinedClass>

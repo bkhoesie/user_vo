@@ -177,22 +177,37 @@ class GroupSyncSweepJobTest extends TestCase {
 		if (!$this->userManager->userExists(self::UID)) {
 			$this->userManager->createUser(self::UID, 'ATestPassword123!');
 		}
-		// user_vo says this user belongs to the group, but NC membership was
-		// never applied - exactly what a skipped/lock-contended sync leaves
-		// behind.
+		// VO says (via the mocked GetMembers filter below) this user belongs
+		// to the group, but NC membership was never applied - exactly what a
+		// skipped/lock-contended sync leaves behind.
+		$voUserId = 'vo_user_sweep_test';
 		$qb = $this->connection->getQueryBuilder();
 		$qb->insert('user_vo')->values([
 			'uid' => $qb->createNamedParameter(self::UID),
 			'backend' => $qb->createNamedParameter('user_vo'),
-			'vo_group_ids' => $qb->createNamedParameter(self::VO_GROUP_ID),
+			'vo_user_id' => $qb->createNamedParameter($voUserId),
 		])->executeStatement();
 
 		$this->ledgerService->markDirty([self::VO_GROUP_ID]);
 
+		// Distinguishes GetGroups (metadata) from GetMembers (this specific
+		// group's direct membership fetch) by URL - a single canned response
+		// shared across both endpoints would be misread as this group's
+		// member list being the *groups* listing, resolving to no one.
 		$apiClient = $this->mockApiClient();
-		$apiClient->method('makeRequest')->willReturn([
-			['id' => self::VO_GROUP_ID, 'name' => 'Test Sweep Group', 'parentid' => null, 'pos' => 1],
-		]);
+		$apiClient->method('makeRequest')->willReturnCallback(function (string $url) use ($voUserId) {
+			if (str_contains($url, 'GetGroups')) {
+				return [
+					['id' => self::VO_GROUP_ID, 'name' => 'Test Sweep Group', 'parentid' => null, 'pos' => 1],
+				];
+			}
+			if (str_contains($url, 'GetMembers')) {
+				return [
+					['id' => $voUserId, 'name' => 'Sweep, Test'],
+				];
+			}
+			return null;
+		});
 
 		$this->runJob();
 
@@ -231,5 +246,75 @@ class GroupSyncSweepJobTest extends TestCase {
 		[$dirty, $clean] = $this->readSeqs();
 		$this->assertSame(0, $dirty);
 		$this->assertSame(0, $clean);
+	}
+
+	/** @return array{0: int} [last_sync_attempt_at] */
+	private function readLastSyncAttempt(string $voGroupId): array {
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('last_sync_attempt_at')
+			->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetch();
+		return [(int)$row['last_sync_attempt_at']];
+	}
+
+	/**
+	 * The sweep job's own ConsecutiveFailureBreaker (separate from
+	 * GroupSyncService::syncAllManagedGroups()'s, which
+	 * testSyncAllManagedGroupsBreaksAfterTwoConsecutiveApiUnavailableFailures
+	 * in GroupSyncServiceTest already covers) must likewise stop after 2
+	 * consecutive VO-unavailable (503) results, rather than burn a live API
+	 * call on every remaining dirty group during a real outage. Verified
+	 * here at the job level, through its actual per-group
+	 * syncSingleGroupById() loop, not just at the service-method level.
+	 */
+	public function testStopsAfterTwoConsecutiveApiUnavailableFailures(): void {
+		$voGroupIds = ['test_sweep_starve_1', 'test_sweep_starve_2', 'test_sweep_starve_3'];
+		$ncGroupIds = array_map(fn ($id) => 'uservo_' . $id, $voGroupIds);
+
+		try {
+			foreach ($voGroupIds as $i => $voGroupId) {
+				$this->groupManager->createGroup($ncGroupIds[$i]);
+				$qb = $this->connection->getQueryBuilder();
+				$qb->insert('user_vo_groups')
+					->values([
+						'vo_group_id' => $qb->createNamedParameter($voGroupId),
+						'vo_group_name' => $qb->createNamedParameter('Test Sweep Starve ' . $i),
+						'nc_group_id' => $qb->createNamedParameter($ncGroupIds[$i]),
+						'deleted_in_vo' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+					])
+					->executeStatement();
+			}
+			$this->ledgerService->markDirty($voGroupIds);
+
+			$apiClient = $this->mockApiClient();
+			$apiClient->method('makeRequest')->willReturnCallback(function (string $url) use ($voGroupIds) {
+				if (str_contains($url, 'GetGroups')) {
+					return array_map(
+						fn ($id) => ['id' => $id, 'name' => 'Test Sweep Starve', 'parentid' => null, 'pos' => 1],
+						$voGroupIds
+					);
+				}
+				// GetMembers: a transport-level failure for every group.
+				return null;
+			});
+
+			$this->runJob();
+
+			$attempted = array_filter($voGroupIds, fn ($id) => $this->readLastSyncAttempt($id)[0] > 0);
+			$this->assertCount(2, $attempted, 'Must stop after the 2nd consecutive VO-unavailable failure, leaving the 3rd group never even attempted this tick');
+		} finally {
+			foreach ($voGroupIds as $voGroupId) {
+				$qb = $this->connection->getQueryBuilder();
+				$qb->delete('user_vo_groups')
+					->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+					->executeStatement();
+			}
+			foreach ($ncGroupIds as $ncGroupId) {
+				if ($this->groupManager->groupExists($ncGroupId)) {
+					$this->groupManager->get($ncGroupId)?->delete();
+				}
+			}
+		}
 	}
 }

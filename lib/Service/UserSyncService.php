@@ -106,18 +106,6 @@ class UserSyncService {
             // Process sync for all users
             $result = $this->processSyncLoop($users, $backend, true);
 
-            // Drives GroupManagementService's "possibly stale" flag: only a
-            // full sync (not the selective syncSelectedUsers() below) may
-            // stamp this. Gated on api_failures, not $result['success']
-            // (true even if every single user failed - see
-            // processSyncLoop()'s contract) or the broader 'failed', which
-            // also counts real per-user states like deleted-in-VO or
-            // no-login that would otherwise block this forever. Missing key
-            // defaults to "don't stamp".
-            if (($result['summary']['api_failures'] ?? 1) === 0) {
-                $this->config->setAppValue('user_vo', 'last_full_user_sync_at', (string)time());
-            }
-
             return $result;
 
         } catch (\Exception $e) {
@@ -420,8 +408,7 @@ class UserSyncService {
         // Narrower than $failureCount: only cases where this user's
         // vo_group_ids genuinely wasn't refreshed. Excludes permanent
         // per-user states (no_login, orphaned NC account) that
-        // $failureCount still counts for the admin-facing summary. Drives
-        // last_full_user_sync_at in syncAllUsers().
+        // $failureCount still counts for the admin-facing summary.
         $apiFailureCount = 0;
         // Skipped users have no cached vo_group_ids yet, so can't be a
         // group member either way - excluded from $apiFailureCount too.
@@ -633,8 +620,7 @@ class UserSyncService {
             $isFullSync ? 'success' : 'synced' => $successCount,
             'failed' => $failureCount,
             // Narrower than 'failed' above - see $apiFailureCount's own
-            // comment near this method's start. This is what
-            // syncAllUsers() gates last_full_user_sync_at on.
+            // comment near this method's start.
             'api_failures' => $apiFailureCount,
             'skipped' => $skippedCount,
             'photo_errors' => $photoErrorCount

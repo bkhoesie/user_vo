@@ -65,7 +65,7 @@ class GroupSyncServiceTest extends TestCase {
 			->executeStatement();
 
 		// Delete test NC groups
-		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child', 'uservo_test_pos_zero_unchanged', 'uservo_test_throwable_good', 'uservo_test_throwable_bad', 'uservo_test_toctou_deleted_during_wait', 'uservo_test_blocking_api_down_single', 'uservo_test_blocking_api_down_byids', 'uservo_test_blocking_api_down_all'];
+		$testGroups = ['uservo_test_123', 'uservo_test_456', 'uservo_test_556', 'uservo_test_789', 'uservo_test_lockrace', 'uservo_test_contended', 'uservo_test_deleted_midsync', 'uservo_test_bulk_locked', 'uservo_test_bulk_free', 'uservo_test_nonblocking_missing', 'uservo_test_nonblocking_api_down', 'uservo_test_concurrent_write', 'uservo_test_no_concurrent_write', 'uservo_test_contended_ledger', 'uservo_test_throws_adduser', 'uservo_test_lease_expire_mid', 'uservo_test_seq_after_wait', 'uservo_test_pidx_child', 'uservo_test_pos_zero_unchanged', 'uservo_test_throwable_good', 'uservo_test_throwable_bad', 'uservo_test_toctou_deleted_during_wait', 'uservo_test_blocking_api_down_single', 'uservo_test_blocking_api_down_byids', 'uservo_test_blocking_api_down_all', 'uservo_test_already_deleted', 'uservo_test_login_already_deleted', 'uservo_test_flag_survives_login', 'uservo_test_restore', 'uservo_test_mass_removal', 'uservo_test_duplicate_excluded', 'uservo_test_baddata_1', 'uservo_test_baddata_2', 'uservo_test_baddata_3', 'uservo_test_downapi_1', 'uservo_test_downapi_2', 'uservo_test_downapi_3', 'uservo_test_structurally_empty', 'uservo_test_nb_lease_reassigned', 'uservo_test_vgs_populated', 'uservo_test_vgs_skip_untouched', 'uservo_test_login_never_restores_flag'];
 		foreach ($testGroups as $groupId) {
 			if ($this->groupManager->groupExists($groupId)) {
 				$group = $this->groupManager->get($groupId);
@@ -76,7 +76,7 @@ class GroupSyncServiceTest extends TestCase {
 		}
 
 		// Delete test users
-		$testUsers = ['testuser1', 'testuser2', 'testuser3', 'testuser_lockrace', 'testuser_nonblocking_api_down', 'testuser_concurrent_write', 'testuser_throw_a', 'testuser_throw_b'];
+		$testUsers = ['testuser1', 'testuser2', 'testuser3', 'testuser_lockrace', 'testuser_nonblocking_api_down', 'testuser_concurrent_write', 'testuser_throw_a', 'testuser_throw_b', 'testuser_already_deleted_member', 'testuser_mass_removal'];
 		foreach ($testUsers as $userId) {
 			if ($this->userManager->userExists($userId)) {
 				$user = $this->userManager->get($userId);
@@ -200,6 +200,7 @@ class GroupSyncServiceTest extends TestCase {
 		$backend->method('fetchAllGroups')->willReturn([
 			['id' => 'test_123', 'name' => 'Test Group 123', 'parentid' => null, 'pos' => 1]
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		// Call sync
 		$result = $this->service->syncSingleGroupById('test_123', $backend);
@@ -283,6 +284,7 @@ class GroupSyncServiceTest extends TestCase {
 			['id' => $parentVoId, 'name' => 'Pidx Parent', 'parentid' => null, 'pos' => 3],
 			['id' => $childVoId, 'name' => 'Pidx Child', 'parentid' => $parentVoId, 'pos' => 2],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$result = $this->service->syncSingleGroupById($childVoId, $backend);
 		$this->assertTrue($result['success']);
@@ -333,6 +335,7 @@ class GroupSyncServiceTest extends TestCase {
 		$backend->method('fetchAllGroups')->willReturn([
 			['id' => $voGroupId, 'name' => 'Pos Zero Unchanged', 'parentid' => null, 'pos' => 0],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
 		$this->assertTrue($result['success']);
@@ -392,6 +395,7 @@ class GroupSyncServiceTest extends TestCase {
 			['id' => $goodVoId, 'name' => 'Throwable Good', 'parentid' => null, 'pos' => 1],
 			['id' => $badVoId, 'name' => 'Throwable Bad', 'parentid' => null, 'pos' => 2],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$result = $service->syncGroupsByIds([$badVoId, $goodVoId], $backend);
 
@@ -426,6 +430,7 @@ class GroupSyncServiceTest extends TestCase {
 			['id' => 'test_223', 'name' => 'Test Group 2', 'parentid' => null, 'pos' => 2],
 			['id' => 'test_323', 'name' => 'Test Group 3', 'parentid' => null, 'pos' => 3],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		// Call sync - but note this will sync ALL managed groups in DB, not just test ones
 		// We need to ensure cleanup ran first
@@ -469,6 +474,7 @@ class GroupSyncServiceTest extends TestCase {
 			['id' => 'test_456', 'name' => 'Test Group 4', 'parentid' => null, 'pos' => 1],
 			['id' => 'test_556', 'name' => 'Test Group 5', 'parentid' => null, 'pos' => 2],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$result = $this->service->syncGroupsByIds($voGroupIds, $backend);
 
@@ -530,6 +536,11 @@ class GroupSyncServiceTest extends TestCase {
 		$backend->method('fetchAllGroups')->willReturn([
 			['id' => 'some_other_group', 'name' => 'Still There', 'parentid' => null, 'pos' => 1],
 		]);
+		// The login path never trusts deleted_in_vo, so it still calls
+		// fetchGroupMembers() here rather than taking the skip branch - an
+		// empty result is then treated as untrusted (see the class's own
+		// empty-distrust rule), not as evidence of deletion either.
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$result = $this->service->syncGroupsByIds(['test_nonblocking_missing'], $backend, nonBlocking: true);
 
@@ -570,11 +581,17 @@ class GroupSyncServiceTest extends TestCase {
 		$qb->insert('user_vo')->values([
 			'uid' => $qb->createNamedParameter($uid),
 			'backend' => $qb->createNamedParameter('user_vo'),
-			'vo_group_ids' => $qb->createNamedParameter($voGroupId),
+			'vo_user_id' => $qb->createNamedParameter('vo_user_nonblocking_api_down'),
 		])->executeStatement();
 
 		$backend = $this->createMock(UserVOAuth::class);
 		$backend->method('fetchAllGroups')->willReturn(null);
+		// Membership comes from this direct per-group fetch, a call
+		// independent of fetchAllGroups() (used only for cosmetic metadata) -
+		// its failure above must not stop this from being attempted.
+		$backend->method('fetchGroupMembers')->willReturn([
+			['id' => 'vo_user_nonblocking_api_down', 'name' => 'Test, User'],
+		]);
 
 		$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
 
@@ -694,12 +711,15 @@ class GroupSyncServiceTest extends TestCase {
 		$qb->insert('user_vo')->values([
 			'uid' => $qb->createNamedParameter($uid),
 			'backend' => $qb->createNamedParameter('user_vo'),
-			'vo_group_ids' => $qb->createNamedParameter($voGroupId),
+			'vo_user_id' => $qb->createNamedParameter('vo_user_lockrace'),
 		])->executeStatement();
 
 		$backend = $this->createMock(UserVOAuth::class);
 		$backend->method('fetchAllGroups')->willReturn([
 			['id' => $voGroupId, 'name' => 'Test Lock Race Group', 'parentid' => null, 'pos' => 1],
+		]);
+		$backend->method('fetchGroupMembers')->willReturn([
+			['id' => 'vo_user_lockrace', 'name' => 'Test, User'],
 		]);
 
 		$lockService = new GroupSyncLockService($this->connection);
@@ -844,6 +864,7 @@ class GroupSyncServiceTest extends TestCase {
 			['id' => $lockedVoGroupId, 'name' => 'Locked Group', 'parentid' => null, 'pos' => 1],
 			['id' => $freeVoGroupId, 'name' => 'Free Group', 'parentid' => null, 'pos' => 2],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$lockService = new GroupSyncLockService($this->connection);
 		$token = $lockService->tryAcquire($lockedVoGroupId);
@@ -938,48 +959,33 @@ class GroupSyncServiceTest extends TestCase {
 	}
 
 	/**
-	 * Headline regression test for B1: syncSingleGroupFullLocked() reads
-	 * user_vo *before* calling IGroup::getUsers() and mutating NC membership.
-	 * If a user's own metadata write lands in that window, this sync's own
-	 * snapshot is already stale by the time it mutates - previously there was
-	 * no way to detect that, and the write could be silently lost until the
-	 * next full sync. The ledger must catch it: the group must end dirty, not
-	 * falsely clean, so the sweep repairs it.
+	 * Headline regression test for the dirty/clean ledger's core guarantee.
+	 * syncSingleGroupFullLocked() captures seqAtStart right after acquiring
+	 * the group's lease, before its own live membership fetch. If VO reports
+	 * a change affecting this same group for a *different* user while this
+	 * sync is still in flight (that user's own login dirty-marking the
+	 * group), this sync's own snapshot - already read before that new mark
+	 * landed - must not claim clean past it: the group must end dirty, not
+	 * falsely clean, so the sweep picks up what this sync's own fetch could
+	 * have missed.
 	 *
 	 * PHPUnit can't run genuinely concurrent syncs (same caveat as
 	 * testNonBlockingSyncNeverMutatesMembershipWhileGroupIsLocked above), so
-	 * this drives the actual race window directly via a mocked IGroup::getUsers()
-	 * callback - called at exactly the point a concurrent write would land -
-	 * which performs the write's real-world effect (updating user_vo and
-	 * marking the group dirty, same as UserVOAuth::updateVOMetadata() will
-	 * once wired up) before returning control to the sync.
+	 * this drives the race window directly via a mocked IGroup::getUsers()
+	 * callback - called at exactly the point such a concurrent dirty-mark
+	 * would land, after this sync's own membership fetch already ran.
 	 */
-	public function testConcurrentUserWriteDuringSyncLeavesGroupDirtyRatherThanFalselyClean(): void {
+	public function testConcurrentDirtyMarkDuringSyncLeavesGroupDirtyRatherThanFalselyClean(): void {
 		$voGroupId = 'test_concurrent_write';
 		$ncGroupId = 'uservo_test_concurrent_write';
-		$uid = 'testuser_concurrent_write';
 
 		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Concurrent Write Group');
-		if (!$this->userManager->userExists($uid)) {
-			$this->userManager->createUser($uid, 'ATestPassword123!');
-		}
-		// Not (yet) a member as far as this sync's own read of user_vo is
-		// concerned - the concurrent write below adds it, but only after
-		// that read has already happened.
-		$qb = $this->connection->getQueryBuilder();
-		$qb->insert('user_vo')->values([
-			'uid' => $qb->createNamedParameter($uid),
-			'backend' => $qb->createNamedParameter('user_vo'),
-			'vo_group_ids' => $qb->createNamedParameter(''),
-		])->executeStatement();
 
 		$mockGroup = $this->createMock(\OCP\IGroup::class);
-		$mockGroup->method('getUsers')->willReturnCallback(function () use ($uid, $voGroupId) {
-			$updateQb = $this->connection->getQueryBuilder();
-			$updateQb->update('user_vo')
-				->set('vo_group_ids', $updateQb->createNamedParameter($voGroupId))
-				->where($updateQb->expr()->eq('uid', $updateQb->createNamedParameter($uid)))
-				->executeStatement();
+		$mockGroup->method('getUsers')->willReturnCallback(function () use ($voGroupId) {
+			// Simulates a different user's own login dirty-marking this same
+			// group (e.g. UserVOAuth::updateVOMetadata()'s symmetric diff)
+			// landing after this sync's own fetch, but before it completes.
 			$this->ledgerService->markDirty([$voGroupId]);
 			return [];
 		});
@@ -1001,12 +1007,13 @@ class GroupSyncServiceTest extends TestCase {
 		$backend->method('fetchAllGroups')->willReturn([
 			['id' => $voGroupId, 'name' => 'Test Concurrent Write Group', 'parentid' => null, 'pos' => 1],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$result = $service->syncSingleGroupById($voGroupId, $backend);
 		$this->assertTrue($result['success'], $result['error'] ?? '');
 
 		[$dirty, $clean] = $this->readSeqs($voGroupId);
-		$this->assertGreaterThan($clean, $dirty, 'A write landing during the sync window must leave the group dirty, not falsely clean');
+		$this->assertGreaterThan($clean, $dirty, 'A dirty mark landing during the sync window must leave the group dirty, not falsely clean');
 	}
 
 	/**
@@ -1026,6 +1033,7 @@ class GroupSyncServiceTest extends TestCase {
 		$backend->method('fetchAllGroups')->willReturn([
 			['id' => $voGroupId, 'name' => 'Test No Concurrent Write Group', 'parentid' => null, 'pos' => 1],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
 		$this->assertTrue($result['success'], $result['error'] ?? '');
@@ -1080,7 +1088,8 @@ class GroupSyncServiceTest extends TestCase {
 		$uidB = 'testuser_throw_b';
 
 		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Throws AddUser Group');
-		foreach ([$uidA, $uidB] as $uid) {
+		$voUserIds = ['A' => 'vo_user_throw_a', 'B' => 'vo_user_throw_b'];
+		foreach ([$uidA => $voUserIds['A'], $uidB => $voUserIds['B']] as $uid => $voUserId) {
 			if (!$this->userManager->userExists($uid)) {
 				$this->userManager->createUser($uid, 'ATestPassword123!');
 			}
@@ -1088,7 +1097,7 @@ class GroupSyncServiceTest extends TestCase {
 			$qb->insert('user_vo')->values([
 				'uid' => $qb->createNamedParameter($uid),
 				'backend' => $qb->createNamedParameter('user_vo'),
-				'vo_group_ids' => $qb->createNamedParameter($voGroupId),
+				'vo_user_id' => $qb->createNamedParameter($voUserId),
 			])->executeStatement();
 		}
 
@@ -1118,6 +1127,10 @@ class GroupSyncServiceTest extends TestCase {
 		$backend = $this->createMock(UserVOAuth::class);
 		$backend->method('fetchAllGroups')->willReturn([
 			['id' => $voGroupId, 'name' => 'Test Throws AddUser Group', 'parentid' => null, 'pos' => 1],
+		]);
+		$backend->method('fetchGroupMembers')->willReturn([
+			['id' => $voUserIds['A'], 'name' => 'Throw, A'],
+			['id' => $voUserIds['B'], 'name' => 'Throw, B'],
 		]);
 
 		$result = $service->syncSingleGroupById($voGroupId, $backend);
@@ -1198,6 +1211,7 @@ class GroupSyncServiceTest extends TestCase {
 		$backend->method('fetchAllGroups')->willReturn([
 			['id' => $voGroupId, 'name' => 'Test Lease Expire Mid Group', 'parentid' => null, 'pos' => 1],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		// The original sync (whose lease was expired-and-reassigned mid-body
 		// by its own getUsers() call above) still runs to completion and
@@ -1236,11 +1250,622 @@ class GroupSyncServiceTest extends TestCase {
 		$backend->method('fetchAllGroups')->willReturn([
 			['id' => $voGroupId, 'name' => 'Test Seq After Wait Group', 'parentid' => null, 'pos' => 1],
 		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
 
 		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
 		$this->assertTrue($result['success'], $result['error'] ?? '');
 
 		[$dirty, $clean] = $this->readSeqs($voGroupId);
 		$this->assertSame($dirty, $clean, 'A mark that landed before the eventual acquire must be folded into the captured seq, not left dangling as a false dirty');
+	}
+
+	// --- deleted_in_vo skip rule: data-loss prevention ---
+	//
+	// Verified empirically against the real production VO API:
+	// GetMembers(filter=gruppe=<a gone id>) returns a well-formed [], not an
+	// error - indistinguishable, by itself, from "this group genuinely has
+	// zero members right now". These tests guard the rule that prevents that
+	// from silently wiping a group whose VO id has simply become stale.
+
+	/**
+	 * A live sync of a group already flagged deleted_in_vo must never call
+	 * fetchGroupMembers() at all - if it did and trusted an errant []
+	 * response, it would wipe the group's real membership.
+	 */
+	public function testLiveSyncOfAlreadyDeletedGroupNeverFetchesMembers(): void {
+		$voGroupId = 'test_already_deleted';
+		$ncGroupId = 'uservo_test_already_deleted';
+		$uid = 'testuser_already_deleted_member';
+
+		$ncGroup = $this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Already Deleted Group');
+		$qb = $this->connection->getQueryBuilder();
+		$qb->update('user_vo_groups')
+			->set('deleted_in_vo', $qb->createNamedParameter(1, \PDO::PARAM_INT))
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeStatement();
+
+		if (!$this->userManager->userExists($uid)) {
+			$this->userManager->createUser($uid, 'ATestPassword123!');
+		}
+		$ncGroup->addUser($this->userManager->get($uid));
+		$this->assertTrue($this->isUserInNcGroup($uid, $ncGroupId), 'Precondition: user is a real, existing member');
+
+		// The skip decision itself is derived purely from live absence from
+		// fetchAllGroups()'s map ($groupDeletedInVO), not from this stored
+		// flag - the pre-set deleted_in_vo=1 above is just the group's
+		// starting state, matching what a prior live sync would already
+		// have recorded. fetchGroupMembers() must never be called once this
+		// group is (again) absent from a live listing.
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'some_other_group', 'name' => 'Still There', 'parentid' => null, 'pos' => 1],
+		]);
+		$backend->expects($this->never())->method('fetchGroupMembers');
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$this->assertTrue($this->isUserInNcGroup($uid, $ncGroupId), 'Membership must be left completely untouched');
+		$this->userManager->get($uid)?->delete();
+	}
+
+	/**
+	 * The login path never consults deleted_in_vo at all (neither reading
+	 * nor writing it) - it always calls fetchGroupMembers(), and an empty
+	 * result is then handled by the general empty-distrust rule, not by
+	 * deletion detection. Its decision must not depend on cache freshness or
+	 * flag timing at all.
+	 */
+	public function testLoginSyncOfAlreadyDeletedGroupStillCallsFetchGroupMembers(): void {
+		$voGroupId = 'test_login_already_deleted';
+		$ncGroupId = 'uservo_test_login_already_deleted';
+
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Login Already Deleted Group');
+		$qb = $this->connection->getQueryBuilder();
+		$qb->update('user_vo_groups')
+			->set('deleted_in_vo', $qb->createNamedParameter(1, \PDO::PARAM_INT))
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeStatement();
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([]);
+		$backend->expects($this->once())->method('fetchGroupMembers')->willReturn([]);
+
+		$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('deleted_in_vo')->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetch();
+		$this->assertEquals(1, $row['deleted_in_vo'], 'The login path must not clear the flag either - it never writes it at all');
+	}
+
+	/**
+	 * A live sync sets deleted_in_vo=1, then a login-triggered sync of the
+	 * SAME group runs next. The flag must survive - a login sync has no
+	 * basis to conclude the group came back (it never even reads the flag),
+	 * so if the metadata write it performs unconditionally cleared it, the
+	 * *next* sync of any kind would wrongly treat the group as no-longer-
+	 * deleted and could wipe its membership via a live fetchGroupMembers()
+	 * call returning the same empirically-confirmed [].
+	 */
+	public function testLoginSyncDoesNotClearAFlagALiveSyncSet(): void {
+		$voGroupId = 'test_flag_survives_login';
+		$ncGroupId = 'uservo_test_flag_survives_login';
+
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Flag Survives Login Group');
+
+		// Step 1: a live sync detects the group is gone from VO.
+		$liveBackend = $this->createMock(UserVOAuth::class);
+		$liveBackend->method('fetchAllGroups')->willReturn([
+			['id' => 'some_other_group', 'name' => 'Still There', 'parentid' => null, 'pos' => 1],
+		]);
+		$result = $this->service->syncSingleGroupById($voGroupId, $liveBackend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('deleted_in_vo')->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetch();
+		$this->assertEquals(1, $row['deleted_in_vo'], 'Precondition: the live sync must have flagged it deleted');
+
+		// Step 2: a login-triggered sync of the same group runs next.
+		$loginBackend = $this->createMock(UserVOAuth::class);
+		$loginBackend->method('fetchAllGroups')->willReturn([]);
+		$loginBackend->method('fetchGroupMembers')->willReturn([]);
+		$result = $this->service->syncGroupsByIds([$voGroupId], $loginBackend, nonBlocking: true);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('deleted_in_vo')->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetch();
+		$this->assertEquals(1, $row['deleted_in_vo'], 'The flag must still be 1 after the login sync - it must not have been cleared');
+	}
+
+	/**
+	 * A VO-restored group (present in a live listing again) must clear its
+	 * stored deleted_in_vo flag and resume normal reconciliation, not stay
+	 * skipped forever.
+	 */
+	public function testLiveSyncRestoresAGroupThatReappearsInVO(): void {
+		$voGroupId = 'test_restore';
+		$ncGroupId = 'uservo_test_restore';
+
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Restore Group');
+		$qb = $this->connection->getQueryBuilder();
+		$qb->update('user_vo_groups')
+			->set('deleted_in_vo', $qb->createNamedParameter(1, \PDO::PARAM_INT))
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeStatement();
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Restore Group', 'parentid' => null, 'pos' => 1],
+		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('deleted_in_vo')->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetch();
+		$this->assertEquals(0, $row['deleted_in_vo'], 'A group present again in a live listing must have its flag cleared, not stay skipped forever');
+	}
+
+	/**
+	 * Regression test: the login path must never restore (or otherwise
+	 * touch) deleted_in_vo, even via the *normal* reconcile branch - not
+	 * just the empty-result-distrust branch
+	 * testLoginSyncDoesNotClearAFlagALiveSyncSet already covers. VO's
+	 * GetMembers can still answer for a group that's absent from GetGroups
+	 * (the two endpoints aren't guaranteed to agree, e.g. an archived group)
+	 * - a non-empty fetchGroupMembers() result on the login path must not
+	 * restore this flag either, since only a live-confirmed sync is
+	 * authorized to conclude the group came back.
+	 */
+	public function testLoginSyncNeverRestoresDeletedInVoEvenViaTheNormalReconcileBranch(): void {
+		$voGroupId = 'test_login_never_restores_flag';
+		$ncGroupId = 'uservo_test_login_never_restores_flag';
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Login Never Restores Flag Group');
+		$qb = $this->connection->getQueryBuilder();
+		$qb->update('user_vo_groups')
+			->set('deleted_in_vo', $qb->createNamedParameter(1, \PDO::PARAM_INT))
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeStatement();
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([]); // Irrelevant on the login path.
+		// Non-empty (matching nobody) so this takes the normal reconcile
+		// path, not the empty-result-distrust branch.
+		$backend->method('fetchGroupMembers')->willReturn([
+			['id' => 'nonexistent_vo_id', 'name' => 'Nobody Here'],
+		]);
+
+		$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('deleted_in_vo')->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetch();
+		$this->assertEquals(1, $row['deleted_in_vo'], 'The login path must never restore this flag, even via the normal (non-empty-result) reconcile branch');
+	}
+
+	// --- mass-removal audit visibility ---
+
+	public function testEmptyingAGroupIsLoggedAsMassRemoval(): void {
+		$voGroupId = 'test_mass_removal';
+		$ncGroupId = 'uservo_test_mass_removal';
+		$uid = 'testuser_mass_removal';
+
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Mass Removal Group');
+
+		// A VO-backend member, via mocks - matches this file's established
+		// pattern for exercising the removal branch (getBackendClassName()
+		// gates it, which a plain database-backend test account can't satisfy).
+		$mockUser = $this->createMock(\OCP\IUser::class);
+		$mockUser->method('getUID')->willReturn($uid);
+		$mockUser->method('getBackendClassName')->willReturn('OCA\\UserVO\\UserVOAuth');
+
+		$removedUids = [];
+		$mockGroup = $this->createMock(\OCP\IGroup::class);
+		$mockGroup->method('getUsers')->willReturnOnConsecutiveCalls([$mockUser], []);
+		$mockGroup->method('getDisplayName')->willReturn('Test Mass Removal Group');
+		$mockGroup->method('removeUser')->willReturnCallback(function ($user) use (&$removedUids) {
+			$removedUids[] = $user->getUID();
+		});
+
+		$mockGroupManager = $this->createMock(IGroupManager::class);
+		$mockGroupManager->method('get')->willReturn($mockGroup);
+
+		$mockUserManager = $this->createMock(IUserManager::class);
+		$mockUserManager->method('get')->willReturnCallback(fn ($u) => $u === $uid ? $mockUser : null);
+
+		$service = new GroupSyncService(
+			$this->connection,
+			$mockGroupManager,
+			$mockUserManager,
+			new GroupNameHarmonizer(),
+			new GroupSyncLockService($this->connection),
+			$this->ledgerService,
+			\OC::$server->get(AuditLogService::class)
+		);
+
+		// Group genuinely still exists in VO (present in the live listing),
+		// but currently has zero direct members.
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Mass Removal Group', 'parentid' => null, 'pos' => 1],
+		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
+
+		$result = $service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+		$this->assertEquals([$uid], $removedUids, 'The member must actually have been removed');
+
+		$auditLog = \OC::$server->get(AuditLogService::class);
+		$entries = $auditLog->getRecentEntries();
+		$massRemovalEntry = current(array_filter(
+			$entries,
+			fn ($e) => $e['event_type'] === 'group_membership_mass_removed' && $e['group_id'] === $voGroupId
+		));
+		$this->assertNotFalse($massRemovalEntry, 'Emptying every VO-backend member must log a distinct mass-removal action, not the routine message');
+
+		$routineEntry = current(array_filter(
+			$entries,
+			fn ($e) => $e['event_type'] === 'group_membership_changed' && $e['group_id'] === $voGroupId
+		));
+		$this->assertFalse($routineEntry, 'Must not ALSO log the routine message for the same change');
+	}
+
+	// --- reverse lookup: !duplicate exclusion, dedup ---
+
+	/**
+	 * A user_vo row marked !duplicate must never be resolved back to a VO
+	 * member - same exclusion the DB-scan code being replaced already had.
+	 */
+	public function testDuplicateMarkedRowIsNeverAddedToAGroup(): void {
+		$voGroupId = 'test_duplicate_excluded';
+		$ncGroupId = 'uservo_test_duplicate_excluded';
+		$duplicateUid = 'testuser_dup!duplicate';
+
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Duplicate Excluded Group');
+
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo')->values([
+			'uid' => $qb->createNamedParameter($duplicateUid),
+			'backend' => $qb->createNamedParameter('user_vo'),
+			'vo_user_id' => $qb->createNamedParameter('vo_user_dup'),
+		])->executeStatement();
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Duplicate Excluded Group', 'parentid' => null, 'pos' => 1],
+		]);
+		$backend->method('fetchGroupMembers')->willReturn([
+			['id' => 'vo_user_dup', 'name' => 'Dup, Test'],
+		]);
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+		$this->assertEquals(0, $result['member_count'], 'The !duplicate-marked row must not have been added');
+
+		$qb = $this->connection->getQueryBuilder();
+		$qb->delete('user_vo')->where($qb->expr()->eq('uid', $qb->createNamedParameter($duplicateUid)))->executeStatement();
+	}
+
+	/**
+	 * Regression test: PHP silently coerces an all-numeric array key back to
+	 * an int. resolveUidsForVoUserIds() uses the uid as an array key purely
+	 * for dedup - returning array_keys() directly would hand back an int
+	 * for a uid like "41207" (e.g. a VO membership-number-derived
+	 * username), not the string this method's contract promises. Under this
+	 * file's declare(strict_types=1), that surfaces as a TypeError the
+	 * first time a caller (IUserManager::get(string $uid)) receives it.
+	 */
+	public function testResolveUidsForVoUserIdsReturnsStringsEvenForAllNumericUids(): void {
+		$numericUid = '41207';
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo')->values([
+			'uid' => $qb->createNamedParameter($numericUid),
+			'backend' => $qb->createNamedParameter('user_vo'),
+			'vo_user_id' => $qb->createNamedParameter('vo_numeric_test'),
+		])->executeStatement();
+
+		$ref = new \ReflectionMethod(GroupSyncService::class, 'resolveUidsForVoUserIds');
+		$ref->setAccessible(true);
+		$result = $ref->invoke($this->service, ['vo_numeric_test']);
+
+		$this->assertSame(['41207'], $result, 'Must return a string uid, not an int PHP\'s array-key coercion produced');
+		$this->assertIsString($result[0]);
+
+		$qb = $this->connection->getQueryBuilder();
+		$qb->delete('user_vo')->where($qb->expr()->eq('uid', $qb->createNamedParameter($numericUid)))->executeStatement();
+	}
+
+	// --- circuit breaker: starvation safety and exception discrimination ---
+
+	/**
+	 * A VoGroupDataUnusableException (a per-group data problem) must never
+	 * trip the circuit breaker, no matter how many groups produce it in the
+	 * same batch. Uses two such groups specifically, not one, since a
+	 * threshold-based check would pass a single-group version of this test
+	 * for the wrong reason - only exception-type discrimination, not a
+	 * higher threshold, actually guarantees this.
+	 */
+	public function testSyncAllManagedGroupsNeverBreaksOnGroupDataProblems(): void {
+		$this->cleanupTestData();
+		$voIds = ['test_baddata_1', 'test_baddata_2', 'test_baddata_3'];
+		foreach ($voIds as $voId) {
+			$this->groupManager->createGroup('uservo_' . $voId);
+			$this->createTestGroupInDB($voId, 'uservo_' . $voId, 'Test Bad Data ' . $voId);
+		}
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn(array_map(
+			fn ($voId) => ['id' => $voId, 'name' => 'Test Bad Data ' . $voId, 'parentid' => null, 'pos' => 1],
+			$voIds
+		));
+		// Malformed for every group - if this counted toward the breaker,
+		// two or more such groups would abort the batch early. Mocking a
+		// throw directly (not a malformed return value) - a full method mock
+		// replaces fetchGroupMembers()'s own body entirely, so it never runs
+		// the real isWellFormedVOList() check that would normally produce
+		// this exception; that check itself is covered directly in
+		// tests/Unit/UserVOAuthTest.php.
+		$backend->method('fetchGroupMembers')->willThrowException(
+			new \OCA\UserVO\Service\Exception\VoGroupDataUnusableException('malformed response')
+		);
+
+		$result = $this->service->syncAllManagedGroups($backend);
+		$this->assertTrue($result['success']);
+
+		$testResults = array_filter($result['results'], fn ($r) => in_array($r['vo_group_id'], $voIds, true));
+		$this->assertCount(3, $testResults, 'All three groups must have been attempted - none skipped due to an early breaker exit');
+		foreach ($testResults as $r) {
+			$this->assertEquals('error', $r['status']);
+		}
+	}
+
+	/**
+	 * The complementary case: a genuine transport-level failure
+	 * (VoApiUnavailableException) DOES trip the breaker, after 2 consecutive
+	 * occurrences - stopping the batch before burning a live API call on
+	 * every remaining group during a real outage.
+	 */
+	public function testSyncAllManagedGroupsBreaksAfterTwoConsecutiveApiUnavailableFailures(): void {
+		$this->cleanupTestData();
+		$voIds = ['test_downapi_1', 'test_downapi_2', 'test_downapi_3'];
+		foreach ($voIds as $voId) {
+			$this->groupManager->createGroup('uservo_' . $voId);
+			$this->createTestGroupInDB($voId, 'uservo_' . $voId, 'Test Down API ' . $voId);
+		}
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn(array_map(
+			fn ($voId) => ['id' => $voId, 'name' => 'Test Down API ' . $voId, 'parentid' => null, 'pos' => 1],
+			$voIds
+		));
+		// Transport failure for every group.
+		$backend->method('fetchGroupMembers')->willReturn(null);
+
+		$result = $this->service->syncAllManagedGroups($backend);
+		$this->assertTrue($result['success']);
+
+		$testResults = array_filter($result['results'], fn ($r) => in_array($r['vo_group_id'], $voIds, true));
+		$this->assertCount(2, $testResults, 'Must stop after the 2nd consecutive VO-unavailable failure, not attempt the 3rd group');
+	}
+
+	// --- resolveUidsForVoUserIds(): chunking ---
+
+	/**
+	 * array_chunk(..., 500) must not drop or duplicate ids at the chunk
+	 * boundary itself - the specific off-by-one a naive chunk-size
+	 * assumption could introduce. Raw query-builder inserts in a loop
+	 * (rather than one bulk statement) match this file's existing style;
+	 * 501 rows is small enough to stay fast.
+	 */
+	public function testResolveUidsForVoUserIdsChunksAcrossTheFiveHundredBoundary(): void {
+		$voMemberIds = [];
+		for ($i = 0; $i < 501; $i++) {
+			$voMemberIds[] = "chunkvo_$i";
+			$qb = $this->connection->getQueryBuilder();
+			$qb->insert('user_vo')->values([
+				'uid' => $qb->createNamedParameter("testuser_chunk_$i"),
+				'backend' => $qb->createNamedParameter('user_vo'),
+				'vo_user_id' => $qb->createNamedParameter("chunkvo_$i"),
+			])->executeStatement();
+		}
+
+		$ref = new \ReflectionMethod(GroupSyncService::class, 'resolveUidsForVoUserIds');
+		$ref->setAccessible(true);
+		$result = $ref->invoke($this->service, $voMemberIds);
+
+		$this->assertCount(501, $result, 'Every id across both chunks must resolve, including the ones straddling the 500-boundary');
+		$this->assertContains('testuser_chunk_499', $result, 'Last id of the first chunk');
+		$this->assertContains('testuser_chunk_500', $result, 'First (and only) id of the second chunk');
+	}
+
+	// --- structurally-empty VO groups: self-heal must not degrade to 24h ---
+
+	/**
+	 * A managed group that's structurally empty in VO (fetchGroupMembers()
+	 * legitimately returns []) must still get explicitly re-dirtied by a
+	 * login-triggered sync, not left however clean it already was -
+	 * dirty-marking is otherwise driven exclusively by
+	 * UserVOAuth::updateVOMetadata()'s own VO-side diff, a signal that never
+	 * fires for this group if nothing about its VO-side membership changed.
+	 * Without this explicit call, an NC-side-only edit (the self-heal case
+	 * that diff exists to protect) would degrade from the sweep's
+	 * <=5-minute cadence to the nightly sync's <=24h one.
+	 */
+	public function testLoginSyncOfAStructurallyEmptyGroupExplicitlyRedirtiesForTheSweep(): void {
+		$voGroupId = 'test_structurally_empty';
+		$ncGroupId = 'uservo_test_structurally_empty';
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test Structurally Empty Group');
+
+		[$dirty0, $clean0] = $this->readSeqs($voGroupId);
+		$this->assertSame($dirty0, $clean0, 'Precondition: a freshly-created group starts clean');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test Structurally Empty Group', 'parentid' => null, 'pos' => 1],
+		]);
+		$backend->method('fetchGroupMembers')->willReturn([]);
+
+		$result = $this->service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		[$dirtyAfter, $cleanAfter] = $this->readSeqs($voGroupId);
+		$this->assertGreaterThan($cleanAfter, $dirtyAfter, 'The login path must explicitly re-dirty a group whose empty membership result it distrusts, not leave it however clean it already was');
+	}
+
+	// --- $mayAdvanceClean: the login path's lease-reassignment self-heal ---
+
+	/**
+	 * The lease-reassignment self-heal inside markCleanIfStillOwned() (mark
+	 * dirty + warn when the held token no longer matches) must still fire on
+	 * the login (mayAdvanceClean: false) path, not just the blocking path
+	 * covered by testSyncWhoseLeaseExpiredMidBodyDoesNotClaimClean -
+	 * mayAdvanceClean only skips the *optimistic* clean_seq UPDATE, the
+	 * mismatch fallthrough itself is shared, unconditional code. Exercised
+	 * end-to-end via the real nonBlocking entry point rather than assuming
+	 * that sharing holds.
+	 *
+	 * fetchGroupMembers() is mocked non-empty (matching nobody) rather than
+	 * [] specifically so this takes the normal reconcile path (which calls
+	 * IGroup::getUsers() - the lease-reassignment hook - before
+	 * markCleanIfStillOwned() runs), not the login path's empty-result-skip
+	 * branch, whose only getUsers() call happens after.
+	 */
+	public function testNonBlockingSyncWithReassignedLeaseStillRedirtiesForTheSweep(): void {
+		$voGroupId = 'test_nb_lease_reassigned';
+		$ncGroupId = 'uservo_test_nb_lease_reassigned';
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test NB Lease Reassigned Group');
+		$this->groupManager->createGroup($ncGroupId);
+
+		$lockService = new GroupSyncLockService($this->connection);
+
+		$mockGroup = $this->createMock(\OCP\IGroup::class);
+		$mockGroup->method('getUsers')->willReturnCallback(function () use ($voGroupId, $lockService) {
+			$past = (new \DateTime())->modify('-1 second');
+			$qb = $this->connection->getQueryBuilder();
+			$qb->update('user_vo_groups')
+				->set('sync_lock_until', $qb->createNamedParameter($past, 'datetime'))
+				->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+				->executeStatement();
+			$otherToken = $lockService->tryAcquire($voGroupId, 60);
+			$this->assertNotNull($otherToken, 'Second worker should acquire once the first lease is forced to expire');
+			return [];
+		});
+
+		$mockGroupManager = $this->createMock(IGroupManager::class);
+		$mockGroupManager->method('get')->willReturn($mockGroup);
+
+		$service = new GroupSyncService(
+			$this->connection,
+			$mockGroupManager,
+			$this->userManager,
+			new GroupNameHarmonizer(),
+			$lockService,
+			$this->ledgerService,
+			\OC::$server->get(AuditLogService::class)
+		);
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test NB Lease Reassigned Group', 'parentid' => null, 'pos' => 1],
+		]);
+		// Non-empty (matching nobody) so this takes the normal path - see
+		// docblock above.
+		$backend->method('fetchGroupMembers')->willReturn([
+			['id' => 'nonexistent_vo_id', 'name' => 'Nobody Here'],
+		]);
+
+		$result = $service->syncGroupsByIds([$voGroupId], $backend, nonBlocking: true);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		[$dirty, $clean] = $this->readSeqs($voGroupId);
+		$this->assertGreaterThan($clean, $dirty, 'A login-triggered sync whose lease was reassigned mid-body must not claim clean either');
+	}
+
+	// --- vo_group_size: populated by a live fetch, untouched by the skip rule ---
+
+	public function testVoGroupSizeIsPopulatedFromTheLiveFetchedMemberCount(): void {
+		$voGroupId = 'test_vgs_populated';
+		$ncGroupId = 'uservo_test_vgs_populated';
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test VGS Populated Group');
+
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => $voGroupId, 'name' => 'Test VGS Populated Group', 'parentid' => null, 'pos' => 1],
+		]);
+		// VO's own reported membership - three, even though none resolve to
+		// an NC uid - vo_group_size reflects VO's count, not NC's.
+		$backend->method('fetchGroupMembers')->willReturn([
+			['id' => 'vgs_1', 'name' => 'One'],
+			['id' => 'vgs_2', 'name' => 'Two'],
+			['id' => 'vgs_3', 'name' => 'Three'],
+		]);
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('vo_group_size')->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetch();
+		$this->assertEquals(3, (int)$row['vo_group_size'], 'vo_group_size must reflect VO\'s own reported count, independent of how many of those ids resolve to NC uids');
+	}
+
+	/**
+	 * Complementary case: a group skipped via the deleted_in_vo rule (see
+	 * the "deleted_in_vo skip rule" section above) must leave a
+	 * previously-recorded vo_group_size untouched, not zero it out - the
+	 * skip branch never calls fetchGroupMembers() at all, so it has no new
+	 * count to report.
+	 */
+	public function testVoGroupSizeIsUntouchedWhenTheDeletedInVoSkipRuleApplies(): void {
+		$voGroupId = 'test_vgs_skip_untouched';
+		$ncGroupId = 'uservo_test_vgs_skip_untouched';
+		$this->groupManager->createGroup($ncGroupId);
+		$this->createTestGroupInDB($voGroupId, $ncGroupId, 'Test VGS Skip Untouched Group');
+
+		$qb = $this->connection->getQueryBuilder();
+		$qb->update('user_vo_groups')
+			->set('deleted_in_vo', $qb->createNamedParameter(1, \PDO::PARAM_INT))
+			->set('vo_group_size', $qb->createNamedParameter(42, \PDO::PARAM_INT))
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeStatement();
+
+		// Non-empty and absent this group - an empty listing is itself
+		// treated as an API failure elsewhere in this service, unrelated to
+		// what this test is checking.
+		$backend = $this->createMock(UserVOAuth::class);
+		$backend->method('fetchAllGroups')->willReturn([
+			['id' => 'some_other_group', 'name' => 'Still There', 'parentid' => null, 'pos' => 1],
+		]);
+		$backend->expects($this->never())->method('fetchGroupMembers');
+
+		$result = $this->service->syncSingleGroupById($voGroupId, $backend);
+		$this->assertTrue($result['success'], $result['error'] ?? '');
+
+		$qb = $this->connection->getQueryBuilder();
+		$row = $qb->select('vo_group_size')->from('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeQuery()->fetch();
+		$this->assertEquals(42, (int)$row['vo_group_size'], 'A skipped (deleted_in_vo) group must keep its last-known vo_group_size, not have it cleared');
 	}
 }

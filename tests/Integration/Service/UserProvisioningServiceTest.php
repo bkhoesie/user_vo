@@ -394,4 +394,140 @@ class UserProvisioningServiceTest extends TestCase {
 		$this->assertTrue($results['errors'][0]['backend_conflict']);
 		$this->assertStringContainsString('different authentication backend', $results['errors'][0]['error']);
 	}
+
+	// --- group_sync_stopped_early: the outage signal from pre-provisioning's own group sync ---
+
+	/**
+	 * Partial mock like backendMock(), but also stubs fetchAllGroups()/
+	 * fetchGroupMembers() - needed only by the tests below, which exercise
+	 * createAccountFromVO()'s own call into the real (container-resolved)
+	 * GroupSyncService for the newly-provisioned user's group memberships.
+	 */
+	private function backendMockWithGroupMethods(): UserVOAuth {
+		$backend = $this->getMockBuilder(UserVOAuth::class)
+			->disableOriginalConstructor()
+			->onlyMethods(['fetchAllMembers', 'fetchUserDataFromVO', 'fetchAllGroups', 'fetchGroupMembers'])
+			->getMock();
+
+		$ref = new \ReflectionProperty(\OCA\UserVO\Base::class, 'backend');
+		$ref->setAccessible(true);
+		$ref->setValue($backend, 'user_vo');
+
+		return $backend;
+	}
+
+	private function createManagedGroupWithRealNcGroup(string $voGroupId): void {
+		$ncGroupId = 'uservo_' . $voGroupId;
+		\OC::$server->get(IGroupManager::class)->createGroup($ncGroupId);
+		$qb = $this->connection->getQueryBuilder();
+		$qb->insert('user_vo_groups')
+			->values([
+				'vo_group_id' => $qb->createNamedParameter($voGroupId),
+				'vo_group_name' => $qb->createNamedParameter('Test Provisioning Group'),
+				'nc_group_id' => $qb->createNamedParameter($ncGroupId),
+				'deleted_in_vo' => $qb->createNamedParameter(0, \PDO::PARAM_INT),
+			])
+			->executeStatement();
+	}
+
+	private function cleanupManagedGroup(string $voGroupId): void {
+		$qb = $this->connection->getQueryBuilder();
+		$qb->delete('user_vo_groups')
+			->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)))
+			->executeStatement();
+		$ncGroupId = 'uservo_' . $voGroupId;
+		$groupManager = \OC::$server->get(IGroupManager::class);
+		if ($groupManager->groupExists($ncGroupId)) {
+			$groupManager->get($ncGroupId)?->delete();
+		}
+	}
+
+	/**
+	 * createAccountFromVO() must surface its own group sync's
+	 * stopped_early signal (2 consecutive VO-unavailable results across this
+	 * user's own managed groups) as group_sync_stopped_early - the signal
+	 * bulkCreateAccounts() below relies on to stop the whole batch instead
+	 * of grinding through every remaining user only to rediscover the same
+	 * outage.
+	 */
+	public function testCreateAccountFromVOReportsGroupSyncStoppedEarly(): void {
+		$voGroupIds = ['test_provisioning_stop_1', 'test_provisioning_stop_2'];
+		foreach ($voGroupIds as $voGroupId) {
+			$this->createManagedGroupWithRealNcGroup($voGroupId);
+		}
+
+		try {
+			$uid = self::UID_PREFIX . 'stopsearly';
+			$backend = $this->backendMockWithGroupMethods();
+			$backend->method('fetchUserDataFromVO')->willReturn([
+				'id' => '1', 'username' => $uid, 'group_ids' => implode(',', $voGroupIds),
+			]);
+			$backend->method('fetchAllGroups')->willReturn(array_map(
+				fn ($id) => ['id' => $id, 'name' => 'Test Provisioning Group', 'parentid' => null, 'pos' => 1],
+				$voGroupIds
+			));
+			// A transport-level failure for both of this user's groups - 2
+			// consecutive VO-unavailable results trips syncGroupsByIds()'s
+			// own breaker (the blocking/default path, since
+			// createAccountFromVO() never passes nonBlocking: true).
+			$backend->method('fetchGroupMembers')->willReturn(null);
+
+			$result = $this->service->createAccountFromVO('1', $backend);
+
+			$this->assertTrue($result['success'], $result['error'] ?? '');
+			$this->assertTrue($result['group_sync_stopped_early'], 'Two consecutive VO-unavailable group results must be surfaced as stopped_early');
+		} finally {
+			foreach ($voGroupIds as $voGroupId) {
+				$this->cleanupManagedGroup($voGroupId);
+			}
+		}
+	}
+
+	/**
+	 * bulkCreateAccounts() must stop the whole batch as soon as one user's
+	 * own group_sync_stopped_early comes back true, rather than attempt
+	 * every remaining user only to rediscover the same VO outage - matches
+	 * how the sweep job, syncAllManagedGroups(), and bulk group creation all
+	 * respond to this signal.
+	 */
+	public function testBulkCreateAccountsStopsTheWholeBatchOnGroupSyncStoppedEarly(): void {
+		$voGroupIds = ['test_provisioning_bulk_stop_1', 'test_provisioning_bulk_stop_2'];
+		foreach ($voGroupIds as $voGroupId) {
+			$this->createManagedGroupWithRealNcGroup($voGroupId);
+		}
+
+		try {
+			$firstUid = self::UID_PREFIX . 'bulkstop_first';
+			$secondUid = self::UID_PREFIX . 'bulkstop_second';
+
+			$backend = $this->backendMockWithGroupMethods();
+			$backend->method('fetchUserDataFromVO')->willReturnCallback(function ($id) use ($firstUid, $secondUid, $voGroupIds) {
+				return match ($id) {
+					'first' => ['id' => 'first', 'username' => $firstUid, 'group_ids' => implode(',', $voGroupIds)],
+					'second' => ['id' => 'second', 'username' => $secondUid, 'group_ids' => ''],
+					default => null,
+				};
+			});
+			$backend->method('fetchAllGroups')->willReturn(array_map(
+				fn ($id) => ['id' => $id, 'name' => 'Test Provisioning Group', 'parentid' => null, 'pos' => 1],
+				$voGroupIds
+			));
+			$backend->method('fetchGroupMembers')->willReturn(null);
+
+			$results = $this->service->bulkCreateAccounts(['first', 'second'], $backend);
+
+			$this->assertCount(1, $results['created'], 'Only the first user must be attempted - the batch must stop right after its group_sync_stopped_early comes back true');
+			$this->assertEquals($firstUid, $results['created'][0]['nc_username']);
+
+			$qb = $this->connection->getQueryBuilder();
+			$row = $qb->select('uid')->from('user_vo')
+				->where($qb->expr()->eq('uid', $qb->createNamedParameter($secondUid)))
+				->executeQuery()->fetch();
+			$this->assertFalse($row, 'The second user must never have been provisioned at all');
+		} finally {
+			foreach ($voGroupIds as $voGroupId) {
+				$this->cleanupManagedGroup($voGroupId);
+			}
+		}
+	}
 }

@@ -12,10 +12,13 @@ declare(strict_types=1);
 namespace OCA\UserVO\Service;
 
 use OCP\IDBConnection;
+use OCP\IGroup;
 use OCP\IGroupManager;
 use OCP\IUserManager;
 use OCA\UserVO\UserVOAuth;
 use OCA\UserVO\Service\Exception\GroupSyncLockContentionException;
+use OCA\UserVO\Service\Exception\VoApiUnavailableException;
+use OCA\UserVO\Service\Exception\VoGroupDataUnusableException;
 use OCA\UserVO\Service\GroupNameHarmonizer;
 use function OCP\Log\logger;
 
@@ -44,12 +47,12 @@ use function OCP\Log\logger;
  *     non_vo_member_count: int,
  *     summary: GroupSyncSingleSummary
  * }
- * @psalm-type GroupSyncError = array{success: false, error: string, status_code?: 400|404|409|500}
+ * @psalm-type GroupSyncError = array{success: false, error: string, status_code?: 400|404|409|422|500|503}
  * @psalm-type GroupSyncSingleResult = GroupSyncSingleSuccess|GroupSyncError
  * @psalm-type GroupSyncAllSummary = array{total: int, succeeded: int, failed: int}
  * @psalm-type GroupSyncAllSuccess = array{success: true, message?: string, summary: GroupSyncAllSummary, results: array}
  * @psalm-type GroupSyncAllResult = GroupSyncAllSuccess|GroupSyncError
- * @psalm-type GroupSyncByIdsResult = array{success: bool, error?: string, synced: int, failed: int, skipped: int, results: array}
+ * @psalm-type GroupSyncByIdsResult = array{success: bool, error?: string, synced: int, failed: int, skipped: int, stopped_early?: bool, results: array}
  */
 class GroupSyncService {
     /** Bounded wait for admin/cron syncs contending on an already-locked group. */
@@ -140,10 +143,13 @@ class GroupSyncService {
             }
 
             // Fetch all VO groups to build the group map (needed for metadata sync).
-            // Login-time (non-blocking) callers may get a short-lived cached result -
-            // membership sync below doesn't depend on this data at all, only cosmetic
-            // metadata (display name, hierarchy) does, so a stale metadata snapshot on
-            // a login is an acceptable tradeoff against hitting VO on every revalidation.
+            // Login-time (non-blocking) callers may get a short-lived cached result.
+            // Membership doesn't depend on this listing at all (it comes from a
+            // separate, always-live fetchGroupMembers() call per group) - this map
+            // is used only for cosmetic metadata (display name, hierarchy) and for
+            // $mayDetectDeletion's live-vs-cached distinction, so a stale metadata
+            // snapshot on a login is an acceptable tradeoff against hitting VO on
+            // every revalidation.
             $allVOGroups = $backend->fetchAllGroups(allowCached: $nonBlocking);
 
             if (!$allVOGroups) {
@@ -162,10 +168,12 @@ class GroupSyncService {
 
                 // Login-time sync must not abort membership sync over a metadata
                 // fetch failure (and any exhausted stale-cache fallback already
-                // happened inside fetchAllGroups()) - membership doesn't depend on
-                // this data at all. Proceed with an empty map: syncSingleGroupFullLocked()
-                // falls back to stored metadata per group and (per $mayDetectDeletion)
-                // won't flag deleted_in_vo from its absence either.
+                // happened inside fetchAllGroups()) - membership comes from a
+                // separate, always-live fetchGroupMembers() call per group, not
+                // from this listing. Proceed with an empty map:
+                // syncSingleGroupFullLocked() falls back to stored metadata per
+                // group and (mayDetectDeletion is already false on this path)
+                // never touches deleted_in_vo regardless of this map's contents.
                 logger('user_vo')->warning('Failed to fetch VO group metadata for login-time sync - proceeding with membership sync only', [
                     'vo_group_ids' => $voGroupIds
                 ]);
@@ -187,6 +195,14 @@ class GroupSyncService {
             $results = [];
             // Shared across the whole batch, not per-group - see LOGIN_TOTAL_WAIT_BUDGET_SECONDS.
             $remainingWaitBudget = self::LOGIN_TOTAL_WAIT_BUDGET_SECONDS;
+            // The login path (nonBlocking) is small and latency-sensitive - break
+            // on the first VO-unavailable failure rather than waiting for a
+            // second one, unlike the shared 2-strike breaker the blocking
+            // callers (admin "sync selected groups", post-provisioning) use -
+            // those are deliberate, blocking, admin-initiated batch actions
+            // where stopping on one bad group would be the wrong tradeoff.
+            $breaker = $nonBlocking ? null : new ConsecutiveFailureBreaker();
+            $stoppedEarly = false;
 
             foreach ($managedGroups as $groupRow) {
                 $voGroupId = $groupRow['vo_group_id'];
@@ -195,7 +211,7 @@ class GroupSyncService {
 
                 try {
                     $groupStart = microtime(true);
-                    $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $voGroupName, $voGroupMap, $nonBlocking, $remainingWaitBudget);
+                    $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $voGroupName, $voGroupMap, $backend, $nonBlocking, $remainingWaitBudget);
                     if ($nonBlocking) {
                         $remainingWaitBudget = max(0.0, $remainingWaitBudget - (microtime(true) - $groupStart));
                     }
@@ -224,13 +240,37 @@ class GroupSyncService {
                         'removed' => $syncResult['removed']
                     ];
                     $syncedCount++;
+                    $breaker?->reset();
+                } catch (VoApiUnavailableException $e) {
+                    logger('user_vo')->error('Failed to sync group - VO API unavailable', [
+                        'vo_group_id' => $voGroupId,
+                        'error' => $e->getMessage()
+                    ]);
+                    $results[] = [
+                        'vo_group_id' => $voGroupId,
+                        'vo_group_name' => $voGroupName,
+                        'nc_group_id' => $ncGroupId,
+                        'status' => 'error',
+                        'error' => $e->getMessage()
+                    ];
+                    $failedCount++;
+
+                    if ($nonBlocking || ($breaker !== null && $breaker->recordVoUnavailable())) {
+                        logger('user_vo')->warning('Group sync batch stopping early - VO API appears unavailable', [
+                            'remaining' => count($managedGroups) - $syncedCount - $failedCount - $skippedCount,
+                        ]);
+                        $stoppedEarly = true;
+                        break;
+                    }
                 } catch (\Throwable $e) {
                     // One group's failure must not abort the rest of this batch
                     // (or, on the login path via UserVOAuth::syncUserGroupsOnLogin,
                     // the login itself) - catching only \Exception would let a
                     // \TypeError/\Error from unexpected VO data escape this loop
                     // entirely, same reasoning as GroupSyncSweepJob's equivalent
-                    // per-group loop.
+                    // per-group loop. Includes VoGroupDataUnusableException (this
+                    // group's own data problem, never a VO-wide signal) - never
+                    // counted toward the breaker above.
                     logger('user_vo')->error('Failed to sync group', [
                         'vo_group_id' => $voGroupId,
                         'error' => $e->getMessage()
@@ -243,6 +283,7 @@ class GroupSyncService {
                         'error' => $e->getMessage()
                     ];
                     $failedCount++;
+                    $breaker?->reset();
                 }
             }
 
@@ -259,6 +300,7 @@ class GroupSyncService {
                 'synced' => $syncedCount,
                 'failed' => $failedCount,
                 'skipped' => $skippedCount,
+                'stopped_early' => $stoppedEarly,
                 'results' => $results
             ];
 
@@ -339,7 +381,7 @@ class GroupSyncService {
             }
 
             // Perform sync using unified helper
-            $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $storedVOName, $voGroupMap);
+            $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $storedVOName, $voGroupMap, $backend);
 
             // Get current VO name for response
             $currentVOGroup = $voGroupMap[$voGroupId] ?? null;
@@ -377,6 +419,35 @@ class GroupSyncService {
                 'error' => $e->getMessage(),
                 'status_code' => 409
             ];
+        } catch (VoApiUnavailableException $e) {
+            // Transport/HTTP-level failure fetching this group's members - VO
+            // plausibly unreachable. The only signal circuit breakers in the
+            // batch callers above count toward "VO looks down, stop early".
+            logger('user_vo')->error('Failed to sync group - VO API unavailable', [
+                'vo_group_id' => $voGroupId ?? 'unknown',
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'status_code' => 503
+            ];
+        } catch (VoGroupDataUnusableException $e) {
+            // VO answered but with an unusable payload for this specific group -
+            // a per-group problem, not a VO-wide outage signal. Deliberately a
+            // different status code than 503 so batch callers never mistake a
+            // group that permanently produces this response for VO being down.
+            logger('user_vo')->error('Failed to sync group - VO returned unusable data', [
+                'vo_group_id' => $voGroupId ?? 'unknown',
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'status_code' => 422
+            ];
         } catch (\Exception $e) {
             logger('user_vo')->error('Failed to sync group', [
                 'vo_group_id' => $voGroupId ?? 'unknown',
@@ -402,11 +473,18 @@ class GroupSyncService {
      */
     public function syncAllManagedGroups(UserVOAuth $backend): array {
         try {
-            // Get all managed groups from database
+            // Get all managed groups from database, least-recently-attempted
+            // first (not vo_position_index, and not last_synced) - both of
+            // those are static or success-only, so a single permanently-
+            // failing group would occupy the same position in every future
+            // run's processing order forever, given the circuit breaker
+            // below stops the batch early on repeated failures. See
+            // GroupSyncLedgerService::findDirtyGroups()'s equivalent
+            // reasoning for the sweep.
             $qb = $this->connection->getQueryBuilder();
             $qb->select('vo_group_id', 'vo_group_name', 'nc_group_id')
                 ->from('user_vo_groups')
-                ->orderBy('vo_position_index', 'ASC');
+                ->orderBy('last_sync_attempt_at', 'ASC');
             $result = $qb->executeQuery();
             $managedGroups = $result->fetchAll();
             $result->closeCursor();
@@ -449,6 +527,7 @@ class GroupSyncService {
             $results = [];
             $successCount = 0;
             $failureCount = 0;
+            $breaker = new ConsecutiveFailureBreaker();
 
             foreach ($managedGroups as $groupRow) {
                 $voGroupId = $groupRow['vo_group_id'];
@@ -457,7 +536,7 @@ class GroupSyncService {
 
                 try {
                     // Perform sync using unified helper
-                    $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $voGroupName, $voGroupMap);
+                    $syncResult = $this->syncSingleGroupFull($voGroupId, $ncGroupId, $voGroupName, $voGroupMap, $backend);
 
                     $results[] = [
                         'vo_group_id' => $voGroupId,
@@ -473,7 +552,36 @@ class GroupSyncService {
                     ];
 
                     $successCount++;
+                    $breaker->reset();
+                } catch (VoApiUnavailableException $e) {
+                    logger('user_vo')->error('Failed to sync group during bulk sync - VO API unavailable', [
+                        'vo_group_id' => $voGroupId,
+                        'error' => $e->getMessage()
+                    ]);
+
+                    $results[] = [
+                        'vo_group_id' => $voGroupId,
+                        'vo_group_name' => $voGroupName,
+                        'nc_group_id' => $ncGroupId,
+                        'status' => 'error',
+                        'error' => $e->getMessage()
+                    ];
+
+                    $failureCount++;
+
+                    if ($breaker->recordVoUnavailable()) {
+                        logger('user_vo')->warning('Bulk group sync stopping early - repeated VO API failures', [
+                            'remaining' => count($managedGroups) - $successCount - $failureCount,
+                        ]);
+                        break;
+                    }
                 } catch (\Exception $e) {
+                    // Includes VoGroupDataUnusableException (this group's own
+                    // data problem, never a VO-wide signal) and any other
+                    // per-group failure - never counted toward the breaker
+                    // above, or a group that permanently produces this
+                    // failure could abort every future run partway through
+                    // for reasons unrelated to VO's actual availability.
                     logger('user_vo')->error('Failed to sync group during bulk sync', [
                         'vo_group_id' => $voGroupId,
                         'error' => $e->getMessage()
@@ -488,6 +596,7 @@ class GroupSyncService {
                     ];
 
                     $failureCount++;
+                    $breaker->reset();
                 }
             }
 
@@ -516,6 +625,44 @@ class GroupSyncService {
     }
 
     /**
+     * Resolves VO member ids to NC uids via the already-indexed vo_user_id
+     * column, chunked to stay under a DB's IN() variable-count limit (a real
+     * group in this org has 782+ members). Returns every matching uid, not
+     * one "canonical" uid per vo_user_id: vo_user_id isn't unique (a legacy
+     * case-variant duplicate account can share one), and picking a single
+     * "winner" would be a new duplicate-resolution policy this method has no
+     * business introducing as a side effect - it matches the `!duplicate`
+     * exclusion the DB-scan code this replaces already had, nothing more.
+     *
+     * @param string[] $voMemberIds
+     * @return string[] NC uids
+     */
+    private function resolveUidsForVoUserIds(array $voMemberIds): array {
+        $uids = [];
+        foreach (array_chunk($voMemberIds, 500) as $chunk) {
+            $qb = $this->connection->getQueryBuilder();
+            $qb->select('uid')
+                ->from('user_vo')
+                ->where($qb->expr()->eq('backend', $qb->createNamedParameter('user_vo')))
+                ->andWhere($qb->expr()->in('vo_user_id', $qb->createNamedParameter($chunk, \Doctrine\DBAL\Connection::PARAM_STR_ARRAY)));
+            $result = $qb->executeQuery();
+            $rows = $result->fetchAll();
+            $result->closeCursor();
+            foreach ($rows as $row) {
+                $uid = $row['uid'];
+                if (str_ends_with($uid, '!duplicate')) {
+                    continue;
+                }
+                $uids[$uid] = true; // dedup only, uid itself is the key
+            }
+        }
+        // array_keys() alone would silently coerce an all-numeric uid (e.g.
+        // a VO membership-number-derived username) back to an int - this
+        // method's contract is string[] uids, so cast explicitly.
+        return array_map('strval', array_keys($uids));
+    }
+
+    /**
      * Helper method to sync a single group with full metadata updates
      * This is extracted from AdminController for reusability
      *
@@ -534,7 +681,7 @@ class GroupSyncService {
      * LOCK_WAIT_SECONDS, then throws so the caller can surface a clear
      * per-group failure.
      */
-    private function syncSingleGroupFull(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, bool $nonBlocking = false, float $nonBlockingWaitBudget = 0.0): array {
+    private function syncSingleGroupFull(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, UserVOAuth $backend, bool $nonBlocking = false, float $nonBlockingWaitBudget = 0.0): array {
         if ($nonBlocking) {
             $lockToken = $this->lockService->acquireWithBoundedWait($voGroupId, $nonBlockingWaitBudget);
             if ($lockToken === null) {
@@ -576,18 +723,33 @@ class GroupSyncService {
             }
         }
 
+        // Stamped here (lease held, before the locked body runs), not inside
+        // syncSingleGroupFullLocked() - several of its throw paths (missing DB
+        // row, missing NC group) precede any point a stamp placed inside it
+        // could reach, which would let exactly the kind of permanently-failing
+        // group this column exists to de-prioritize sit unstamped at the head
+        // of every sync queue forever. Lock contention above is deliberately
+        // NOT stamped: whichever sync currently holds the lease will stamp
+        // when it finishes, so this isn't a genuinely-unattempted group.
+        $this->stampSyncAttempt($voGroupId);
+
         try {
-            // $nonBlocking (the login path) may have fetched $voGroupMap from a
-            // cache rather than live - a group missing from a stale snapshot isn't
-            // trustworthy evidence it was actually deleted in VO, so only a
-            // guaranteed-live fetch (every other caller) may set deleted_in_vo.
-            return $this->syncSingleGroupFullLocked($voGroupId, $ncGroupId, $storedVOName, $voGroupMap, $lockToken, mayDetectDeletion: !$nonBlocking);
+            return $this->syncSingleGroupFullLocked($voGroupId, $ncGroupId, $storedVOName, $voGroupMap, $backend, $lockToken, mayDetectDeletion: !$nonBlocking);
         } catch (\Throwable $e) {
             $this->auditLogService->log('group_sync_failed', null, $voGroupId, 'Group sync failed: ' . $e->getMessage());
             throw $e;
         } finally {
             $this->lockService->release($voGroupId, $lockToken);
         }
+    }
+
+    /** Unix timestamp of the last sync attempt, success or failure - see the Version1007 migration. */
+    private function stampSyncAttempt(string $voGroupId): void {
+        $qb = $this->connection->getQueryBuilder();
+        $qb->update('user_vo_groups')
+            ->set('last_sync_attempt_at', $qb->createNamedParameter(time(), \PDO::PARAM_INT))
+            ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
+        $qb->executeStatement();
     }
 
     /**
@@ -599,9 +761,9 @@ class GroupSyncService {
      *     on the login path, might simply be missing the group by coincidence
      *     of timing, not because it's gone).
      */
-    private function syncSingleGroupFullLocked(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, string $lockToken, bool $mayDetectDeletion = true): array {
+    private function syncSingleGroupFullLocked(string $voGroupId, string $ncGroupId, string $storedVOName, array $voGroupMap, UserVOAuth $backend, string $lockToken, bool $mayDetectDeletion = true): array {
         // Get stored metadata. dirty_seq is captured here - right after lease
-        // acquire, right before the user_vo membership read below - as this
+        // acquire, right before the live membership read below - as this
         // sync's "seq at start". See GroupSyncLedgerService and the
         // Version1005Date20260803000000 migration for why the ledger needs
         // this exact placement to correctly detect a write that races this sync.
@@ -647,62 +809,111 @@ class GroupSyncService {
             throw new \Exception('NC group does not exist');
         }
 
-        // Auto-update display name to match current VO name
+        // Auto-update display name to match current VO name. Independent of
+        // the membership decisions below (metadata isn't drawn from the
+        // membership fetch), so this runs unconditionally either way.
         $expectedDisplayName = $this->groupNameHarmonizer->harmonize($currentVOName);
         $currentDisplayName = $ncGroup->getDisplayName();
         if ($currentDisplayName !== $expectedDisplayName) {
             $ncGroup->setDisplayName($expectedDisplayName);
         }
 
-        // Get all VO users who should be in this group (based on cached vo_group_ids)
-        $qb = $this->connection->getQueryBuilder();
-        $qb->select('uid', 'vo_user_id', 'vo_group_ids')
-            ->from('user_vo')
-            ->where($qb->expr()->eq('backend', $qb->createNamedParameter('user_vo')));
-        $result = $qb->executeQuery();
-        $allUsers = $result->fetchAll();
-        $result->closeCursor();
+        // Metadata (display name/hierarchy) fields are always written - they
+        // don't depend on the membership fetch below at all. deleted_in_vo,
+        // last_synced, the count columns, and vo_group_size are added
+        // conditionally further down, only when this call actually has a
+        // trustworthy answer for them.
+        $updateQb = $this->connection->getQueryBuilder();
+        $updateQb->update('user_vo_groups')
+            ->set('nc_display_name', $updateQb->createNamedParameter($expectedDisplayName))
+            ->set('vo_group_name', $updateQb->createNamedParameter($currentVOName))
+            ->set('vo_parent_id', $updateQb->createNamedParameter($currentVOParentId))
+            ->set('vo_position', $updateQb->createNamedParameter($currentVOPosition, \PDO::PARAM_INT))
+            ->where($updateQb->expr()->eq('vo_group_id', $updateQb->createNamedParameter($voGroupId)));
 
-        // Filter users who should be in this group
-        $expectedVOUsernames = [];
-        foreach ($allUsers as $userRow) {
-            $uid = $userRow['uid'];
-            $voGroupIds = $userRow['vo_group_ids'];
-
-            // Skip users with !duplicate marker
-            if (str_ends_with($uid, '!duplicate')) {
-                continue;
-            }
-
-            // Skip users without vo_group_ids
-            if (empty($voGroupIds)) {
-                continue;
-            }
-
-            // Parse group IDs (comma-separated)
-            $groupIdArray = array_map('trim', explode(',', $voGroupIds));
-
-            // Check if this group is in the user's group list
-            if (in_array($voGroupId, $groupIdArray, true)) {
-                $expectedVOUsernames[] = $uid;
-            }
+        if (!$groupDeletedInVO && ($currentVOParentId !== $storedVOParentId || $currentVOPosition !== $storedVOPosition)) {
+            $allVOGroups = array_values($voGroupMap);
+            $newPositionIndex = $this->calculatePositionIndex($currentVOParentId, $currentVOPosition, $allVOGroups);
+            $updateQb->set('vo_position_index', $updateQb->createNamedParameter($newPositionIndex));
         }
 
-        // Get current NC group members
-        $currentMembers = $ncGroup->getUsers();
-        $currentMemberIds = array_map(fn($user) => $user->getUID(), $currentMembers);
+        if ($groupDeletedInVO) {
+            // A live path (mayDetectDeletion true) just found this group
+            // absent from a guaranteed-fresh VO group listing. Verified
+            // empirically: GetMembers(filter=gruppe=<a gone id>) returns a
+            // well-formed [] - indistinguishable, by itself, from "this group
+            // genuinely has zero members right now". Trusting that [] here
+            // would silently and "correctly" (per fetchGroupMembers()'s own
+            // contract) empty this group's real membership. Skip the live
+            // membership fetch entirely instead - leave membership and
+            // vo_group_size untouched - and record deleted_in_vo=1. This
+            // write is self-correcting: it's recomputed fresh from the live
+            // map on every live-path sync, so a VO-side restoration clears it
+            // again automatically the next time this group is present in a
+            // live listing, without needing separate "restore" logic.
+            $updateQb->set('deleted_in_vo', $updateQb->createNamedParameter(1, \PDO::PARAM_INT));
+            $updateQb->executeStatement();
 
-        // Sync: add missing users, remove departed users
+            // Converged state (nothing to reconcile) - only reachable when
+            // $mayDetectDeletion is true, so always safe to advance clean_seq.
+            $this->ledgerService->markCleanIfStillOwned($voGroupId, $lockToken, $seqAtStart, mayAdvanceClean: $mayDetectDeletion);
+
+            return $this->currentMemberCountsResult($ncGroup, [], [], []);
+        }
+
         $added = [];
         $removed = [];
         $skipped = [];
 
-        // A failure partway through this block can leave membership half-applied.
-        // Re-dirty the group so the sweep repairs it, rather than let a half-applied
+        // A failure partway through this block (including the membership
+        // fetch itself) can leave membership half-applied, or leave a
+        // permanently-broken group's failure completely unrecorded. Re-dirty
+        // the group so the sweep repairs it, rather than let a half-applied
         // sync masquerade as clean once retried successfully by a caller that
-        // swallows the exception (this app's callers generally do, to keep other
-        // groups in a batch unaffected).
+        // swallows the exception (this app's callers generally do, to keep
+        // other groups in a batch unaffected).
         try {
+            // Fetched before $ncGroup->getUsers() below, not after - the
+            // NC-membership read must not be taken and then held stale across
+            // this call's 0.2-15s network round trip.
+            $voMembers = $backend->fetchGroupMembers($voGroupId);
+            if ($voMembers === null) {
+                throw new VoApiUnavailableException("Failed to fetch members for group $voGroupId");
+            }
+
+            if (!$mayDetectDeletion && empty($voMembers)) {
+                // Login path only. An empty result here is untrusted, same as
+                // a fetch failure: leave membership, vo_group_size, and
+                // deleted_in_vo untouched. Explicitly re-dirty rather than
+                // rely on the usual trigger (UserVOAuth::updateVOMetadata()'s
+                // VO-side diff), which won't fire if nothing changed on VO's
+                // side - exactly the self-heal case (an NC-side edit VO never
+                // saw) this call protects from degrading to the nightly
+                // sync's cadence.
+                $this->ledgerService->markDirty([$voGroupId]);
+
+                $updateQb->executeStatement();
+                $this->ledgerService->markCleanIfStillOwned($voGroupId, $lockToken, $seqAtStart, mayAdvanceClean: $mayDetectDeletion);
+                return $this->currentMemberCountsResult($ncGroup, [], [], []);
+            }
+
+            $voGroupSize = count($voMembers);
+            $expectedVOUsernames = $this->resolveUidsForVoUserIds(array_column($voMembers, 'id'));
+
+            $currentMembers = $ncGroup->getUsers();
+            $currentMemberIds = array_map(fn($user) => $user->getUID(), $currentMembers);
+
+            // Pre-mutation count, for the mass-removal audit check below -
+            // the post-mutation count/vo_member_count computed further down
+            // can't be reused for this comparison, since by then the group
+            // may already be empty.
+            $priorVoBackendCount = 0;
+            foreach ($currentMembers as $member) {
+                if ($member->getBackendClassName() === 'OCA\\UserVO\\UserVOAuth') {
+                    $priorVoBackendCount++;
+                }
+            }
+
             // Add users who should be in the group but aren't
             foreach ($expectedVOUsernames as $username) {
                 if (!in_array($username, $currentMemberIds, true)) {
@@ -719,7 +930,7 @@ class GroupSyncService {
                 }
             }
 
-            // Remove users who are no longer in VO group
+            // Remove users who are no longer in the VO group
             foreach ($currentMemberIds as $username) {
                 if (!in_array($username, $expectedVOUsernames, true)) {
                     // Only remove if user is from user_vo backend
@@ -737,7 +948,13 @@ class GroupSyncService {
 
         // Log only when membership actually changed - a no-op sync (the
         // overwhelming majority, given how often this runs per group at
-        // production scale) isn't worth an audit entry.
+        // production scale) isn't worth an audit entry. A sync that removed
+        // every VO-backend member the group had is logged as a distinct,
+        // more visible action - now that an empty fetchGroupMembers() result
+        // is trusted (the group above wasn't skipped as deleted-in-VO), a
+        // legitimately-emptied VO group correctly empties the NC group in
+        // one pass, which deserves to stand out from an ordinary
+        // single-member departure, not blend into the routine message.
         if (!empty($added) || !empty($removed)) {
             $parts = [];
             if (!empty($added)) {
@@ -746,7 +963,12 @@ class GroupSyncService {
             if (!empty($removed)) {
                 $parts[] = 'removed: ' . implode(', ', $removed);
             }
-            $this->auditLogService->log('group_membership_changed', null, $voGroupId, 'Group membership changed (' . implode('; ', $parts) . ')');
+            $message = 'Group membership changed (' . implode('; ', $parts) . ')';
+            if ($priorVoBackendCount > 0 && count($removed) === $priorVoBackendCount) {
+                $this->auditLogService->log('group_membership_mass_removed', null, $voGroupId, $message);
+            } else {
+                $this->auditLogService->log('group_membership_changed', null, $voGroupId, $message);
+            }
         }
 
         // Calculate member counts
@@ -763,38 +985,35 @@ class GroupSyncService {
             }
         }
 
-        // Update metadata in database
         $now = new \DateTime();
-        $updateQb = $this->connection->getQueryBuilder();
-        $updateQb->update('user_vo_groups')
-            ->set('last_synced', $updateQb->createNamedParameter($now->format('Y-m-d H:i:s')))
-            ->set('nc_display_name', $updateQb->createNamedParameter($expectedDisplayName))
-            ->set('vo_group_name', $updateQb->createNamedParameter($currentVOName))
-            ->set('vo_parent_id', $updateQb->createNamedParameter($currentVOParentId))
-            ->set('vo_position', $updateQb->createNamedParameter($currentVOPosition, \PDO::PARAM_INT))
-            ->set('deleted_in_vo', $updateQb->createNamedParameter($groupDeletedInVO ? 1 : 0, \PDO::PARAM_INT))
+        $updateQb->set('last_synced', $updateQb->createNamedParameter($now->format('Y-m-d H:i:s')))
+            ->set('vo_group_size', $updateQb->createNamedParameter($voGroupSize, \PDO::PARAM_INT))
             ->set('member_count', $updateQb->createNamedParameter($totalCount, \PDO::PARAM_INT))
             ->set('vo_member_count', $updateQb->createNamedParameter($voCount, \PDO::PARAM_INT))
-            ->set('non_vo_member_count', $updateQb->createNamedParameter($nonVoCount, \PDO::PARAM_INT))
-            ->where($updateQb->expr()->eq('vo_group_id', $updateQb->createNamedParameter($voGroupId)));
-
-        // Update position index if parent or position changed (and group not deleted)
-        if (!$groupDeletedInVO && ($currentVOParentId !== $storedVOParentId || $currentVOPosition !== $storedVOPosition)) {
-            // Rebuild full VO groups array from map
-            $allVOGroups = array_values($voGroupMap);
-            $newPositionIndex = $this->calculatePositionIndex($currentVOParentId, $currentVOPosition, $allVOGroups);
-            $updateQb->set('vo_position_index', $updateQb->createNamedParameter($newPositionIndex));
+            ->set('non_vo_member_count', $updateQb->createNamedParameter($nonVoCount, \PDO::PARAM_INT));
+        if ($mayDetectDeletion) {
+            // Only a live-confirmed sync (this branch is only reached with
+            // $groupDeletedInVO false, i.e. either the group was present in
+            // a live listing, or this is the login path) may restore this
+            // flag - restoring it here unconditionally would let the login
+            // path clear a live sync's own deleted_in_vo=1 whenever VO's two
+            // endpoints disagree (GetGroups omits it, GetMembers still
+            // answers for it), contradicting the login path's "never
+            // touched" rule and silently hiding the deleted-in-VO admin
+            // badge until the next live sync re-derives it.
+            $updateQb->set('deleted_in_vo', $updateQb->createNamedParameter(0, \PDO::PARAM_INT));
         }
-
         $updateQb->executeStatement();
 
         // Last statement before returning (and thus before the lease release in
         // syncSingleGroupFull()'s finally): advances clean_seq only if $lockToken
         // still matches the current holder, so an overrun sync can't falsely claim
-        // "clean" out from under whoever holds the lease now. See
-        // GroupSyncLedgerService::markCleanIfStillOwned() and the
+        // "clean" out from under whoever holds the lease now. On the login path
+        // (mayAdvanceClean false) this never advances clean_seq at all, even on
+        // a successful sync - see UserVOAuth::syncUserGroupsOnLogin()'s use of
+        // this. See GroupSyncLedgerService::markCleanIfStillOwned() and the
         // Version1005Date20260803000000 migration for the full argument.
-        $this->ledgerService->markCleanIfStillOwned($voGroupId, $lockToken, $seqAtStart);
+        $this->ledgerService->markCleanIfStillOwned($voGroupId, $lockToken, $seqAtStart, mayAdvanceClean: $mayDetectDeletion);
 
         return [
             'added' => $added,
@@ -803,6 +1022,26 @@ class GroupSyncService {
             'member_count' => $totalCount,
             'vo_member_count' => $voCount,
             'non_vo_member_count' => $nonVoCount
+        ];
+    }
+
+    /** Shared return shape for a branch that didn't touch membership - counts are computed fresh (NC-only, no VO call) so callers still see accurate current numbers. */
+    private function currentMemberCountsResult(IGroup $ncGroup, array $added, array $removed, array $skipped): array {
+        $allMembers = $ncGroup->getUsers();
+        $totalCount = count($allMembers);
+        $voCount = 0;
+        foreach ($allMembers as $member) {
+            if ($member->getBackendClassName() === 'OCA\\UserVO\\UserVOAuth') {
+                $voCount++;
+            }
+        }
+        return [
+            'added' => $added,
+            'removed' => $removed,
+            'skipped' => $skipped,
+            'member_count' => $totalCount,
+            'vo_member_count' => $voCount,
+            'non_vo_member_count' => $totalCount - $voCount
         ];
     }
 

@@ -53,33 +53,6 @@ class GroupManagementService {
     }
 
     /**
-     * A group's membership is only as fresh as the last full user sync
-     * (vo_group_ids is a per-user cache that only a user sync refreshes,
-     * never a group sync). A group whose last_synced predates that hasn't
-     * been re-checked against the freshest data yet - not "wrong", just
-     * not yet confirmed. No last_synced at all is always stale.
-     *
-     * $lastSynced (DATETIME, via strtotime()) and last_full_user_sync_at
-     * (unix timestamp) are comparable because NC pins UTC and both
-     * last_synced writers emit naive UTC datetimes.
-     */
-    private function isPossiblyStale(?string $lastSynced): bool {
-        $lastFullUserSyncAt = $this->config->getAppValue('user_vo', 'last_full_user_sync_at', '');
-        if ($lastFullUserSyncAt === '') {
-            // No full user sync has ever completed - nothing to compare
-            // against, so don't flag every single group as stale on a
-            // fresh install before the first sync has even had a chance to
-            // run.
-            return false;
-        }
-        if ($lastSynced === null) {
-            return true;
-        }
-        $lastSyncedTimestamp = strtotime($lastSynced);
-        return $lastSyncedTimestamp === false || $lastSyncedTimestamp < (int)$lastFullUserSyncAt;
-    }
-
-    /**
      * Fetch all groups from VereinOnline with managed status
      *
      * @param UserVOAuth $backend Backend instance for API access
@@ -164,7 +137,7 @@ class GroupManagementService {
 
                 // Check if this group exists in our database (is managed)
                 $qb = $this->connection->getQueryBuilder();
-                $qb->select('nc_group_id', 'nc_display_name', 'vo_group_name', 'deleted_in_vo', 'last_synced', 'member_count', 'vo_member_count', 'non_vo_member_count')
+                $qb->select('nc_group_id', 'nc_display_name', 'vo_group_name', 'deleted_in_vo', 'last_synced', 'member_count', 'vo_member_count', 'non_vo_member_count', 'vo_group_size')
                     ->from('user_vo_groups')
                     ->where($qb->expr()->eq('vo_group_id', $qb->createNamedParameter($voGroupId)));
                 $result = $qb->executeQuery();
@@ -222,7 +195,7 @@ class GroupManagementService {
                     'member_count' => $isManaged ? (int)$dbRow['member_count'] : null,
                     'vo_member_count' => $isManaged ? (int)$dbRow['vo_member_count'] : null,
                     'non_vo_member_count' => $isManaged ? (int)$dbRow['non_vo_member_count'] : null,
-                    'possibly_stale' => $isManaged ? $this->isPossiblyStale($dbRow['last_synced']) : false,
+                    'vo_group_size' => ($isManaged && $dbRow['vo_group_size'] !== null) ? (int)$dbRow['vo_group_size'] : null,
                     'backend_conflict' => $backendConflict,
                     'conflicting_backends' => $conflictingBackends,
                 ];
@@ -337,7 +310,7 @@ class GroupManagementService {
                     'member_count' => (int)$group['member_count'],
                     'vo_member_count' => (int)$group['vo_member_count'],
                     'non_vo_member_count' => (int)$group['non_vo_member_count'],
-                    'possibly_stale' => $this->isPossiblyStale($group['last_synced']),
+                    'vo_group_size' => $group['vo_group_size'] !== null ? (int)$group['vo_group_size'] : null,
                     'is_managed' => true,  // All groups from this endpoint are managed
                     // A tracking row whose NC group is gone - e.g. an admin
                     // deleted it directly via NC's own UI and
@@ -411,6 +384,12 @@ class GroupManagementService {
             }
         }
 
+        // Auto-syncing a newly-created group below costs one live VO API call
+        // (fetchGroupMembers()) - a VO outage during a large bulk-create
+        // shouldn't wait (group count) x up to 15s with no early exit.
+        $breaker = new ConsecutiveFailureBreaker();
+        $skipAutoSync = false;
+
         foreach ($voGroupIds as $voGroupId) {
             try {
                 // Check if already managed
@@ -451,27 +430,49 @@ class GroupManagementService {
                         'vo_group_name' => $createResult['vo_group_name']
                     ];
 
-                    // Auto-sync group members after creation, matching single createGroup()
-                    try {
-                        $syncResult = $this->groupSyncService->syncSingleGroupById($voGroupId, $backend);
-                        $createdEntry['synced'] = $syncResult['success'];
-                        if (!$syncResult['success']) {
-                            $createdEntry['sync_error'] = $syncResult['error'] ?? 'Unknown sync error';
-                            $this->logger->warning('Group created but auto-sync failed (bulk)', [
+                    // Auto-sync group members after creation, matching single createGroup() -
+                    // unless a prior group in this batch already signaled VO looks
+                    // unavailable, in which case skip straight to "not synced" without
+                    // spending another up-to-15s call on an outcome that's already
+                    // predictable. The group itself is still created either way (a
+                    // local, non-VO operation); a later manual/nightly/sweep sync
+                    // picks up membership once VO is reachable again.
+                    if ($skipAutoSync) {
+                        $createdEntry['synced'] = false;
+                        $createdEntry['sync_error'] = 'Skipped - VO API appeared unavailable earlier in this batch';
+                    } else {
+                        try {
+                            $syncResult = $this->groupSyncService->syncSingleGroupById($voGroupId, $backend);
+                            $createdEntry['synced'] = $syncResult['success'];
+                            if (!$syncResult['success']) {
+                                $createdEntry['sync_error'] = $syncResult['error'] ?? 'Unknown sync error';
+                                $this->logger->warning('Group created but auto-sync failed (bulk)', [
+                                    'app' => 'user_vo',
+                                    'vo_group_id' => $voGroupId,
+                                    'sync_error' => $createdEntry['sync_error']
+                                ]);
+                                if (($syncResult['status_code'] ?? null) === 503 && $breaker->recordVoUnavailable()) {
+                                    $skipAutoSync = true;
+                                    $this->logger->warning('Bulk group creation: stopping auto-sync early - VO API appears unavailable', [
+                                        'app' => 'user_vo',
+                                    ]);
+                                } elseif (($syncResult['status_code'] ?? null) !== 503) {
+                                    $breaker->reset();
+                                }
+                            } else {
+                                $breaker->reset();
+                            }
+                        } catch (\Exception $e) {
+                            // Sync failed but group still created - log error but don't fail the batch
+                            $createdEntry['synced'] = false;
+                            $createdEntry['sync_error'] = $e->getMessage();
+                            $this->logger->error('Exception during group auto-sync (bulk)', [
                                 'app' => 'user_vo',
                                 'vo_group_id' => $voGroupId,
-                                'sync_error' => $createdEntry['sync_error']
+                                'error' => $e->getMessage()
                             ]);
+                            $breaker->reset();
                         }
-                    } catch (\Exception $e) {
-                        // Sync failed but group still created - log error but don't fail the batch
-                        $createdEntry['synced'] = false;
-                        $createdEntry['sync_error'] = $e->getMessage();
-                        $this->logger->error('Exception during group auto-sync (bulk)', [
-                            'app' => 'user_vo',
-                            'vo_group_id' => $voGroupId,
-                            'error' => $e->getMessage()
-                        ]);
                     }
 
                     $results['created'][] = $createdEntry;

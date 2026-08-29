@@ -191,7 +191,7 @@ style('user_vo', 'admin');
 
         <div class="vo-notice">
             <span class="icon icon-info"></span>
-            <?php p($l->t('Group sync updates group metadata (name, hierarchy) live from VereinOnline, but only reconciles membership against each user\'s already-synced VereinOnline group list - it does not refresh that list itself. Each affected member\'s own next login picks this up automatically; to make a group membership change take effect immediately for everyone, without waiting on logins, run a user sync first (or use "Full Resync" below), then sync the affected group(s).')); ?>
+            <?php p($l->t('Group sync fetches each group\'s metadata and membership live from VereinOnline. It can only add members who already have a Nextcloud account - created via their own first login, or by pre-provisioning them below.')); ?>
         </div>
 
         <h4><?php p($l->t('Sync Options')); ?></h4>
@@ -393,6 +393,7 @@ style('user_vo', 'admin');
                         <th><?php p($l->t('Status')); ?></th>
                         <th><?php p($l->t('VO Members')); ?></th>
                         <th><?php p($l->t('Non-VO Members')); ?></th>
+                        <th title="<?php p($l->t('Total members VO reports for this group, including any not yet linked to an NC account')); ?>"><?php p($l->t('VO Reports')); ?></th>
                         <th><?php p($l->t('Last Synced')); ?></th>
                         <th><?php p($l->t('Actions')); ?></th>
                     </tr>

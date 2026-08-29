@@ -8,10 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- "Full Resync" button (users, then groups, in the right order) on a new admin overview section,
-  with an explanation of why group sync alone can miss new VereinOnline group members
-- Managed groups now show a "Possibly stale" badge when a user sync has completed since the
-  group's own membership was last confirmed
+- "Full Resync" button on a new admin overview section, syncing users and groups in one click
+- Managed groups now show VereinOnline's own reported member count ("VO Reports" column),
+  independent of how many of those members have ever logged into Nextcloud
+
+### Changed
+- Group membership sync now fetches each group's members directly from VereinOnline instead of
+  relying on previously-synced user data, so membership is correct even for VereinOnline members
+  who have never logged into Nextcloud
+- A group's membership manually changed in Nextcloud now self-heals on the affected user's next
+  login, even when nothing changed on the VereinOnline side
+- Nightly sync, bulk group creation, and bulk account provisioning now stop early after repeated
+  VereinOnline API failures instead of retrying every remaining group/user
 
 ### Fixed
 - A VereinOnline API error could be mistaken for "no groups/members", which could make every

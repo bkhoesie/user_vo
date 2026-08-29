@@ -16,6 +16,7 @@ use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IConfig;
 use function OCP\Log\logger;
 use OCA\UserVO\Service\ConfigService;
+use OCA\UserVO\Service\ConsecutiveFailureBreaker;
 use OCA\UserVO\Service\GroupSyncLedgerService;
 use OCA\UserVO\Service\GroupSyncService;
 use OCA\UserVO\UserVOAuth;
@@ -113,6 +114,7 @@ class GroupSyncSweepJob extends TimedJob {
         $repaired = 0;
         $stillContended = 0;
         $failed = 0;
+        $breaker = new ConsecutiveFailureBreaker();
 
         foreach ($dirtyGroupIds as $voGroupId) {
             try {
@@ -124,6 +126,7 @@ class GroupSyncSweepJob extends TimedJob {
                 // of the loop and leave every remaining dirty group untouched
                 // for this tick.
                 $failed++;
+                $breaker->reset();
                 logger('user_vo')->warning('Group sync sweep failed to repair a dirty group', [
                     'vo_group_id' => $voGroupId,
                     'error' => $e->getMessage(),
@@ -133,10 +136,12 @@ class GroupSyncSweepJob extends TimedJob {
 
             if ($result['success']) {
                 $repaired++;
+                $breaker->reset();
             } elseif (($result['status_code'] ?? null) === 409) {
                 // Another sync currently holds this group's lease - leave it
                 // dirty (untouched by this failed attempt) and retry next tick.
                 $stillContended++;
+                $breaker->reset();
             } else {
                 $failed++;
                 logger('user_vo')->warning('Group sync sweep failed to repair a dirty group', [
@@ -145,14 +150,29 @@ class GroupSyncSweepJob extends TimedJob {
                 ]);
 
                 if (($result['error'] ?? null) === 'Failed to fetch groups from VereinOnline') {
-                    // Every remaining group in this batch shares the same
-                    // backend instance and would fail identically - stop
-                    // instead of burning one failed VO API call per
-                    // remaining dirty group on every tick of an outage.
+                    // Global signal: fetchAllGroups() itself failed, before
+                    // this group's own membership was ever touched - every
+                    // remaining group in this batch shares the same backend
+                    // instance and would fail identically. Group-independent
+                    // by construction, so this breaks immediately, unlike the
+                    // per-group 503 signal below.
                     logger('user_vo')->warning('Group sync sweep stopping early - VO API appears to be down', [
                         'remaining' => count($dirtyGroupIds) - $repaired - $stillContended - $failed,
                     ]);
                     break;
+                }
+
+                if (($result['status_code'] ?? null) === 503) {
+                    if ($breaker->recordVoUnavailable()) {
+                        logger('user_vo')->warning('Group sync sweep stopping early - repeated VO API failures', [
+                            'remaining' => count($dirtyGroupIds) - $repaired - $stillContended - $failed,
+                        ]);
+                        break;
+                    }
+                } else {
+                    // Includes 422 (this group's own data problem, never a
+                    // VO-wide signal) and any other per-group failure.
+                    $breaker->reset();
                 }
             }
         }
